@@ -14,6 +14,9 @@ import { OutfitEditor } from './editor';
 import { SavedTryOns, TryOnButton } from './try-on/try-on-entry';
 import { ComponentText, OutfitThumb } from './outfits-screen';
 import { useOutfit, usePickerItems, type OutfitView } from './use-outfits';
+import { recoverableOutfit } from '../../domain/outfit-lifecycle';
+import type { OutfitLifecycle } from './use-outfit-lifecycle';
+import { OutfitLifecycleDialog } from './lifecycle-controls';
 
 type Shared = {
   client: AppClient; scope: OwnerScope; images: PrivateImages; online: boolean; t: Translate; invalidation: number; paused: boolean;
@@ -45,15 +48,16 @@ function EditPane(props: Shared & { view: EditView; removed: boolean; onReload: 
 }
 
 export function OutfitDetail(props: Shared & { id: string | null; timeZone: string; language: Language; onPlan: (id: string) => void; onWorn: () => void;
-  onWriting: (busy: boolean) => void; onTryOn: () => void; }) {
+  onWriting: (busy: boolean) => void; onTryOn: () => void; lifecycle: OutfitLifecycle; }) {
   const { client, scope, id, online, invalidation, t, images } = props;
   const view = useOutfit(client, scope, id, online, invalidation);
   const [editing, setEditing] = useState(false);
   const [editKey, setEditKey] = useState(0);
   const [snapshot, setSnapshot] = useState<EditView | null>(null);
   const [wearing, setWearing] = useState(false);
+  const [confirmation, setConfirmation] = useState<OutfitRecord | null>(null);
   const { onSaved, onWriting } = props;
-  const onWearPending = useCallback((busy: boolean) => { setWearing(busy); onWriting(busy); }, [onWriting]);
+  const onWearPending = useCallback((busy: boolean, unresolved = false) => { setWearing(busy || unresolved); onWriting(busy); }, [onWriting]);
   const savedHere = useCallback((saved: string) => {
     setEditing(false); setSnapshot(null);
     onSaved(saved);
@@ -62,33 +66,52 @@ export function OutfitDetail(props: Shared & { id: string | null; timeZone: stri
   const record = view.data?.record ?? null;
   const live = useMemo(() => view.data && record ? { ...view.data, record } : null, [view.data, record]);
   // An open editor keeps its last loaded outfit if a refresh finds it removed, so the draft and any pending save stay put.
-  useEffect(() => { if (editing && live) setSnapshot(live); }, [editing, live]);
-  const editView = editing ? live ?? snapshot : null;
+  useEffect(() => { if (editing && live && live.record.deletedAt === null) setSnapshot(live); }, [editing, live]);
+  const editView = editing ? live?.record.deletedAt === null ? live : snapshot : null;
   const unavailable = id === null || view.data !== null && record === null;
+  const trashed = record?.deletedAt !== null && record !== null;
+  const blocked = wearing || props.lifecycle.locked || !!pendingCreate(scope, `wear-today:${record?.id}`);
   return <section className="detail-page outfit-page" aria-labelledby="outfit-detail-title">
     <button type="button" className="text-button" onClick={(event) => { event.currentTarget.focus(); props.onBack(); }}>{t('outfits.back')}</button>
     <header className="settings-heading outfit-detail-heading"><h1 id="outfit-detail-title" tabIndex={-1}>{(editView?.record ?? record)?.title ?? t('nav.outfits')}</h1>
-      {!editView && !unavailable && record && view.data && <button type="button" className="text-button" disabled={wearing} onClick={() => setEditing(true)}>{t('outfits.edit')}</button>}</header>
-    {editView ? <EditPane key={editKey} {...props} view={editView} removed={unavailable} onSavedHere={savedHere}
+      {!editView && !unavailable && !trashed && record && view.data && <button type="button" className="text-button" disabled={blocked} onClick={() => setEditing(true)}>{t('outfits.edit')}</button>}</header>
+    {editView ? <EditPane key={editKey} {...props} view={editView} removed={unavailable || trashed} onSavedHere={savedHere}
         onReload={() => { setEditKey(value => value + 1); view.reload(); }} />
       : unavailable ? <div className="notice notice-error" role="alert"><span>{t('outfits.unavailable')}</span></div>
       : !record || !view.data ? view.error
         ? <div className="notice notice-error" role="alert"><span>{t(view.error)}</span><button type="button" className="text-button" disabled={!online} onClick={view.reload}>{t('common.retry')}</button></div>
         : <p role="status">{t('common.loading')}</p>
-      : <OutfitSummary record={record} view={view.data} images={images} t={t} editDisabled={wearing} onEdit={() => setEditing(true)}>
+      : trashed ? <div className="notice outfit-in-trash">
+        <p>{t('outfitTrash.inTrash')}</p>
+        {recoverableOutfit(record) ? <button type="button" className="button button-primary" disabled={!online || blocked}
+          onClick={() => { void props.lifecycle.execute([record], 'restore'); }}>{t('trash.restore')}</button> : <p>{t('outfitTrash.expired')}</p>}
+        <a className="text-button" href="#/trash">{t('nav.trash')}</a>
+      </div>
+      : <OutfitSummary record={record} view={view.data} images={images} t={t} editDisabled={blocked} onEdit={() => setEditing(true)}>
         <WearActions client={client} scope={scope} record={record} view={view.data} online={online} t={t} timeZone={props.timeZone}
+          disabled={props.lifecycle.locked}
           onPlan={() => props.onPlan(record.id)} onChanged={props.onWorn} onPending={onWearPending} />
-        <TryOnButton client={client} scope={scope} record={record} components={view.data.components} disabled={wearing} t={t} onTryOn={props.onTryOn} />
+        <TryOnButton client={client} scope={scope} record={record} components={view.data.components} disabled={blocked} t={t} onTryOn={props.onTryOn} />
+        <button type="button" className="button button-secondary" disabled={!online || blocked || view.loading || !!view.error}
+          onClick={event => { event.currentTarget.focus(); setConfirmation(structuredClone(record)); }}>{t('wardrobe.moveSelected')}</button>
       </OutfitSummary>}
-    {!editView && record && <SavedTryOns client={client} scope={scope} outfitId={record.id} online={online} language={props.language} t={t} />}
+    {!editView && record && !trashed && <SavedTryOns client={client} scope={scope} outfitId={record.id} online={online} language={props.language} t={t} />}
+    {confirmation && <OutfitLifecycleDialog title={t('outfitTrash.confirmName', { name: confirmation.title })} body={t('outfitTrash.preserve')}
+      action={t('wardrobe.moveSelected')} lifecycle={props.lifecycle} online={online} t={t} onCancel={() => setConfirmation(null)}
+      onConfirm={() => { void props.lifecycle.execute([confirmation], 'trash').then(result => {
+        if (scope.signal.aborted || !result.done.length && !result.failed.length) return;
+        setConfirmation(null);
+        if (result.done.includes(confirmation.id)) props.onBack();
+      }); }} />}
   </section>;
 }
 
 // "Wear today" records a worn look straight away; Undo removes that look again. While either is being written the page
 // holds navigation, and a create whose reply was lost stays with this owner session until a reread or replay settles it.
-function WearActions({ client, scope, record, view, online, t, timeZone, onPlan, onChanged, onPending }: {
+function WearActions({ client, scope, record, view, online, t, timeZone, onPlan, onChanged, onPending, disabled }: {
   client: AppClient; scope: OwnerScope; record: OutfitRecord; view: OutfitView; online: boolean; t: Translate; timeZone: string;
-  onPlan: () => void; onChanged: () => void; onPending: (pending: boolean) => void;
+  onPlan: () => void; onChanged: () => void; onPending: (pending: boolean, unresolved?: boolean) => void;
+  disabled: boolean;
 }) {
   const key = `wear-today:${record.id}`;
   const [pending, setPending] = useState(false);
@@ -97,7 +120,7 @@ function WearActions({ client, scope, record, view, online, t, timeZone, onPlan,
   const undoButton = useRef<HTMLButtonElement>(null);
   const lifetime = useRef(new AbortController());
   const retry = useRef<(() => void) | null>(null);
-  useEffect(() => { onPending(pending); }, [pending, onPending]);
+  useEffect(() => { onPending(pending, problem?.key === wearProblems.unknown.key || !!pendingCreate(scope, key)); }, [pending, problem, scope, key, onPending]);
   useEffect(() => () => onPending(false), [onPending]);
   const itemIds = record.links.map(link => link.itemId).filter(id => {
     const state = view.components.get(id)?.state;
@@ -146,15 +169,15 @@ function WearActions({ client, scope, record, view, online, t, timeZone, onPlan,
     }, fail);
   }
   return <>
-    <button type="button" className="button button-primary" disabled={!online || pending || !itemIds.length} aria-describedby={itemIds.length ? undefined : 'wear-unavailable'} onClick={wear}>{t('calendar.wearToday')}</button>
-    <button type="button" className="button button-secondary" disabled={pending || !itemIds.length} onClick={onPlan}>{t('calendar.plan')}</button>
+    <button type="button" className="button button-primary" disabled={disabled || !online || pending || !itemIds.length} aria-describedby={itemIds.length ? undefined : 'wear-unavailable'} onClick={wear}>{t('calendar.wearToday')}</button>
+    <button type="button" className="button button-secondary" disabled={disabled || pending || !itemIds.length} onClick={onPlan}>{t('calendar.plan')}</button>
     {!itemIds.length && <p id="wear-unavailable" className="muted">{t('calendar.noUsableItems')}</p>}
     {pending && <p className="muted" role="status">{t('common.saving')}</p>}
     {done && <div className="notice notice-success" role="status"><Icon name="check" /><span>{t(done.key)}</span>
-      {done.look && <button ref={undoButton} type="button" className="text-button" disabled={!online || pending} onClick={() => undo(done.look!)}>{t('common.undo')}</button>}
+      {done.look && <button ref={undoButton} type="button" className="text-button" disabled={disabled || !online || pending} onClick={() => undo(done.look!)}>{t('common.undo')}</button>}
       <button type="button" className="icon-button" aria-label={t('common.close')} onClick={() => setDone(null)}><Icon name="close" /></button></div>}
     {problem && <div className="notice notice-error" role="alert"><span>{t(problem.key)}</span>
-      {problem.action === 'retry' && <button type="button" className="text-button" disabled={!online || pending} onClick={() => retry.current?.()}>{t('common.retry')}</button>}</div>}
+      {problem.action === 'retry' && <button type="button" className="text-button" disabled={disabled || !online || pending} onClick={() => retry.current?.()}>{t('common.retry')}</button>}</div>}
   </>;
 }
 function OutfitSummary({ record, view, images, t, editDisabled, onEdit, children }: { record: OutfitRecord; view: OutfitView; images: PrivateImages; t: Translate; editDisabled: boolean; onEdit: () => void; children: ReactNode }) {

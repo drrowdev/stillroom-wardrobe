@@ -18,6 +18,8 @@ import { revokeSession } from '../data/revoke';
 import type { AppClient } from '../data/client';
 import { useWardrobeBrowse } from '../features/wardrobe/use-wardrobe-browse';
 import { useBulkTrash } from '../features/wardrobe/use-bulk-trash';
+import { useOutfitLifecycle } from '../features/outfits/use-outfit-lifecycle';
+import { OutfitLifecycleNotice } from '../features/outfits/lifecycle-controls';
 import { PrivateImages } from '../images/private-images';
 import { LanguageSettings } from '../features/settings/language-settings';
 import { UndoNotice } from '../features/settings/trash';
@@ -138,6 +140,8 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   // Calendar and outfit wear writes hold navigation the same way, from their own page.
   const queued = useRef<{ from: WorkspaceRoute; next: WorkspaceRoute; position?: number } | null>(null);
   const writing = useRef(false);
+  const pageWriting = useRef(false);
+  const lifecycleWriting = useRef(false);
   const [settled, setSettled] = useState(0);
   const images = useMemo(() => new PrivateImages(client, scope), [client, scope]);
   const ai = useMemo(() => new AiClient(client, config, scope), [client, config, scope]);
@@ -164,9 +168,18 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   }, []);
   const onWriting = useCallback((busy: boolean) => {
     const was = writing.current;
-    writing.current = busy;
-    if (was && !busy && queued.current) setSettled(value => value + 1);
+    pageWriting.current = busy;
+    writing.current = busy || lifecycleWriting.current;
+    if (was && !writing.current && queued.current) setSettled(value => value + 1);
   }, []);
+  const onLifecycleWriting = useCallback((busy: boolean) => {
+    const was = writing.current;
+    lifecycleWriting.current = busy;
+    writing.current = busy || pageWriting.current;
+    if (was && !writing.current && queued.current) setSettled(value => value + 1);
+  }, []);
+  const outfitLifecycleChanged = useCallback(() => { invalidateOutfits(); invalidateHistory(); }, [invalidateOutfits, invalidateHistory]);
+  const outfitLifecycle = useOutfitLifecycle({ client, scope, online, onChanged: outfitLifecycleChanged, onWriting: onLifecycleWriting });
   const bulk = useBulkTrash({ lifecycle, scope, browse, images, online,
     onChanged: () => { void refresh(); invalidateOutfits(); }, onNotice: () => { setUndo(null); setNotice(false); } });
   useEffect(() => { images.activate(); return () => images.clear(); }, [images]);
@@ -296,6 +309,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     <>
       <main id="main" className="workspace-main" tabIndex={-1}>
         {!online && <div className="notice notice-offline" role="status">{t('common.offline')} {t('common.stale')}</div>}
+        <OutfitLifecycleNotice lifecycle={outfitLifecycle} online={online} language={language} t={t} />
         {undo && <UndoNotice key={`${undo.item.id}:${undo.item.version}`} undo={undo} visible={route === 'wardrobe'} routeSignal={routeSignal} lifecycle={lifecycle} scope={scope} online={online} t={t} images={images}
           onRestored={() => { setUndo(null); void refresh(); invalidateOutfits(); }} />}
         {bulk.notice && route === 'wardrobe' && <LazyBoundary t={t}><BulkUndoNotice key={bulk.notice.kind === 'trashed' ? bulk.notice.expiresAt : 'failed'} notice={bulk.notice}
@@ -307,18 +321,18 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route === 'add-several' ? <BulkAdd client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online}
             onDirty={onDirty} onSaved={() => { void refresh(); invalidateOutfits(); }} onBack={() => changeRoute('add')} />
           : route === 'settings' ? <ProfileScreen client={client} ai={ai} stylist={stylist} images={images} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} version={config.version} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} onSignOut={onSignOut} />
-          : route === 'trash' ? <Trash lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
+          : route === 'trash' ? <Trash client={client} outfitLifecycle={outfitLifecycle} invalidation={outfitsInvalidation} lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
             onDeleting={itemId => { setUndo(current => current?.item.id === itemId ? null : current); bulk.forget(itemId); }}
             onBack={() => changeRoute('wardrobe')} onChanged={itemId => { setUndo(null); bulk.forget(itemId); void refresh(); invalidateOutfits(); }} />
           : route.startsWith('detail:') ? <ItemDetail key={route} client={client} scope={scope} itemId={detailRouteId(route.slice(7))} images={images}
             lifecycle={lifecycle} onTrashed={trashed} ai={ai} onBeforeDiscard={onBeforeDiscard}
             t={t} language={language} currency={profile.currency} online={online} onDirty={onDirty} onSaved={() => { void refresh(); invalidateOutfits(); }} onBack={() => changeRoute('wardrobe')} />
-          : route === 'outfits' ? <OutfitsScreen client={client} scope={scope} invalidation={outfitsInvalidation} images={images} online={online} language={language} t={t}
+          : route === 'outfits' ? <OutfitsScreen client={client} scope={scope} invalidation={outfitsInvalidation} images={images} online={online} language={language} t={t} lifecycle={outfitLifecycle}
             onCreate={() => changeRoute('outfit-new')} onAddItem={() => changeRoute('add')} />
           : route === 'outfit-new' ? <NewOutfit key={outfitSeed ? outfitSeed.itemIds.join('|') : 'blank'} {...outfitProps} initial={outfitSeed ?? undefined} />
           : route.startsWith('outfit:') && route.endsWith(TRYON_ROUTE) ? <TryOnScreen key={route} client={client} scope={scope} id={outfitRouteId(route.slice(7, -TRYON_ROUTE.length))}
             online={online} language={language} t={t} onBack={() => changeRoute(route.slice(0, -TRYON_ROUTE.length) as WorkspaceRoute)} />
-          : route.startsWith('outfit:') ? <OutfitDetail key={route} {...outfitProps} id={outfitRouteId(route.slice(7))} timeZone={profile.timezone} language={language}
+          : route.startsWith('outfit:') ? <OutfitDetail key={route} {...outfitProps} id={outfitRouteId(route.slice(7))} timeZone={profile.timezone} language={language} lifecycle={outfitLifecycle}
             onTryOn={() => changeRoute(`${route}${TRYON_ROUTE}` as WorkspaceRoute)}
             onPlan={outfitId => { setCalendarSeed({ outfitId }); changeRoute('calendar'); }} onWorn={invalidateHistory} onWriting={onWriting} />
           : route === 'calendar' ? <CalendarScreen client={client} scope={scope} online={online} language={language} t={t} timeZone={profile.timezone}

@@ -949,6 +949,247 @@ test('I11 list collages fill the card for one to four items, and the editor favo
   }
 });
 
+test.describe('OUTFIT1 outfit lifecycle', () => {
+  const trashGroup = (page: Page) => page.getByRole('region', { name: text('nav.outfits'), exact: true });
+  const confirm = (page: Page) => page.locator('dialog[aria-labelledby="outfit-lifecycle-title"]');
+  const goTrash = async (page: Page) => {
+    await page.evaluate(() => { location.hash = '#/trash'; });
+    await expect(page.locator('#trash-title')).toBeVisible();
+  };
+  for (const language of languages) test(`single removal, Undo and reloaded Trash Restore preserve clothes/history (${language})`, async ({ page }) => {
+    let id = '';
+    const { api } = await start(page, language, (api, clothes) => {
+      id = seedOutfit(api, [clothes.trousers.id, clothes.top.id], { notes: 'Kept', favourite: true });
+      seedOutfit(api, [clothes.shoes.id], { title: 'Office' });
+      seedOutfit(api, [clothes.peer.id], { title: 'Robin private' }, 'b');
+      api.wearEvents.push({ id: randomUUID(), owner_id: owners.a, outfit_id: id, local_date: '2026-01-01', timezone: 'Europe/Helsinki',
+        state: 'worn', label: 'Weekend then', deleted_at: null, version: 1, created_at: new Date().toISOString() });
+    });
+    const preserved = JSON.stringify({ items: api.items, images: api.images, files: [...api.files.keys()], events: api.wearEvents, links: api.outfitItems });
+    await openOutfits(page, language); await page.locator(`a[href="#/outfits/${id}"]`).click();
+    await button(page, 'wardrobe.moveSelected', language).click();
+    await expect(confirm(page)).toContainText(text('outfitTrash.confirmName', language, { name: 'Weekend' }));
+    await expect(confirm(page).getByRole('button', { name: text('common.cancel', language), exact: true })).toBeFocused();
+    await confirm(page).press('Escape');
+    expect(api.outfitLifecycleControl.writes).toHaveLength(0);
+    await expect(button(page, 'wardrobe.moveSelected', language)).toBeFocused();
+    await button(page, 'wardrobe.moveSelected', language).click();
+    await confirm(page).getByRole('button', { name: text('wardrobe.moveSelected', language), exact: true }).click();
+    await expect(page.locator('#outfits-title')).toBeVisible();
+    await expect(page.locator('.outfit-card')).toHaveCount(1);
+    await expect(page.locator('#outfit-undo')).toBeVisible();
+    expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+    expect(api.outfits.find(row => row.id === id)).toMatchObject({ version: 2, notes: 'Kept', favourite: true });
+    expect(JSON.stringify({ items: api.items, images: api.images, files: [...api.files.keys()], events: api.wearEvents, links: api.outfitItems })).toBe(preserved);
+    await page.locator('#outfit-undo').click();
+    await expect(page.locator('.outfit-card')).toHaveCount(2);
+    expect(api.outfits.find(row => row.id === id)).toMatchObject({ version: 3, deleted_at: null });
+    await page.locator(`a[href="#/outfits/${id}"]`).click();
+    await button(page, 'wardrobe.moveSelected', language).click();
+    await confirm(page).getByRole('button', { name: text('wardrobe.moveSelected', language), exact: true }).click();
+    await expect(page.locator('#outfits-title')).toBeVisible();
+    await goTrash(page); await page.reload(); await expectSignedIn(page);
+    const group = page.getByRole('region', { name: text('nav.outfits', language), exact: true });
+    await expect(group.getByRole('heading', { name: 'Weekend', exact: true })).toBeVisible();
+    await expect(group).toContainText(text('outfitTrash.days_other', language, { count: '7' }));
+    await expect(page.getByText('Robin private', { exact: true })).toHaveCount(0);
+    await group.getByRole('button', { name: text('trash.restore', language), exact: true }).click();
+    await expect(group.getByText(text('outfitTrash.empty', language), { exact: true })).toBeVisible();
+    expect(api.outfits.find(row => row.id === id)).toMatchObject({ version: 5, deleted_at: null, notes: 'Kept', favourite: true });
+    expect(JSON.stringify({ items: api.items, images: api.images, files: [...api.files.keys()], events: api.wearEvents, links: api.outfitItems })).toBe(preserved);
+    expect(api.outfitControl.saves).toBe(0);
+  });
+
+  test('bulk selection is keyboard-accessible, serial and frozen; failures and unknown writes never gain unconfirmed Undo', async ({ page }) => {
+    const ids: string[] = [];
+    const { api } = await start(page, 'en', (api, clothes) => {
+      for (const [index, title] of ['First', 'Second', 'Third'].entries()) ids.push(seedOutfit(api, [clothes.top.id],
+        { title, created_at: new Date(Date.now() - (index + 1) * 60000).toISOString() }));
+    });
+    let sent = 0, release: (() => void) | null = null;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    await page.route('**/rest/v1/rpc/set_outfit_trashed', async route => {
+      sent++;
+      if (sent === 1) await held;
+      if (sent === 3) api.outfitControl.readFailures = 100;
+      await route.fallback();
+    });
+    api.outfitLifecycleControl.scripts.push({ mode: 'malformed' }, { mode: 'error', status: 400, body: { code: '22023', message: 'Request conflict' } },
+      { mode: 'committedLost' });
+    await openOutfits(page); await button(page, 'wardrobe.select').click();
+    await expect(page.locator('.outfit-card a')).toHaveCount(0);
+    const first = page.getByRole('button', { name: text('wardrobe.selectItem', 'en', { title: 'First' }), exact: true });
+    await first.focus(); await first.press('Space'); await expect(first).toHaveAttribute('aria-pressed', 'true');
+    await button(page, 'outfitTrash.selectAll').click();
+    await expect(page.getByRole('status').filter({ hasText: '3 selected' })).toBeVisible();
+    await button(page, 'wardrobe.moveSelected').click();
+    await expect(confirm(page)).toContainText(text('outfitTrash.confirm_other', 'en', { count: '3' }));
+    await confirm(page).getByRole('button', { name: text('wardrobe.moveSelected'), exact: true }).click();
+    await expect.poll(() => sent).toBe(1);
+    await expect(confirm(page).getByRole('button', { name: text('wardrobe.moveSelected'), exact: true })).toBeDisabled();
+    expect(api.outfitLifecycleControl.writes).toHaveLength(0);
+    release!();
+    await expect(confirm(page)).toHaveCount(0);
+    await expect(page.getByRole('alert').filter({ hasText: text('outfitTrash.unknown') })).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: text('outfitTrash.moved_one', 'en', { count: '1' }) })).toBeVisible();
+    await expect(page.locator('#outfit-undo')).toBeEnabled();
+    expect(api.outfitLifecycleControl.writes.map(write => write.body.p_id)).toEqual(ids);
+    expect(api.outfits.find(row => row.id === ids[1])).toMatchObject({ deleted_at: null, version: 1 });
+    await page.locator('#outfit-undo').click();
+    await expect(page.locator('#outfit-undo')).toHaveCount(0);
+    await expect(page.getByRole('alert').filter({ hasText: text('outfitTrash.unknown') })).toBeVisible();
+    await expect(button(page, 'lifecycle.check')).toBeEnabled();
+    expect(api.outfitLifecycleControl.writes.at(-1)).toMatchObject({ action: 'restore', body: { p_id: ids[0], p_expected_version: 2 } });
+    expect(api.outfitLifecycleControl.writes.filter(write => write.body.p_id === ids[2])).toHaveLength(1);
+    api.outfitControl.readFailures = 0;
+    await button(page, 'lifecycle.check').click();
+    await expect(page.locator('#outfit-undo')).toBeEnabled();
+    expect(api.outfitLifecycleControl.writes).toHaveLength(4);
+    await expect(page.locator('.outfit-card')).toHaveCount(2);
+    await page.locator('#outfit-undo').click();
+    await expect(page.locator('.outfit-card')).toHaveCount(3);
+    expect(api.outfitLifecycleControl.writes.at(-1)).toMatchObject({ action: 'restore', body: { p_id: ids[2], p_expected_version: 2, p_trashed: false } });
+    expect(api.outfits.find(row => row.id === ids[0])!.deleted_at).toBeNull();
+  });
+
+  test('Undo lasts eight seconds; expired outfits stay in grouped Trash without Restore or automatic purge', async ({ page }) => {
+    await page.clock.install();
+    let id = '';
+    const { api } = await start(page, 'en', (api, clothes) => {
+      id = seedOutfit(api, [clothes.top.id]);
+      seedOutfit(api, [clothes.shoes.id], { title: 'Expired', deleted_at: new Date(Date.now() - 8 * 86400000).toISOString() });
+    });
+    await openOutfits(page); await page.locator(`a[href="#/outfits/${id}"]`).click();
+    await button(page, 'wardrobe.moveSelected').click();
+    await confirm(page).getByRole('button', { name: text('wardrobe.moveSelected'), exact: true }).click();
+    await expect(page.locator('#outfit-undo')).toBeVisible();
+    await page.clock.fastForward(8100);
+    await expect(page.locator('#outfit-undo')).toHaveCount(0);
+    await goTrash(page);
+    const expired = trashGroup(page).getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Expired', exact: true }) });
+    await expect(expired).toContainText(text('outfitTrash.expired'));
+    await expect(expired.getByRole('button', { name: text('trash.restore'), exact: true })).toHaveCount(0);
+    await expect(expired.getByRole('button', { name: text('lifecycle.delete'), exact: true })).toBeVisible();
+    expect(api.outfits).toHaveLength(2);
+    expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+  });
+
+  test('an uncertain Undo cannot resend, and closing its notice keeps the read-only Check', async ({ page }) => {
+    let id = '';
+    const { api } = await start(page, 'en', (api, clothes) => { id = seedOutfit(api, [clothes.top.id]); });
+    await openOutfits(page); await page.locator(`a[href="#/outfits/${id}"]`).click();
+    await button(page, 'wardrobe.moveSelected').click();
+    await confirm(page).getByRole('button', { name: text('wardrobe.moveSelected'), exact: true }).click();
+    await expect(page.locator('#outfit-undo')).toBeEnabled();
+    api.outfitControl.readFailures = 100;
+    api.outfitLifecycleControl.scripts.push({ mode: 'committedLost' });
+    await page.locator('#outfit-undo').click();
+    await expect(page.getByRole('alert').filter({ hasText: text('outfitTrash.unknown') })).toBeVisible();
+    await expect(page.locator('#outfit-undo')).toBeDisabled();
+    expect(api.outfitLifecycleControl.writes).toHaveLength(2);
+    await page.locator('.lifecycle-undo').getByRole('button', { name: text('common.close'), exact: true }).click();
+    await expect(page.locator('#outfit-undo')).toHaveCount(0);
+    await expect(button(page, 'lifecycle.check')).toBeEnabled();
+    api.outfitControl.readFailures = 0;
+    await button(page, 'lifecycle.check').click();
+    await expect(page.locator('.outfit-card')).toHaveCount(1);
+    await expect(button(page, 'lifecycle.check')).toHaveCount(0);
+    expect(api.outfitLifecycleControl.writes).toHaveLength(2);
+    expect(api.outfits.find(record => record.id === id)).toMatchObject({ version: 3, deleted_at: null });
+  });
+
+  test('an owner change during a held batch clears selection, notices and queued targets', async ({ page }) => {
+    const ids: string[] = [];
+    let peer = '';
+    const { api } = await start(page, 'en', (api, clothes) => {
+      for (const title of ['First', 'Second', 'Third']) ids.push(seedOutfit(api, [clothes.top.id], { title }));
+      peer = seedOutfit(api, [clothes.peer.id], { title: 'Robin outfit' }, 'b');
+    });
+    let sent = 0, firstTarget = '', release: (() => void) | null = null;
+    const held = new Promise<void>(resolve => { release = resolve; });
+    await page.route('**/rest/v1/rpc/set_outfit_trashed', async route => {
+      sent++; if (sent === 1) firstTarget = String(route.request().postDataJSON().p_id);
+      await held; await route.fallback();
+    });
+    await openOutfits(page); await button(page, 'wardrobe.select').click(); await button(page, 'outfitTrash.selectAll').click();
+    await button(page, 'wardrobe.moveSelected').click();
+    await confirm(page).getByRole('button', { name: text('wardrobe.moveSelected'), exact: true }).click();
+    await expect.poll(() => sent).toBe(1);
+    expect(await page.evaluate(async () => {
+      const modulePath = '/src/data/client.ts';
+      const { makeClient } = await import(modulePath) as typeof import('../../src/data/client');
+      const client = makeClient({ url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_browser_fixture_only', version: 'browser-fixture' });
+      return !(await client.auth.signInWithPassword({ email: 'user-b@example.test', password: 'fictional-test-password' })).error;
+    })).toBe(true);
+    await expectIdentity(page, 'Robin');
+    await expect(page.locator('.outfit-card h2')).toHaveText(['Robin outfit']);
+    release!();
+    await expect(confirm(page)).toHaveCount(0);
+    await expect(page.locator('#outfit-undo')).toHaveCount(0);
+    await expect(page.locator('.outfit-selection')).toHaveCount(0);
+    await expect(button(page, 'lifecycle.check')).toHaveCount(0);
+    expect(sent).toBe(1);
+    expect(api.outfitLifecycleControl.writes.every(write => write.owner === owners.a && write.body.p_id === firstTarget)).toBe(true);
+    for (const id of ids.filter(value => value !== firstTarget))
+      expect(api.outfits.find(record => record.id === id)).toMatchObject({ version: 1, deleted_at: null });
+    expect(api.outfits.find(record => record.id === peer)).toMatchObject({ version: 1, deleted_at: null });
+  });
+
+  test('named permanent deletion waits for active try-on, reconciles lost reply, and preserves semantic wear history', async ({ page }) => {
+    let id = '';
+    const { api } = await start(page, 'en', (api, clothes) => {
+      id = seedOutfit(api, [clothes.top.id], { deleted_at: new Date().toISOString() });
+      const event = randomUUID();
+      api.wearEvents.push({ id: event, owner_id: owners.a, outfit_id: id, local_date: '2026-01-01', timezone: 'Europe/Helsinki',
+        state: 'worn', label: 'Historical Weekend', deleted_at: null, version: 1, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' });
+      api.wearLinks.push({ id: randomUUID(), owner_id: owners.a, event_id: event, item_id: clothes.top.id, title_snapshot: 'Old shirt name', category_snapshot: 'top' });
+      api.tryonControl.chains.push({ id: randomUUID(), owner: owners.a, outfitId: id, steps: [], nextStep: 1, state: 'running', resultId: null,
+        expiresAtMs: Date.now() + 60000 });
+    });
+    const preserved = JSON.stringify({ items: api.items, images: api.images, links: api.wearLinks, files: [...api.files.keys()] });
+    const original = { ...api.wearEvents[0]! };
+    await goTrash(page);
+    await trashGroup(page).getByRole('button', { name: text('lifecycle.delete'), exact: true }).click();
+    await expect(confirm(page)).toContainText(text('outfitTrash.deleteName', 'en', { name: 'Weekend' }));
+    await expect(confirm(page)).toContainText(text('outfitTrash.deleteBody'));
+    await confirm(page).getByRole('button', { name: text('lifecycle.delete'), exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText(text('outfitTrash.busy'));
+    expect(api.outfits).toHaveLength(1); expect(api.tryonControl.chains).toHaveLength(1);
+    api.tryonControl.chains[0]!.expiresAtMs = Date.now() - 1;
+    api.outfitLifecycleControl.scripts.push({ mode: 'committedLost' });
+    await trashGroup(page).getByRole('button', { name: text('lifecycle.delete'), exact: true }).click();
+    await confirm(page).getByRole('button', { name: text('lifecycle.delete'), exact: true }).click();
+    await expect(trashGroup(page)).toContainText(text('outfitTrash.empty'));
+    expect(api.outfitLifecycleControl.writes).toHaveLength(2);
+    expect(api.outfits).toHaveLength(0); expect(api.outfitItems).toHaveLength(0);
+    expect(api.tryonControl.chains).toHaveLength(0);
+    expect(api.wearEvents[0]).toEqual({ ...original, outfit_id: null, version: 2, updated_at: api.wearEvents[0]!.updated_at });
+    expect(JSON.stringify({ items: api.items, images: api.images, links: api.wearLinks, files: [...api.files.keys()] })).toBe(preserved);
+    await expect(page.locator('#outfit-undo')).toHaveCount(0);
+    expect(api.tryonControl.requests).toHaveLength(0);
+  });
+
+  test('direct historical links offer recovery instead of unavailable; editor and offline state cannot remove an outfit', async ({ page }) => {
+    let id = '';
+    const { api } = await start(page, 'en', (api, clothes) => { id = seedOutfit(api, [clothes.top.id], { deleted_at: new Date().toISOString() }); });
+    await page.evaluate(value => { location.hash = `#/outfits/${value}`; }, id);
+    await expect(page.getByText(text('outfitTrash.inTrash'), { exact: true })).toBeVisible();
+    await expect(page.getByText(text('outfits.unavailable'), { exact: true })).toHaveCount(0);
+    await expect(button(page, 'outfits.edit')).toHaveCount(0);
+    await button(page, 'trash.restore').click();
+    await expect(button(page, 'outfits.edit')).toBeVisible();
+    await page.context().setOffline(true);
+    await expect(button(page, 'wardrobe.moveSelected')).toBeDisabled();
+    expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+    await page.context().setOffline(false);
+    await button(page, 'outfits.edit').click();
+    await page.locator('#outfit-name').fill('Unsaved');
+    await expect(button(page, 'wardrobe.moveSelected')).toHaveCount(0);
+    await expect(page.locator('#outfit-name')).toHaveValue('Unsaved');
+    expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+  });
+});
+
 test.describe('bounded I11 visual evidence', () => {
   test.describe.configure({ retries: 0 });
   for (const selected of [{ project: 'chromium', language: 'en', width: 1280, suffix: 'en-desktop' },
@@ -956,7 +1197,7 @@ test.describe('bounded I11 visual evidence', () => {
     test(`list, editor and detail ${selected.suffix} retain functional assertions in every project`, async ({ page }, testInfo: TestInfo) => {
       const language: Language = selected.language;
       let weekend = '', errands = '';
-      await start(page, language, (api, clothes) => {
+      const { api, clothes } = await start(page, language, (api, clothes) => {
         const scarf = api.seedSavedItem('a', 'Grey scarf').item as Row;
         Object.assign(scarf, { category: 'accessory', colours: ['grey'], created_at: '2026-09-09T00:00:03Z' });
         Object.assign(clothes.top as Row, { deleted_at: new Date().toISOString() });
@@ -972,7 +1213,7 @@ test.describe('bounded I11 visual evidence', () => {
         await mkdir(directory, { recursive: true });
         const info = await lstat(directory); expect(info.isDirectory() && !info.isSymbolicLink()).toBe(true);
       }
-      const capture = async (name: 'list' | 'editor' | 'detail') => {
+      const capture = async (name: 'list' | 'editor' | 'detail' | 'outfit-bulk-confirm' | 'outfit-trash' | 'outfit-delete-confirm' | 'outfit-phone-trash') => {
         expect(new URL(page.url()).origin).toBe(new URL(testInfo.project.use.baseURL!).origin);
         await expectIdentity(page, 'Alex');
         expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
@@ -990,6 +1231,8 @@ test.describe('bounded I11 visual evidence', () => {
         expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && png.readUInt32BE(16) === selected.width).toBe(true);
         const file = await open(path.join(directory, `${name}-${selected.suffix}.png`), 'wx');
         try { await file.writeFile(png); } finally { await file.close(); }
+        if (name.startsWith('outfit-')) console.log(JSON.stringify({ outfit1Capture: `${name}-${selected.suffix}.png`,
+          path: path.join(directory, `${name}-${selected.suffix}.png`), width: png.readUInt32BE(16), height: png.readUInt32BE(20), bytes: png.byteLength }));
       };
       await openOutfits(page, language);
       await expect(page.locator('.outfit-card')).toHaveCount(3);
@@ -1014,6 +1257,35 @@ test.describe('bounded I11 visual evidence', () => {
       await page.getByText(text('item.moreDetails', language), { exact: true }).click();
       await expect(page.locator('#outfit-notes')).toHaveValue('Dinner');
       await capture('editor');
+      // The six existing I11 scenes above remain. These four extra bounded scenes use the same safety checks.
+      await button(page, 'outfits.back', language).click();
+      seedOutfit(api, [clothes.shoes.id], { title: 'Expired', deleted_at: new Date(Date.now() - 8 * 86400000).toISOString() });
+      await button(page, 'wardrobe.select', language).click();
+      await button(page, 'outfitTrash.selectAll', language).click();
+      await button(page, 'wardrobe.moveSelected', language).click();
+      const dialog = page.locator('dialog[aria-labelledby="outfit-lifecycle-title"]');
+      await expect(dialog).toContainText(text('outfitTrash.confirm_other', language, { count: '3' }));
+      if (selected.suffix === 'en-desktop') await capture('outfit-bulk-confirm');
+      await dialog.getByRole('button', { name: text('wardrobe.moveSelected', language), exact: true }).click();
+      await expect(page.locator('.outfit-card')).toHaveCount(0);
+      await page.evaluate(() => { location.hash = '#/trash'; });
+      await expect(page.locator('#trash-title')).toBeVisible();
+      const group = page.getByRole('region', { name: text('nav.outfits', language), exact: true });
+      await expect(group.getByRole('listitem')).toHaveCount(4);
+      await expect(group.getByRole('button', { name: text('trash.restore', language), exact: true })).toHaveCount(3);
+      await expect(group.getByText(text('outfitTrash.expired', language), { exact: true })).toBeVisible();
+      await capture(selected.suffix === 'en-desktop' ? 'outfit-trash' : 'outfit-phone-trash');
+      const expired = group.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Expired', exact: true }) });
+      await expired.getByRole('button', { name: text('lifecycle.delete', language), exact: true }).click();
+      await expect(dialog).toContainText(text('outfitTrash.deleteName', language, { name: 'Expired' }));
+      if (selected.suffix === 'en-desktop') await capture('outfit-delete-confirm');
+      await dialog.getByRole('button', { name: text('common.cancel', language), exact: true }).click();
+      await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });
+      await expired.getByRole('button', { name: text('lifecycle.delete', language), exact: true }).click();
+      await expect(dialog).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth
+        && [...document.querySelectorAll('dialog')].every(element => element.scrollWidth <= element.clientWidth))).toBe(true);
+      await dialog.getByRole('button', { name: text('common.cancel', language), exact: true }).click();
     });
   }
 });

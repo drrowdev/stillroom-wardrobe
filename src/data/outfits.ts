@@ -20,13 +20,20 @@ function parse<T>(read: () => T): T {
 }
 
 export async function loadOutfits(client: AppClient, scope: OwnerScope, signal: AbortSignal): Promise<OutfitRecord[]> {
+  return loadOutfitRows(client, scope, signal, false);
+}
+export async function loadTrashedOutfits(client: AppClient, scope: OwnerScope, signal: AbortSignal): Promise<OutfitRecord[]> {
+  return loadOutfitRows(client, scope, signal, true);
+}
+async function loadOutfitRows(client: AppClient, scope: OwnerScope, signal: AbortSignal, trashed: boolean): Promise<OutfitRecord[]> {
   const lifetime = AbortSignal.any([scope.signal, signal]);
   const result: OutfitRecord[] = [];
   let cursor: { createdAt: string; id: string } | null = null;
   for (;;) {
     throwIfAborted(lifetime);
-    let query = client.from('outfits').select(outfitColumns).eq('owner_id', scope.ownerId).is('deleted_at', null)
+    let query = client.from('outfits').select(outfitColumns).eq('owner_id', scope.ownerId)
       .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(pageSize);
+    query = trashed ? query.not('deleted_at', 'is', null) : query.is('deleted_at', null);
     if (cursor) query = query.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
     const { data, error } = await query.abortSignal(lifetime);
     throwIfAborted(lifetime);
@@ -35,7 +42,7 @@ export async function loadOutfits(client: AppClient, scope: OwnerScope, signal: 
     for (const row of data as unknown[]) {
       const record = parse(() => parseOutfitRow(row, scope.ownerId));
       const order = timestampOrder(record.createdAt);
-      if (record.deletedAt !== null || result.some(value => value.id === record.id) || cursor && (order > timestampOrder(cursor.createdAt)
+      if ((record.deletedAt !== null) !== trashed || result.some(value => value.id === record.id) || cursor && (order > timestampOrder(cursor.createdAt)
         || order === timestampOrder(cursor.createdAt) && record.id >= cursor.id)) throw new AppError('error.unavailable');
       cursor = { createdAt: record.createdAt, id: record.id };
       result.push(record);
@@ -45,12 +52,12 @@ export async function loadOutfits(client: AppClient, scope: OwnerScope, signal: 
 }
 
 // Reads the parent even when soft-deleted so an unknown save can be told apart from a removed outfit.
-export async function loadOutfit(client: AppClient, scope: OwnerScope, id: string, signal: AbortSignal): Promise<OutfitRecord | null> {
+export async function loadOutfit(client: AppClient, scope: OwnerScope, id: string, signal: AbortSignal, retry = true): Promise<OutfitRecord | null> {
   const lifetime = AbortSignal.any([scope.signal, signal]);
   throwIfAborted(lifetime);
   if (!isUuid(id) || id !== id.toLowerCase()) return null;
   const { data, error } = await client.from('outfits').select(outfitColumns).eq('owner_id', scope.ownerId).eq('id', id)
-    .abortSignal(lifetime).maybeSingle();
+    .abortSignal(lifetime).retry(retry).maybeSingle();
   throwIfAborted(lifetime);
   requireSuccess(error);
   if (data === null) return null;

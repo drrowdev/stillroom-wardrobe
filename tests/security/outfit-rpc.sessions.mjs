@@ -11,6 +11,18 @@ async function directionCases(client, owner, peer, h, p) {
   const foreignItem = await p.item(), theirs = await p.create([foreignItem.id], { p_title: 'Fictional peer outfit' });
   const snapshot = async () => ({ mine: await h.read(mine.p_id), theirs: await p.read(theirs.p_id) });
   const before = await snapshot();
+  // App lifecycle RPCs reject both foreign and nonexistent references identically, without peer side effects.
+  for (const target of [theirs.p_id, randomUUID()]) for (const [name, extra] of [
+    ['set_outfit_trashed', { p_trashed: true }], ['set_outfit_trashed', { p_trashed: false }], ['delete_trashed_outfit', {}],
+  ]) {
+    const body = { p_id: target, p_expected_version: 1, ...extra };
+    const reply = await client.request(owner.token, `/rest/v1/rpc/${name}`, { method: 'POST', body });
+    requireEvidence(!reply.ok && reply.status === 400);
+    eq(reply.data, { code: '22023', details: null, hint: null, message: 'Request conflict' });
+    const anonymous = await client.request(null, `/rest/v1/rpc/${name}`, { method: 'POST', body });
+    requireEvidence(!anonymous.ok && [401, 403].includes(anonymous.status) && anonymous.data?.code === '42501');
+  }
+  eq(await snapshot(), before);
 
   // Foreign items, alone or mixed, are invalid and create nothing.
   for (const itemIds of [[foreignItem.id], [own.id, foreignItem.id]]) {

@@ -6,6 +6,9 @@ import { locales, type Language, type MessageKey, type Translate } from '../../i
 import { Failure, type Shared } from './trash';
 import { useAction } from './use-action';
 import '../../styles/data-flow.css';
+import type { AppClient } from '../../data/client';
+import type { OutfitLifecycle } from '../outfits/use-outfit-lifecycle';
+import { OutfitTrash } from './outfit-trash';
 
 function DeleteDialog({ preview, busy, t, language, returnFocus, onCancel, onConfirm }: {
   preview: DeletionStatus; busy: boolean; t: Translate; language: Language; returnFocus: HTMLButtonElement | null; onCancel: () => void; onConfirm: () => void;
@@ -30,7 +33,8 @@ function DeleteDialog({ preview, busy, t, language, returnFocus, onCancel, onCon
       <button type="button" className="button button-danger" disabled={busy} onClick={onConfirm}>{t('lifecycle.delete')}</button></div>
   </dialog>;
 }
-export function Trash(props: Shared & { language: Language; onBack: () => void; onChanged: (itemId: string) => void; onDeleting: (itemId: string) => void }) {
+export function Trash(props: Shared & { client: AppClient; outfitLifecycle: OutfitLifecycle; invalidation: number;
+  language: Language; onBack: () => void; onChanged: (itemId: string) => void; onDeleting: (itemId: string) => void }) {
   const { lifecycle, scope, images, online, t, language } = props;
   const action = useAction(scope, online);
   const { run } = action;
@@ -94,12 +98,13 @@ export function Trash(props: Shared & { language: Language; onBack: () => void; 
       }
     });
   }
-  const locked = action.busy || intent !== null || restore !== null;
+  const locked = action.busy || intent !== null || restore !== null || props.outfitLifecycle.locked;
   return <section className="trash-page" aria-labelledby="trash-title">
     <button className="text-button" onClick={props.onBack}>{t('common.back')}</button>
     <div className="page-heading"><h1 id="trash-title" tabIndex={-1}>{t('nav.trash')}</h1>
       <button className="text-button" disabled={!online || action.busy} onClick={() => { void action.run(signal => load(signal, null)); }}>{t('common.refresh')}</button></div>
     <p className="muted">{t('trash.retention')}</p>
+    <h2>{t('outfitTrash.clothes')}</h2>
     <Failure action={action} t={t} />
     {notice && <p role="status" className="notice">{t(notice)}</p>}
     {restore && <button className="button button-secondary" disabled={action.busy || !online} onClick={() => { void action.run(async signal => {
@@ -124,7 +129,7 @@ export function Trash(props: Shared & { language: Language; onBack: () => void; 
     {!loaded && !action.error && <p role="status">{t('common.loading')}</p>}
     {loaded && !rows.length && <p>{t('trash.empty')}</p>}
     <ul className="trash-list">{rows.map(row => <li className="settings-card" key={row.id}>
-      <h2>{row.title}</h2>
+      <h3>{row.title}</h3>
       {row.request_id || operations.some(receipt => receipt.itemId === row.id) ? <button type="button" className="button button-secondary" disabled={locked || !online} onClick={() => {
         void action.run(async signal => {
           const current = await lifecycle.statusOf(row.id, signal);
@@ -161,6 +166,8 @@ export function Trash(props: Shared & { language: Language; onBack: () => void; 
       </div>}
     </li>)}</ul>
     {next && <button className="button button-secondary" disabled={locked || !online} onClick={() => { void action.run(signal => load(signal, next)); }}>{t('wardrobe.more')}</button>}
+    <OutfitTrash client={props.client} scope={scope} online={online} invalidation={props.invalidation}
+      lifecycle={props.outfitLifecycle} disabled={action.busy || intent !== null || restore !== null} language={language} t={t} />
     {dialog && intent && operation?.phase === 'prepared' && !uncertain && <DeleteDialog preview={intent.preview}
       busy={action.busy} t={t} language={language} returnFocus={deleteTrigger.current} onCancel={cancel} onConfirm={() => {
       void action.run(async signal => {

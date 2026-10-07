@@ -682,6 +682,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   // Scripts the next outfit save or outfit reads: lost replies, commits whose reply is lost, and failed rereads.
   const outfitControl: { nextSave: null | { mode: 'lost' | 'committedLost' | 'transport' } | { mode: 'error'; status: number; body: unknown };
     readFailures: number; readFailureStatus: number; saves: number } = { nextSave: null, readFailures: 0, readFailureStatus: 500, saves: 0 };
+  const outfitLifecycleControl = {
+    scripts: [] as ({ mode: 'lost' | 'committedLost' | 'malformed' } | { mode: 'error'; status: number; body: unknown })[],
+    writes: [] as { owner: string; action: string; body: JsonRow }[],
+  };
   // Scripts the next calendar save or removal: a lost reply, a commit whose reply is lost, or a scripted error.
   const wearControl: { next: null | { mode: 'lost' | 'committedLost' } | { mode: 'error'; status: number; body: unknown }; saves: number; patches: number; now: Date | null }
     = { next: null, saves: 0, patches: 0, now: null };
@@ -1009,7 +1013,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
       const setup = { ...tryOnDefaults, ...tryonControl.setup[owner] };
       const now = Date.now();
-      const live = tryonControl.results.filter(row => row.owner === owner && row.expiresAtMs > now);
+      const live = tryonControl.results.filter(row => row.owner === owner && row.expiresAtMs > now
+        && outfits.some(outfit => outfit.owner_id === owner && outfit.id === row.outfitId && outfit.deleted_at === null));
       if (name === 'tryon_status' || name === 'tryon_set_consent') {
         if (name === 'tryon_set_consent') {
           tryonControl.consentWrites.push({ owner, body });
@@ -1616,15 +1621,54 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       } else {
         const keyset = url.searchParams.get('or');
         const match = keyset ? /^\(created_at\.lt\.([^,]+),and\(created_at\.eq\.([^,]+),id\.lt\.([^)]+)\)\)$/.exec(keyset) : null;
-        if (url.searchParams.get('deleted_at') !== 'is.null' || url.searchParams.get('order') !== 'created_at.desc,id.desc'
+        const trash = url.searchParams.get('deleted_at') === 'not.is.null';
+        if (!['is.null', 'not.is.null'].includes(url.searchParams.get('deleted_at') ?? '') || url.searchParams.get('order') !== 'created_at.desc,id.desc'
           || url.searchParams.get('limit') !== '500' || keyset && (!match || match[1] !== match[2] || !isUuid(match[3]))) { await json({ code: '22023' }, 400); return; }
-        rows = rows.filter(row => row.deleted_at === null && (!match || String(row.created_at) < match[1]! || row.created_at === match[1] && String(row.id) < match[3]!))
+        rows = rows.filter(row => (row.deleted_at !== null) === trash && (!match || String(row.created_at) < match[1]! || row.created_at === match[1] && String(row.id) < match[3]!))
           .sort((a, b) => String(a.created_at) < String(b.created_at) ? 1 : String(a.created_at) > String(b.created_at) ? -1 : String(a.id) < String(b.id) ? 1 : -1).slice(0, 500);
       }
       const shaped = rows.map(row => ({ id: row.id, owner_id: row.owner_id, title: row.title, occasion: row.occasion, notes: row.notes, favourite: row.favourite,
         deleted_at: row.deleted_at, version: row.version, created_at: row.created_at,
         outfit_items: outfitItems.filter(link => link.owner_id === owner && link.outfit_id === row.id).map(link => ({ owner_id: link.owner_id, item_id: link.item_id, position: link.position })) }));
       await json(request.headers().accept?.includes('vnd.pgrst.object') ? shaped[0] ?? null : shaped); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/set_outfit_trashed' || url.pathname === '/rest/v1/rpc/delete_trashed_outfit') {
+      const body = request.postDataJSON() as JsonRow;
+      const permanent = url.pathname.endsWith('/delete_trashed_outfit');
+      const keys = Object.keys(body).sort().join(',');
+      if (!owner || method !== 'POST' || keys !== (permanent ? 'p_expected_version,p_id' : 'p_expected_version,p_id,p_trashed')) {
+        await json({ code: '42501', message: 'Not available' }, 403); return;
+      }
+      outfitLifecycleControl.writes.push({ owner, action: permanent ? 'delete' : body.p_trashed ? 'trash' : 'restore', body });
+      const script = outfitLifecycleControl.scripts.shift();
+      if (script?.mode === 'error') { await json(script.body, script.status); return; }
+      if (script?.mode === 'lost') { await json({ message: 'Unavailable' }, 503); return; }
+      const record = outfits.find(row => row.id === body.p_id && row.owner_id === owner);
+      if (!record || record.version !== body.p_expected_version || !Number.isSafeInteger(body.p_expected_version)
+        || Number(body.p_expected_version) < 1 || (permanent ? record.deleted_at === null
+          : typeof body.p_trashed !== 'boolean' || (record.deleted_at === null) !== body.p_trashed || Number(record.version) >= Number.MAX_SAFE_INTEGER)) {
+        await json({ code: '22023', message: 'Request conflict' }, 400); return;
+      }
+      if (permanent && tryonControl.chains.some(chain => chain.owner === owner && chain.outfitId === record.id
+        && chain.state === 'running' && chain.expiresAtMs > Date.now())) {
+        await json({ code: '22023', message: 'Try-on running' }, 400); return;
+      }
+      if (!permanent && !body.p_trashed && (Date.parse(String(record.deleted_at)) > Date.now()
+        || Date.parse(String(record.deleted_at)) < Date.now() - 7 * 86400000)) {
+        await json({ code: '22023', message: 'Recovery expired' }, 400); return;
+      }
+      if (permanent) {
+        outfits.splice(outfits.indexOf(record), 1);
+        for (let i = outfitItems.length - 1; i >= 0; i--) if (outfitItems[i]!.outfit_id === record.id && outfitItems[i]!.owner_id === owner) outfitItems.splice(i, 1);
+        for (const look of wearEvents) if (look.outfit_id === record.id && look.owner_id === owner)
+          Object.assign(look, { outfit_id: null, version: Number(look.version) + 1, updated_at: new Date().toISOString() });
+        for (let i = tryonControl.results.length - 1; i >= 0; i--) if (tryonControl.results[i]!.owner === owner && tryonControl.results[i]!.outfitId === record.id) tryonControl.results.splice(i, 1);
+        for (let i = tryonControl.chains.length - 1; i >= 0; i--) if (tryonControl.chains[i]!.owner === owner && tryonControl.chains[i]!.outfitId === record.id) tryonControl.chains.splice(i, 1);
+      } else Object.assign(record, { deleted_at: body.p_trashed ? new Date().toISOString() : null, version: Number(record.version) + 1 });
+      if (script?.mode === 'committedLost') { await json({ message: 'Unavailable' }, 503); return; }
+      if (script?.mode === 'malformed') { await json({ id: record.id }); return; }
+      await json(permanent ? { id: record.id, owner_id: owner, version: record.version, deleted: true }
+        : { id: record.id, owner_id: owner, version: record.version, deleted_at: record.deleted_at }); return;
     }
     if (url.pathname === '/rest/v1/rpc/save_outfit') {
       outfitControl.saves++;
@@ -2129,7 +2173,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { provenance: provenanceRows, stylistControl, enhanceControl, tryonControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, trashControl, holdFeedbackReads, outfitControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { provenance: provenanceRows, stylistControl, enhanceControl, tryonControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, trashControl, holdFeedbackReads, outfitControl, outfitLifecycleControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

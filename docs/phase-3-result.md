@@ -170,3 +170,88 @@ native-device claim.
 - **Coordinator:** GPT-6 Astra code review, publication release, draft PR and
   CI remain open.
 - **Owner:** normal-owner acceptance remains open.
+
+## OUTFIT1 - outfit Trash lifecycle, 7 October 2026
+
+This source packet extends the historical I11 result above; it is not a
+merge, hosted installation, deployment, visual approval or owner acceptance.
+The owner requested both individual and multi-select removal, with Undo and
+Trash Restore, and chose seven-day recovery plus permanent deletion.
+The coordinator approved the Tier A plan with binding Opus5.5/high critique
+amendments in [#84 comment 6036609345](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6036609345).
+The fresh sole local writer uses GPT-6.1 Sol/medium, on
+`drrowdev-outfit1-trash-and-undo`, base
+`06b2eac5b2baa341d711e84c35a938b66b25a84e`. Root instruction files, dependency
+pins, CI and old migration bodies/hashes are unchanged.
+
+Requirements: R06 (outfits), R07/R08 (wear/calendar preservation), R11/R12
+(owner integrity), R16/R17 (recovery/Trash), R20 (accessibility),
+R23 (predictable concurrency) and R27 (EN/FI/SV localization).
+The earlier I11 localization label R23 above is historical; R27 is the
+localization requirement.
+
+- Individual detail and accessible list selection/Select all use explicit
+  confirmation, sequential frozen owner/version targets and confirmed-only
+  eight-second Undo. Confirmed targets can be undone while a different target
+  remains uncertain; uncertain Undo cannot resend, and closing the Undo notice
+  keeps Check available. Failed/uncertain changes are explicit; Check is read-only.
+- Trash groups clothes and outfits without using garment RPCs for outfits.
+  Seven-day Restore survives reload. Expired outfits remain, with permanent
+  deletion only; there is no purge. Direct historical outfit links show
+  recovery instead of a generic unavailable message.
+- The LF transaction `20261007090000_outfit_lifecycle.sql` adds two checked
+  authenticated RPCs with the approved admission/profile/controls/outfit lock
+  order. Existing ordinary grants and `save_outfit` are unchanged.
+- Permanent deletion refuses unexpired running try-on chains; existing FKs
+  remove outfit links/private try-on JPEGs/references. Clothes/photos,
+  calendar dates/labels, wear snapshots and statistics stay. Wear source
+  nulling necessarily bumps technical version/time; client invalidates
+  history/calendar. No consent/provider/cost changes or hosted action.
+- Saved-only exports already exclude trashed outfits and null their exported
+  event source links; historical text remains. That behavior is unchanged.
+
+### OUTFIT1 validation and remaining gates
+
+Pinned Node24.19.0/npm11.17.0 and locked Playwright executables were verified
+locally. The first lint attempt failed because dependencies were absent; the
+approved locked `npm ci --quiet` restored them without changing manifests.
+The locked install reported seven high advisories; no dependency upgrade or
+install-script approval was performed.
+
+| Command | Evidence so far |
+| --- | --- |
+| `npm run test:unit -- tests\unit\outfit-lifecycle.test.ts tests\unit\outfit-lifecycle-schema.test.ts tests\unit\outfits.test.ts tests\unit\preservation.test.ts tests\unit\isolation-catalog.test.ts tests\unit\ci-storage-guard.test.ts tests\unit\ai-purge-schedule.test.ts tests\unit\bulk-trash.test.ts tests\unit\wear-events.test.ts tests\unit\wear-history.test.ts` | 694 passed |
+| `$env:PLAYWRIGHT_PORT='5194'; npm run test:browser -- outfits.spec.ts bulk-trash.spec.ts items.spec.ts --grep 'OUTFIT1\|bounded I11\|select three, move them\|standalone list states' --project chromium --project mobile --project webkit-photo` | 39 passed, including partial/uncertain Undo, owner change during a held batch, repaired garment-group selectors, EN/FI/SV, 320px/200% dialog overflow and bounded captures |
+| `npm run lint` | passed |
+| `npm run check:translations` | passed, 1100 keys in EN/FI/SV |
+| `npm run scan:secrets` | passed locally without the CI canary |
+| `npm run typecheck` | pending only the two real generated RPC signatures; no fabricated types/casts |
+
+The broader fixture run (`npm run test:browser -- outfits.spec.ts
+bulk-trash.spec.ts items.spec.ts tryon.spec.ts calendar.spec.ts --project
+chromium --project mobile --project webkit-photo`, port5194) recorded
+372 passed, 22 skipped and six failures: the two old garment tests in every
+project assumed a single Trash list and level-two garment headings.
+Those selectors were corrected for the new groups/heading hierarchy; all six
+passed in the targeted run above. That is not a full-suite green result at the
+final head. Calendar is selected only by chromium/mobile in the existing
+configuration; no project matches were expanded. Full exact-head CI remains
+pending. Normal-session lifecycle integration and
+security/isolation probes were added but not run locally: this writer has
+no approved backend-stack ownership. No Docker/WSL or hosted smoke ran.
+The initial source CI will generate real types before driftguard; only a
+coordinator-authorized exact-run `database-types` artifact may update the
+tracked types, byte-for-byte. A fresh exact-head CI must then pass.
+
+All six historical I11 captures remain. Four bounded additions are
+`outfit-bulk-confirm-en-desktop.png`, `outfit-trash-en-desktop.png`,
+`outfit-delete-confirm-en-desktop.png` and
+`outfit-phone-trash-fi-mobile.png` under ignored `test-results/i11-visual`.
+The existing CI upload enumerates the six old paths and **does not upload
+these four additions**. The coordinator explicitly chose to review these
+four local ignored captures at the final committed head, alongside CI's
+six preserved scenes, without changing CI. Final-head regeneration and
+actual review remain pending; current pre-commit images are not acceptance.
+The writer stays text-only.
+Independent Opus5.5/high code review, coordinator exact-head visual review,
+normal-owner acceptance and owner-run R5 deployment remain separate gates.
