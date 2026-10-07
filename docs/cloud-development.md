@@ -14,7 +14,7 @@ The [owner decision on #84, comment 6036228105](https://github.com/drrowdev/stil
 controls model selection and session lifecycle. It supersedes older model pins
 and long-lived builder instructions in this guide and the root/Copilot
 instructions. It also supersedes the 1 October reviewer-model note in
-[the release ledger](release-gates.md); the ledger remains unedited as a
+[the release ledger](release-gates.md); its earlier review attributions remain a
 historical record. Historical model names, decisions, reviews and receipts remain
 evidence, not commands for new work. Other scope, authority, tooling, text-only,
 CI and merge gates remain unchanged.
@@ -490,6 +490,59 @@ prove neither ordinary login nor RLS/Storage isolation.
 Coordinator-recorded evidence. Each item cites its source comment; nothing here
 is a fresh observation by a writer.
 
+**Current hosted evidence, 7 October 2026 (R5/D20).** The owner separately
+[approved publication](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6043088015)
+of `e0399184f1351c4c39b990a1c61c1940437d2c79`, then reported success at
+17:24:36 UTC: Pages deployment `8786abdf-d020-45a9-b0d2-8962efc6ecb3`.
+The [D20 readback](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6043247098)
+verifies that exact app version, all 17 referenced entry/catalogue assets,
+EN/FI/SV startup catalogues byte-equal to C, reviewed headers/cache policy
+and both approved model/runtime binaries. R5 batches ADM2 #172, MODEL1 #173,
+OUTFIT1 #174 and test-only regression/diagnostic coverage #175.
+The [clean exact-C engineering receipt](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6042149672)
+records CI 37648354775 and Apple 37648452447, attempt 1 SUCCESS;
+Documentation checks intentionally skipped. Browser accessibility coverage
+is not a physical screen-reader check. The earlier candidate's failures remain
+unexplained, not fixed or waived. Main is unfrozen; docs-only reconciliation
+does not replace the deployed `e0399184` app or need another Pages deployment.
+
+OUTFIT1 was separately
+[owner-approved and installed](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6039023712)
+from merge `eedc4d00`, bringing the hosted ledger to 30:
+
+| Source migration | Hosted version | Evidence |
+|---|---|---|
+| `20261007090000_outfit_lifecycle.sql` | `20261007132943_outfit_lifecycle` | 7 Oct: stored migration and both function bodies match Git; authenticated-only EXECUTE, security definer, empty search path and two-second lock timeout verified. Structural checks only, no private rows or hosted lifecycle RPC smoke. |
+
+The [R5-only approved Edge source-equivalence method](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6039970161)
+used actual GETs of seven deployed packages (49/49 source files match),
+each function's own import closure/map/deno configuration and JWT flag,
+against its recorded F3/F2/F5/F8 baseline. Test-only C preserves the full
+functions/images/domain/config trees from the verified `eedc4d00` candidate.
+Live versions, bundles, JWT and maps were reread before/after publication:
+analyze-clothing 18, finalize-analyzed-item 18, finalize-image-change 18,
+delete-account 15, stylist-chat 16, enhance-photo 19, try-on 8;
+all `verify_jwt=true`. No Edge redeploy occurred.
+This proves source equivalence only, **not unchanged hosted settings**:
+the owner is unsure of that history and it is not independently verified.
+R3/R4's earlier "no Supabase diff" rationale did not meet literal whole-directory
+release-checks step 6; the later R5-specific comparison does not retroactively
+accept them or relax that rule globally.
+
+See [the current ledger](release-gates.md) for D20, M14, F9/F10, R5 and K3.
+Normal-owner OUTFIT1 checks, BULK2 five-photo/large-batch iPhone/laptop feedback,
+BULK1 Undo, O1 signed-in/offline reopen, checklist 2-10 and R2-R4 acceptance
+remain open. The owner reported shared allowance settings of 200 requests/h
+and USD 50/month in the
+[7 October handover](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6036228105);
+these are not independently verified, and cleanup 60/h is unconfirmed.
+Shared allowance settings do not connect the independent accounts or share data.
+Existing activation, privacy/provider and F7/A8 gates are unchanged;
+no authenticated Supabase/private-content request, provider call or activation
+occurred for R5 publication. Parked PR #27 remains deferred; HEIC work remains
+declined. The dated rollout observations below are retained as history, not
+current status or full Phase 0/product acceptance.
+
 **First hosted rollout, 23 September 2026.** Owner approvals:
 [PR #32 `5794990408`](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5794990408)
 accepted possible loss of hosted test garments, photos and Save attempts, and a
@@ -575,7 +628,8 @@ Owner review was pending in both receipts.
   ([PR #34 `5808561122`](https://github.com/drrowdev/stillroom-wardrobe/pull/34#issuecomment-5808561122)).
 - `27a1c642` of main `3ed08147` (UX L1b and L2a), 24 September
   ([PR #36 `5813432944`](https://github.com/drrowdev/stillroom-wardrobe/pull/36#issuecomment-5813432944)).
-  This is the latest cited Pages deployment.
+  This was the latest cited Pages deployment in that 24 September snapshot;
+  current publication evidence is R5/D20 above.
 
 **I16 weather CSP (source only, not deployed).** The I16
 draft PR adds `https://geocoding-api.open-meteo.com` and
@@ -1012,7 +1066,7 @@ that button and by the emergency worker.
 - Owner question Q1: accept the remaining create-ID residual (see the Phase 5
   result, Findings).
 
-**Scope.** Recorded as live by these comments: add/edit/Save/photo replacement,
+**Scope at 24 September 2026.** Recorded as live by these comments: add/edit/Save/photo replacement,
 AI-filled details for the owner's account only, and the simplified UI (L1a, L1b,
 L2a). Not built: outfits, suggestions and weather (Phases 3–5). The owner moved
 the calendar (I12/I13: date planning, marking worn, wear counts and
@@ -1021,7 +1075,12 @@ cost-per-wear) to the backlog at about 12:12Z on 24 September 2026
 must not depend on wear history for now. This is not the owner's full core
 workflow and not Phase 0 or product acceptance.
 
-| Gate | Current evidence / next step | Responsible actor |
+The following actor table retains the **24 September snapshot**, including
+then-unbuilt features and pending rollout steps. It is not the current hosted
+inventory; use the dated R5 update above and the release ledger for later evidence.
+Its ordinary-session, human-acceptance and actor boundaries still apply.
+
+| Gate | Dated evidence / next step (24 September snapshot) | Responsible actor |
 |---|---|---|
 | Backend installation | The eleven Phase 0–2 source migrations are installed (23 September mapping above, including the manual M11 row). The two COL1 migrations were recorded as applied at R1 on 24 September (`5815899879`); see COL1. Future hosted DDL needs separate approval. | Coordinator/operator; cloud source worker must not access it |
 | Hosted Auth | User-confirmed dashboard settings in the dated snapshot above; one owner's ordinary sign-in passed in the 23 September smoke test. Email delivery remains unproved. No arbitrary preview/wildcard redirect or inference from local TOML/SQL. | User dashboard confirmation; coordinator/operator tracks remaining gates |
