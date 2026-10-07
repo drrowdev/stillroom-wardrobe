@@ -225,7 +225,7 @@ install-script approval was performed.
 | `npm run lint` | passed |
 | `npm run check:translations` | passed, 1100 keys in EN/FI/SV |
 | `npm run scan:secrets` | passed locally without the CI canary |
-| `npm run typecheck` | pending only the two real generated RPC signatures; no fabricated types/casts |
+| `npm run typecheck` | passed after the authorized genuine generated-type import; no fabricated types/casts |
 
 The broader fixture run (`npm run test:browser -- outfits.spec.ts
 bulk-trash.spec.ts items.spec.ts tryon.spec.ts calendar.spec.ts --project
@@ -239,9 +239,22 @@ configuration; no project matches were expanded. Full exact-head CI remains
 pending. Normal-session lifecycle integration and
 security/isolation probes were added but not run locally: this writer has
 no approved backend-stack ownership. No Docker/WSL or hosted smoke ran.
-The initial source CI will generate real types before driftguard; only a
-coordinator-authorized exact-run `database-types` artifact may update the
-tracked types, byte-for-byte. A fresh exact-head CI must then pass.
+The initial source [CI run 37617032688](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/37617032688),
+head `081eed7a46f1ad71b909811bdea5f2968f8d0657`, passed preservation,
+integration and security before the generated-type guard. Its static checks
+failed on the two missing RPC names; the type guard failed solely on the
+genuine generated additions. All three Chromium/mobile shards and WebKit2/2
+passed. WebKit1/2 reported a new nonallowlisted retry in unchanged
+`enhancement.spec.ts:324`: `crop-review-hint` was absent while preparing an
+accepted changed crop. The retry passed, but the gate correctly failed;
+this result is not waived and no Actions rerun/allowlist change was performed.
+
+The coordinator authorized `database-types` artifact11480883218 from that
+exact run/head and supplied its extracted text file. The writer mechanically
+copied it byte-for-byte and verified byte equality: only
+`delete_trashed_outfit` and `set_outfit_trashed` were added.
+Typecheck, lint, translations and the 694 affected unit tests passed afterward.
+A fresh exact-head CI must pass all required gates.
 
 All six historical I11 captures remain. Four bounded additions are
 `outfit-bulk-confirm-en-desktop.png`, `outfit-trash-en-desktop.png`,
