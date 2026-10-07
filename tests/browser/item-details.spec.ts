@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
+import { expect, test, type Page, type Request, type Response, type Route, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { createHash } from 'node:crypto';
 import { mkdir, open, readdir, lstat } from 'node:fs/promises';
@@ -7,6 +7,145 @@ import { messages, type Language } from '../../src/i18n/all';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { closeAccountMenu, expectIdentity, openAccountMenu } from './shell-support';
+
+type EditorDiagnosticStage = 'signed-in' | 'editor-ready' | 'invalid-inputs' | 'saved'
+  | 'before-reload' | 'reloaded' | 'reopened' | 'finished';
+type EditorDiagnosticTime = { elapsedMs: number; remainingBudgetEstimateMs: number };
+type EditorDiagnosticEvent = EditorDiagnosticTime & {
+  endpoint: 'collection-items' | 'detail-items' | 'item-images' | 'profile' | 'auth-user' | 'auth-token'
+    | 'other-fixture' | 'app-entry' | 'editor-module';
+  method: 'GET' | 'POST' | 'OPTIONS' | 'other';
+  lifecycle: 'requested' | 'responded' | 'finished' | 'failed';
+  status: 'none' | 'success' | 'client-error' | 'server-error' | 'other';
+};
+type EditorDiagnosticSnapshot = EditorDiagnosticTime & {
+  stage: EditorDiagnosticStage; route?: 'wardrobe' | 'detail' | 'other';
+  heading?: boolean; loading?: boolean; empty?: boolean; itemLink?: boolean;
+  detailLoading?: boolean; lazyLoading?: boolean; loadError?: boolean; edit?: boolean; input?: boolean;
+  login?: boolean; locked?: boolean; waiting?: boolean; captureError?: boolean; pageClosed?: boolean; sampleCompletedElapsedMs?: number;
+  sampleState: 'pending' | 'complete' | 'failed' | 'timed-out';
+};
+const editorDiagnostics = new WeakMap<Page, ReturnType<typeof editorDiagnostic>>();
+test.beforeEach(({ page }, info) => {
+  if (!/^saved editor (en|fi|sv): Unicode limits/.test(info.title)) return;
+  editorDiagnostics.set(page, editorDiagnostic(page, info));
+});
+function editorDiagnostic(page: Page, info: TestInfo, sample?: () => Promise<{ heading: boolean }>) {
+  const events: EditorDiagnosticEvent[] = [], snapshots: EditorDiagnosticSnapshot[] = [], pending: Promise<void>[] = [];
+  const started = performance.now(), app = new URL(info.project.use.baseURL!).origin;
+  let truncated = 0, finalized = false;
+  // This clock starts after Playwright's page fixture, not at the test's actual deadline.
+  const timing = (): EditorDiagnosticTime => {
+    const elapsedMs = Math.round(performance.now() - started);
+    return { elapsedMs, remainingBudgetEstimateMs: Math.max(0, info.timeout - elapsedMs) };
+  };
+  const requestEvent = (request: Request, lifecycle: EditorDiagnosticEvent['lifecycle'], status = 0) => {
+    const url = new URL(request.url());
+    const endpoint = url.origin === app
+      ? url.pathname === '/src/main.tsx' || request.isNavigationRequest() ? 'app-entry'
+        : url.pathname === '/src/features/wardrobe/item-editor.tsx' ? 'editor-module' : null
+      : url.origin !== 'http://127.0.0.1:54321' ? null
+        : url.pathname === '/rest/v1/items' ? url.searchParams.has('id') ? 'detail-items' : 'collection-items'
+          : url.pathname === '/rest/v1/item_images' ? 'item-images'
+            : url.pathname === '/rest/v1/profiles' ? 'profile'
+              : url.pathname === '/auth/v1/user' ? 'auth-user'
+                : url.pathname === '/auth/v1/token' ? 'auth-token' : 'other-fixture';
+    if (!endpoint) return;
+    const method = request.method();
+    if (events.length === 40) { events.shift(); truncated++; }
+    events.push({ ...timing(), endpoint, method: method === 'GET' || method === 'POST' || method === 'OPTIONS' ? method : 'other', lifecycle,
+      status: status === 0 ? 'none' : status >= 200 && status < 300 ? 'success'
+        : status >= 400 && status < 500 ? 'client-error' : status >= 500 && status < 600 ? 'server-error' : 'other' });
+  };
+  const requested = (request: Request) => requestEvent(request, 'requested');
+  const responded = (response: Response) => requestEvent(response.request(), 'responded', response.status());
+  const finished = (request: Request) => requestEvent(request, 'finished');
+  const failed = (request: Request) => requestEvent(request, 'failed');
+  page.on('request', requested); page.on('response', responded);
+  page.on('requestfinished', finished); page.on('requestfailed', failed);
+  return {
+    capture(stage: EditorDiagnosticStage) {
+      if (finalized) return;
+      if (snapshots.length === 10) { truncated++; return; }
+      const snapshot: EditorDiagnosticSnapshot = { ...timing(), stage, sampleState: 'pending' };
+      snapshots.push(snapshot);
+      pending.push((sample ? sample() : page.evaluate(() => {
+        const visible = (selector: string) => Array.from(document.querySelectorAll(selector))
+          .some(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible');
+        return {
+          route: location.hash.startsWith('#/items/') ? 'detail' as const
+            : location.hash === '' || location.hash === '#/' ? 'wardrobe' as const : 'other' as const,
+          heading: visible('#wardrobe-title'), loading: visible('.item-grid[aria-busy=true]'), empty: visible('.empty-wardrobe'),
+          itemLink: visible('.item-detail-link'), detailLoading: visible('.detail-page > p[role=status]'),
+          lazyLoading: visible('.chunk-loading'), loadError: visible('.notice-error,.chunk-error'),
+          edit: visible('#detail-edit'), input: visible('#detail-title'), login: visible('#email'),
+          locked: visible('.entry-card > .stack'), waiting: visible('#waiting-title'),
+        };
+      })).then(state => {
+        if (!finalized) Object.assign(snapshot, state, { sampleState: 'complete', sampleCompletedElapsedMs: timing().elapsedMs });
+      }, () => {
+        if (finalized) return;
+        snapshot.sampleState = 'failed'; snapshot.captureError = true;
+        snapshot.pageClosed = page.isClosed(); snapshot.sampleCompletedElapsedMs = timing().elapsedMs;
+      }));
+    },
+    async finish() {
+      page.off('request', requested); page.off('response', responded);
+      page.off('requestfinished', finished); page.off('requestfailed', failed);
+      const finalize = () => {
+        finalized = true;
+        const unsettledSamples = snapshots.filter(snapshot => snapshot.sampleState === 'pending').length;
+        for (const snapshot of snapshots) if (snapshot.sampleState === 'pending') snapshot.sampleState = 'timed-out';
+        const unsuccessful = info.status !== 'passed' && info.status !== 'skipped';
+        return {
+          budgetOrigin: 'diagnostic-start-estimate', ...timing(), truncated,
+          retainedNetworkEvents: events.length, retainedSnapshots: snapshots.length,
+          unavailableSnapshots: snapshots.filter(snapshot => snapshot.captureError).length,
+          sampleTimedOut: unsettledSamples > 0, unsettledSamples,
+          ...(unsuccessful || unsettledSamples > 0 ? { events: events.map(event => ({ ...event })), snapshots: snapshots.map(snapshot => ({ ...snapshot })) } : {}),
+        };
+      };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let report: ReturnType<typeof finalize>;
+      try {
+        await Promise.race([
+          Promise.all(pending),
+          new Promise<void>(resolve => { timer = setTimeout(resolve, 2000); }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+        report = finalize();
+        console.log('Saved editor reload diagnostic', JSON.stringify(report));
+      }
+      return report;
+    },
+  };
+}
+test.afterEach(async ({ page }) => {
+  const diagnostic = editorDiagnostics.get(page);
+  if (!diagnostic) return;
+  diagnostic.capture('finished');
+  try { await diagnostic.finish(); } finally { editorDiagnostics.delete(page); }
+});
+test('diagnostic collector: editor teardown bounds stalled samples and seals late results', async ({ page }, info) => {
+  let resolveSample!: (state: { heading: boolean }) => void;
+  const stalled = editorDiagnostic(page, info, () => new Promise(resolve => { resolveSample = resolve; }));
+  stalled.capture('finished');
+  const report = await stalled.finish();
+  expect(report).toMatchObject({ sampleTimedOut: true, unsettledSamples: 1, retainedSnapshots: 1, unavailableSnapshots: 0 });
+  expect(report.snapshots?.[0]).toMatchObject({ sampleState: 'timed-out' });
+  expect(report.snapshots?.[0]).not.toHaveProperty('heading');
+  const sealed = JSON.stringify(report);
+  resolveSample({ heading: true });
+  await Promise.resolve();
+  expect(JSON.stringify(report)).toBe(sealed);
+  const ready = editorDiagnostic(page, info, () => Promise.resolve({ heading: true }));
+  ready.capture('finished');
+  expect(await ready.finish()).toMatchObject({ sampleTimedOut: false, unsettledSamples: 0, unavailableSnapshots: 0, retainedSnapshots: 1 });
+  const rejected = editorDiagnostic(page, info, () => Promise.reject(new Error('Synthetic diagnostic sample failure.')));
+  rejected.capture('finished');
+  expect(await rejected.finish()).toMatchObject({ sampleTimedOut: false, unsettledSamples: 0, unavailableSnapshots: 1 });
+});
 
 async function imageChangeSetup(page: Page, language: Language = 'en', loss?: 'reservation' | 'finalizer') {
   const api = await aiFixture(page, language, true, undefined, false, loss);
@@ -452,8 +591,10 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     const { item, image } = api.seedSavedItem('a', '🌿'.repeat(100));
     image.alt_text = '🌿'.repeat(240);
     await page.goto('/'); await signIn(page);
+    editorDiagnostics.get(page)?.capture('signed-in');
     await page.locator(`a[href="#/items/${item.id}"]`).click();
     await openMore(page);
+    editorDiagnostics.get(page)?.capture('editor-ready');
     const title = page.locator('#detail-title'), description = page.locator('#detail-description');
     const titleError = page.locator('#detail-title-error'), descriptionError = page.locator('#detail-description-error');
     const calls = writes(page);
@@ -479,6 +620,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await save(page, language).click();
     await expect(title).toBeFocused();
     expect(calls).toHaveLength(0);
+    editorDiagnostics.get(page)?.capture('invalid-inputs');
 
     await title.fill('');
     await page.keyboard.insertText('🍂'.repeat(100));
@@ -500,6 +642,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(item.title).toBe('🍂'.repeat(100));
     expect(image.alt_text).toBe('🍂'.repeat(240));
     expect(calls).toHaveLength(2);
+    editorDiagnostics.get(page)?.capture('saved');
     await editItem(page);
     await expect(save(page, language)).toBeDisabled();
 
@@ -511,14 +654,91 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(calls).toHaveLength(2);
     await title.fill('🍂'.repeat(100));
     await expect(save(page, language)).toBeDisabled();
+    editorDiagnostics.get(page)?.capture('before-reload');
     await page.reload();
+    editorDiagnostics.get(page)?.capture('reloaded');
     await openMore(page);
+    editorDiagnostics.get(page)?.capture('reopened');
     await expect(title).toHaveValue('🍂'.repeat(100));
     await expect(description).toHaveValue('🍂'.repeat(240));
     await expect(save(page, language)).toBeDisabled();
     await page.getByRole('button', { name: messages['common.back'][language], exact: true }).click();
     await expect(page.locator('.item-card h2')).toHaveText('🍂'.repeat(100));
     expect(calls).toHaveLength(2);
+  });
+}
+
+async function holdRequests(page: Page, pattern: string, matches: (request: Request) => boolean) {
+  const held: Route[] = [];
+  let released = false;
+  const handler = async (route: Route) => {
+    if (!released && matches(route.request())) { held.push(route); return; }
+    await route.fallback();
+  };
+  await page.route(pattern, handler);
+  const release = async () => {
+    released = true;
+    while (held.length) await held.shift()!.fallback();
+  };
+  return {
+    observed: () => held.length > 0,
+    release,
+    async close() {
+      try { await release(); } finally { await page.unroute(pattern, handler); }
+    },
+  };
+}
+test('reload readiness: held collection keeps loading distinct from a usable item card', async ({ page }) => {
+  const api = await mockBackend(page);
+  const { item } = api.seedSavedItem();
+  const gate = await holdRequests(page, itemUrl, request => {
+    const url = new URL(request.url());
+    return request.method() === 'GET' && !url.searchParams.has('id') && url.searchParams.get('owner_id') === `eq.${owners.a}`;
+  });
+  try {
+    await page.goto('/'); await signIn(page);
+    await expect.poll(gate.observed).toBe(true);
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    await expect(page.locator('.item-grid[aria-busy=true]')).toBeVisible();
+    await expect(page.locator('.item-detail-link')).toHaveCount(0);
+    await expect(page.locator('.empty-wardrobe,.notice-error')).toHaveCount(0);
+    await gate.release();
+    await page.locator(`a[href="#/items/${item.id}"]`).click();
+    await openMore(page);
+    await expect(page.locator('#detail-title')).toHaveValue(item.title);
+  } finally { await gate.close(); }
+});
+for (const boundary of ['detail data', 'editor module'] as const) {
+  test(`reload readiness: held ${boundary} preserves a confirmed Unicode save without more writes`, async ({ page }) => {
+    const { item } = await setup(page);
+    const calls = writes(page);
+    const title = '🍂'.repeat(100), description = '🍂'.repeat(240);
+    await page.locator('#detail-title').fill(title);
+    await page.locator('#detail-description').fill(description);
+    await save(page).click();
+    await expect(page.getByText(messages['detail.saved'].en, { exact: true })).toBeVisible();
+    expect(calls).toHaveLength(2);
+    const gate = await holdRequests(page, boundary === 'detail data' ? itemUrl : '**/src/features/wardrobe/item-editor.tsx*', request => {
+      const url = new URL(request.url());
+      return request.method() === 'GET' && (boundary === 'editor module'
+        || url.searchParams.get('id') === `eq.${item.id}` && url.searchParams.get('owner_id') === `eq.${owners.a}`);
+    });
+    try {
+      await page.reload();
+      await expect.poll(gate.observed).toBe(true);
+      await expect(page.locator(boundary === 'detail data' ? '.detail-page > p[role=status]' : '.detail-page .chunk-loading')).toBeVisible();
+      await expect(page.locator('#detail-edit,#detail-title')).toHaveCount(0);
+      await expect(page.locator('#email,.empty-wardrobe,.notice-error,.chunk-error')).toHaveCount(0);
+      expect(calls).toHaveLength(2);
+      await gate.release();
+      await openMore(page);
+      await expect(page.locator('#detail-title')).toHaveValue(title);
+      await expect(page.locator('#detail-description')).toHaveValue(description);
+      await expect(save(page)).toBeDisabled();
+      await page.getByRole('button', { name: messages['common.back'].en, exact: true }).click();
+      await expect(page.locator('.item-card h2')).toHaveText(title);
+      expect(calls).toHaveLength(2);
+    } finally { await gate.close(); }
   });
 }
 test('saved editor keeps required validation, literal XSS text and no implicit writes', async ({ page }) => {
