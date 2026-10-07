@@ -3,7 +3,7 @@ import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import { errorKey, isAborted } from '../../data/errors';
 import { loadWardrobe } from '../../data/items';
-import { loadComponents, loadOutfit, loadOutfits } from '../../data/outfits';
+import { loadComponents, loadOutfit, loadOutfits, loadTrashedOutfits } from '../../data/outfits';
 import type { MessageKey } from '../../i18n';
 import type { OutfitComponent, OutfitRecord } from '../../domain/outfits';
 import type { WardrobeItem } from '../../domain/wardrobe';
@@ -38,6 +38,10 @@ function useLoaded<T>(load: (signal: AbortSignal) => Promise<T>, online: boolean
 }
 
 export type OutfitList = { outfits: OutfitRecord[]; components: Map<string, OutfitComponent>; hasClothes: boolean };
+export function useOutfitTrash(client: AppClient, scope: OwnerScope, online: boolean, invalidation: number) {
+  const load = useCallback((signal: AbortSignal) => loadTrashedOutfits(client, scope, signal), [client, scope]);
+  return useLoaded(load, online, invalidation);
+}
 export function useOutfitList(client: AppClient, scope: OwnerScope, online: boolean, invalidation: number) {
   const load = useCallback(async (signal: AbortSignal): Promise<OutfitList> => {
     const [outfits, wardrobe] = await Promise.all([loadOutfits(client, scope, signal), loadWardrobe(client, scope, signal)]);
@@ -52,13 +56,15 @@ export function useOutfit(client: AppClient, scope: OwnerScope, id: string | nul
   const missingReload = useRef(false);
   const load = useCallback(async (signal: AbortSignal): Promise<OutfitView> => {
     const record = id ? await loadOutfit(client, scope, id, signal) : null;
-    if (!record || record.deletedAt !== null) return { record: null, components: new Map() };
+    if (!record) return { record: null, components: new Map() };
+    if (record.deletedAt !== null) return { record, components: new Map() };
     const components = await loadComponents(client, scope, record.links.map(link => link.itemId), signal);
     // A link whose item cannot be read is reloaded once; a completed deletion then shows as a gap.
     if (missingReload.current || ![...components.values()].some(component => component.state === 'missing')) return { record, components };
     missingReload.current = true;
     const again = await loadOutfit(client, scope, record.id, signal);
-    if (!again || again.deletedAt !== null) return { record: null, components: new Map() };
+    if (!again) return { record: null, components: new Map() };
+    if (again.deletedAt !== null) return { record: again, components: new Map() };
     return { record: again, components: await loadComponents(client, scope, again.links.map(link => link.itemId), signal) };
   }, [client, scope, id]);
   return useLoaded(load, online, invalidation);

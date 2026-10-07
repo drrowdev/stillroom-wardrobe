@@ -76,7 +76,7 @@ test('select three, move them to Trash in one go, then Undo restores all three',
   await notice(page).getByRole('link', { name: messages['nav.trash'].en, exact: true }).click();
   await expect(page.locator('#trash-title')).toBeVisible();
   await expect(page.locator('.trash-list li')).toHaveCount(3);
-  await expect(page.locator('.trash-list')).not.toContainText('Robin private');
+  await expect(page.locator('.trash-page > .trash-list')).not.toContainText('Robin private');
 });
 
 test('a version conflict fails only that item: it stays selected and the others stay in Trash', async ({ page }) => {

@@ -82,7 +82,7 @@ function policyOf(snapshot: Snapshot, tableName: string, name: string): Policy {
 describe('I17 isolation catalogue validator', () => {
   it('accepts the reviewed inventory and separates its families', () => {
     expect(catalog.validateCatalog(validSnapshot(), helperMd5)).toEqual([]);
-    expect(catalog.EXPOSED_RPCS).toHaveLength(67);
+    expect(catalog.EXPOSED_RPCS).toHaveLength(69);
     expect(catalog.SERVICE_ONLY_RPCS).toHaveLength(27);
     expect(catalog.PRIVATE_TABLES).toHaveLength(38);
     expect(Object.keys(catalog.PUBLIC_TABLES)).toHaveLength(10);

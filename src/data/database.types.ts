@@ -722,6 +722,10 @@ export type Database = {
         Args: { p_intent: Json; p_objects: Json; p_owner_id: string }
         Returns: undefined
       }
+      delete_trashed_outfit: {
+        Args: { p_expected_version: number; p_id: string }
+        Returns: Json
+      }
       deletion_control: {
         Args: {
           p_action: string
@@ -973,6 +977,10 @@ export type Database = {
           owner_id: string
           version: number
         }[]
+      }
+      set_outfit_trashed: {
+        Args: { p_expected_version: number; p_id: string; p_trashed: boolean }
+        Returns: Json
       }
       stylist_claim: {
         Args: {

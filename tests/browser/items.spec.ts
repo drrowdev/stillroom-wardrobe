@@ -339,7 +339,7 @@ test('standalone list states and initially offline Trash preserve pages across r
   await context.setOffline(false);
   await expect(page.locator('.trash-list li')).toHaveCount(40);
   await button(page, 'wardrobe.more').click(); await expect(page.locator('.trash-list li')).toHaveCount(41);
-  const displayed = await page.locator('.trash-list h2').allTextContents();
+  const displayed = await page.locator('.trash-page > .trash-list h3').allTextContents();
   expect([...displayed].sort()).toEqual(Array.from({ length: 41 }, (_, n) => `Fictional trash ${n}`).sort());
   const reads = api.requests.filter(request => request.path.endsWith('/item_deletion_status')).length;
   await context.setOffline(true);
@@ -347,7 +347,7 @@ test('standalone list states and initially offline Trash preserve pages across r
   await context.setOffline(false);
   await expect(button(page, 'common.refresh')).toBeEnabled();
   await page.waitForTimeout(250);
-  await expect(page.locator('.trash-list h2')).toHaveText(displayed);
+  await expect(page.locator('.trash-page > .trash-list h3')).toHaveText(displayed);
   expect(api.requests.filter(request => request.path.endsWith('/item_deletion_status'))).toHaveLength(reads);
   await button(page, 'common.refresh').click();
   await expect(page.locator('.trash-list li')).toHaveCount(40);
@@ -356,7 +356,7 @@ test('standalone list states and initially offline Trash preserve pages across r
   await openAccountMenu(page, 'en'); await button(page, 'auth.signOut').click();
   await signIn(page, 'b');
   await expect(page.locator('#trash-title')).toBeVisible();
-  await expect(page.locator('.trash-list h2')).toHaveText(['Robin trash']);
+  await expect(page.locator('.trash-page > .trash-list h3')).toHaveText(['Robin trash']);
   expect(api.requests.some(request => request.path.endsWith('/begin_item_deletion') || request.method === 'DELETE')).toBe(false);
 });
 test('bounded synthetic Trash and named-delete captures with functional/a11y assertions in every project', async ({ page }, info) => {

@@ -198,6 +198,21 @@ async function buildFixture(owner) {
   await client.rpc(owner, 'save_outfit', { p_id: f.outfit, p_title: `Isolation outfit ${L}`, p_occasion: 'everyday',
     p_notes: '', p_favourite: false, p_item_ids: [f.item, f.plain], p_expected_version: null });
   control(owner, 'save_outfit', true);
+  const scratchOutfit = randomUUID();
+  await client.rpc(owner, 'save_outfit', { p_id: scratchOutfit, p_title: `Isolation lifecycle ${L}`, p_occasion: 'everyday',
+    p_notes: '', p_favourite: false, p_item_ids: [f.plain], p_expected_version: null });
+  cleanups.push(async () => fatal((await client.request(owner.token,
+    `/rest/v1/outfits?owner_id=eq.${owner.uid}&id=eq.${scratchOutfit}`, { method: 'DELETE' })).ok, 'cleanup-lifecycle'));
+  for (const [version, trashed] of [[1, true], [2, false], [3, true]]) {
+    const row = await client.rpc(owner, 'set_outfit_trashed',
+      { p_id: scratchOutfit, p_expected_version: version, p_trashed: trashed });
+    fatal(row.id === scratchOutfit && row.owner_id === owner.uid && row.version === version + 1
+      && (trashed ? typeof row.deleted_at === 'string' : row.deleted_at === null), `fixture-${L}-outfit-lifecycle`);
+  }
+  control(owner, 'set_outfit_trashed', true);
+  const deletedOutfit = await client.rpc(owner, 'delete_trashed_outfit', { p_id: scratchOutfit, p_expected_version: 4 });
+  control(owner, 'delete_trashed_outfit', deletedOutfit.id === scratchOutfit && deletedOutfit.owner_id === owner.uid
+    && deletedOutfit.version === 4 && deletedOutfit.deleted === true);
   await client.rpc(owner, 'save_wear_event', { p_id: f.event, p_local_date: '2026-01-01', p_timezone: 'Europe/Helsinki',
     p_state: 'worn', p_label: `Isolation look ${L}`, p_outfit_id: f.outfit, p_item_ids: [f.item], p_expected_version: null });
   control(owner, 'save_wear_event', true);
@@ -521,6 +536,9 @@ function foreignCases(a) {
       p_item_id: k === 'item' ? x.item : null, p_title: 'Forbidden', p_category: 'top', p_import_id: n2 }), NA),
     one('save_outfit', ['item', 'outfit'], outfit, (k) => (k === 'outfit' ? CONFLICT_PLAIN : SELECTION),
       { mixed: (x) => ({ ...outfit(a, 'item'), p_item_ids: [a.item, x.item] }), mixedKey: 'item', mixedExpected: SELECTION }),
+    one('set_outfit_trashed', ['outfit'], (x) => ({ p_id: x.outfit, p_expected_version: 1, p_trashed: true }), CONFLICT,
+      { also: (x) => ({ p_id: x.outfit, p_expected_version: 1, p_trashed: false }) }),
+    one('delete_trashed_outfit', ['outfit'], (x) => ({ p_id: x.outfit, p_expected_version: 1 }), CONFLICT),
     one('save_wear_event', ['item', 'event', 'outfit'], wear,
       (k) => (k === 'event' ? CONFLICT_PLAIN : k === 'outfit' ? { status: 409, code: '23503' } : SELECTION),
       { mixed: wearMixed, mixedKey: 'item', mixedExpected: SELECTION }),
@@ -1173,6 +1191,9 @@ async function freezeCase(frozen, other) {
     need(matchOutcome({ status: 403, code: '42501' }, insert), `${stage}: frozen insert ${describe(insert)}`);
     for (const [name, body, expected] of [
       ['export_manifest', { p_export_id: randomUUID() }, NULL],
+      ['set_outfit_trashed', { p_id: f.outfit, p_expected_version: 1, p_trashed: true }, NA],
+      ['set_outfit_trashed', { p_id: f.outfit, p_expected_version: 1, p_trashed: false }, NA],
+      ['delete_trashed_outfit', { p_id: f.outfit, p_expected_version: 1 }, NA],
       ['item_deletion_status', { p_item_ids: [f.item] }, { status: 403, code: '42501' }],
       ['image_change_status', { p_item_id: f.changeItem, p_request_id: f.changeRequest }, { status: 403, code: '42501' }],
       ['restore_item_attribution', { p_item_id: f.item, p_import_id: randomUUID(), p_entries: tagEntries(null) }, { status: 403, code: '42501' }],

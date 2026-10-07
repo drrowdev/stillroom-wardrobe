@@ -193,6 +193,8 @@ REST below means `/rest/v1/…` with the publishable key and user bearer token. 
 | Image upload | SDK Storage `.upload(path,blob,{contentType:'image/jpeg',upsert:false,cacheControl:'0'})` | 409 existing object → authenticated download and compare SHA-256; equal means success, unequal means conflict. |
 | Commit/retire/forget image | RPC `commit_image(p_image_id)` / `retire_image(p_image_id)` / `forget_image(p_image_id)` → void | Incomplete upload → keep old ready version; retiring an imported version leaves the active photo unchanged; existing object bytes block forgetting. |
 | Outfit save | RPC `save_outfit(p_id,p_title,p_occasion,p_notes,p_favourite,p_item_ids,p_expected_version)` → version | Atomic parent + ordered links; same create payload/ID is idempotent; stale version fails. |
+| Outfit Trash/Restore (OUTFIT1) | RPC `set_outfit_trashed(p_id uuid,p_expected_version bigint,p_trashed boolean)` -> JSON `id,owner_id,version,deleted_at` | Enabled owner, expected version and lifecycle checked under shared admission/profile/AI-controls/outfit locks. Trash uses server time; Restore is inclusive `[now-7 days,now]`. Payload/ordered links/history stay. |
+| Permanent outfit removal (OUTFIT1) | RPC `delete_trashed_outfit(p_id uuid,p_expected_version bigint)` -> JSON `id,owner_id,version,deleted:true` | Trashed owner row only. Unexpired running try-on is refused. Deletes outfit links/private try-on chains/attempts/JPEG results through existing FKs; garments/photos and wear snapshots stay. Wear source FK becomes null, bumping its technical version/time. |
 | Calendar save | RPC `save_wear_event(p_id,p_local_date,p_timezone,p_state,p_label,p_outfit_id,p_item_ids,p_expected_version)` → version | Atomic event/links; preserves unchanged history snapshots. Future worn date fails. |
 | Calendar date/state only | Version-checked PATCH of the event | Retains historical null-link items. Delete/trash and undo operate on the owner event. |
 | Statistics | SELECT owner events/links/items; reduce in browser using rules in `06` | Empty is valid. Never request an administrator aggregate. |
@@ -205,6 +207,24 @@ REST below means `/rest/v1/…` with the publishable key and user bearer token. 
 | Save/edit description | RPC `update_image_description(p_image_id,p_expected_description_version,p_alt_text)` → one typed row with `id,owner_id,item_id,alt_text,description_version`; new-image Save stores edited text at reservation | Expected-counter write changes text/counter only; intentional `''` clears. No image re-upload, path/hash/byte mutation or unrestricted image UPDATE. |
 
 `deletion_control(p_owner_id,p_action,p_code)` is server-only, never granted to normal/anonymous users. The deletion endpoint derives the verified owner. The separate analysis endpoint is callable by an approved user with consent/budget, not anonymously or with only a publishable key; its provider credentials and private receipt operations remain server-only.
+
+OUTFIT1 is an app consistency contract, not a new RLS boundary: existing
+ordinary owner UPDATE/DELETE grants remain unchanged. App lifecycle writes
+use only these RPCs, with SDK write retries disabled. Unknown/malformed
+replies trigger an owner-scoped read, never an automatic resend. Exact
+version/state/payload reconciliation confirms soft changes; only owned
+absence confirms an uncertain permanent deletion. Undo uses confirmed
+returned versions for eight seconds and stays in the current owner/epoch's
+memory. Seven-day Restore remains available after reload. Expected versions
+must be integers `1..2^53-1`; soft changes at the maximum are refused rather
+than returning an unsafe increment. `22023` distinguishes conflict,
+`Recovery expired` and `Try-on running`; admission refusal is `42501`.
+
+Export behavior is unchanged: raw `export_manifest` is owner-scoped, while
+the saved-only projection excludes trashed outfits/their outfit links and
+sets their exported wear-event source IDs to null. Historical labels,
+dates and garment snapshots remain. Restore/export never invokes inference.
+No source migration authorizes hosted installation or deployment.
 
 ### I29b saved-description source contract
 

@@ -199,6 +199,79 @@ async function ownerCases(client, owner, h) {
   await remove(gapItems[0].id); await remove(gapItems[2].id);
   gapState = await h.read(gap.p_id);
   eq(gapState.parent.length, 1); eq(gapState.parent[0].version, 1); eq(gapState.links, []);
+
+  // OUTFIT1 normal-owner lifecycle: only the outfit changes, until permanent deletion nulls its history source.
+  const lifecycle = await h.create([third.id, first.id], { p_title: 'Lifecycle', p_notes: 'Kept', p_favourite: true });
+  const lifecycleCall = (name, version, extra = {}, token = owner.token) => client.request(token, `/rest/v1/rpc/${name}`,
+    { method: 'POST', body: { p_id: lifecycle.p_id, p_expected_version: version, ...extra } });
+  const lifecycleBefore = await h.read(lifecycle.p_id);
+  const garments = await client.request(owner.token, `/rest/v1/items?owner_id=eq.${owner.uid}&select=*&order=id`);
+  requireEvidence(garments.ok);
+  const lifecycleEvent = randomUUID(); h.events.push(lifecycleEvent);
+  const recorded = await client.request(owner.token, '/rest/v1/rpc/save_wear_event', { method: 'POST', body: {
+    p_id: lifecycleEvent, p_local_date: '2026-01-01', p_timezone: 'Europe/Helsinki', p_state: 'worn', p_label: 'Kept history',
+    p_outfit_id: lifecycle.p_id, p_item_ids: [third.id, first.id], p_expected_version: null } });
+  requireEvidence(recorded.ok);
+  const history = async () => {
+    const eventRead = await client.request(owner.token, `/rest/v1/wear_events?id=eq.${lifecycleEvent}&select=*`);
+    const snapshots = await client.request(owner.token, `/rest/v1/wear_event_items?event_id=eq.${lifecycleEvent}&select=*&order=item_id`);
+    requireEvidence(eventRead.ok && snapshots.ok && eventRead.data.length === 1 && snapshots.data.length === 2);
+    return { event: eventRead.data[0], snapshots: snapshots.data };
+  };
+  const originalHistory = await history();
+  const lifecycleRejected = (reply, message) => {
+    requireEvidence(!reply.ok && reply.status === 400 && reply.data?.code === '22023'); eq(reply.data.message, message);
+  };
+  lifecycleRejected(await lifecycleCall('delete_trashed_outfit', 1), 'Request conflict');
+  for (const version of [null, 0, -1, 9007199254740992])
+    lifecycleRejected(await lifecycleCall('set_outfit_trashed', version, { p_trashed: true }), 'Invalid input');
+  const trashedOutfit = await lifecycleCall('set_outfit_trashed', 1, { p_trashed: true });
+  requireEvidence(trashedOutfit.ok);
+  eq(Object.keys(trashedOutfit.data).sort(), ['deleted_at', 'id', 'owner_id', 'version']);
+  eq(trashedOutfit.data.id, lifecycle.p_id); eq(trashedOutfit.data.owner_id, owner.uid); eq(trashedOutfit.data.version, 2);
+  requireEvidence(Number.isFinite(Date.parse(trashedOutfit.data.deleted_at)));
+  const lifecycleTrashed = await h.read(lifecycle.p_id);
+  eq(lifecycleTrashed.links, lifecycleBefore.links);
+  eq(await history(), originalHistory);
+  lifecycleRejected(await lifecycleCall('set_outfit_trashed', 2, { p_trashed: true }), 'Request conflict');
+  lifecycleRejected(await lifecycleCall('set_outfit_trashed', 1, { p_trashed: false }), 'Request conflict');
+  const restoredOutfit = await lifecycleCall('set_outfit_trashed', 2, { p_trashed: false });
+  requireEvidence(restoredOutfit.ok); eq(restoredOutfit.data.deleted_at, null); eq(restoredOutfit.data.version, 3);
+  let restoredState = await h.read(lifecycle.p_id);
+  eq({ ...restoredState.parent[0], version: 1, updated_at: lifecycleBefore.parent[0].updated_at }, lifecycleBefore.parent[0]);
+  eq(restoredState.links, lifecycleBefore.links);
+
+  // Server-clock expiry, future trash dates and safe-counter overflow all fail without changes.
+  for (const stamp of [new Date(Date.now() - 8 * 86400000).toISOString(), new Date(Date.now() + 86400000).toISOString()]) {
+    const patch = await client.request(owner.token, `/rest/v1/outfits?owner_id=eq.${owner.uid}&id=eq.${lifecycle.p_id}`,
+      { method: 'PATCH', body: { deleted_at: stamp }, headers: { Prefer: 'return=representation' } });
+    requireEvidence(patch.ok && patch.data.length === 1);
+    const version = patch.data[0].version;
+    restoredState = await h.read(lifecycle.p_id);
+    lifecycleRejected(await lifecycleCall('set_outfit_trashed', version, { p_trashed: false }), 'Recovery expired');
+    eq(await h.read(lifecycle.p_id), restoredState);
+  }
+  const reset = await client.request(owner.token, `/rest/v1/outfits?owner_id=eq.${owner.uid}&id=eq.${lifecycle.p_id}`,
+    { method: 'PATCH', body: { deleted_at: null }, headers: { Prefer: 'return=representation' } });
+  requireEvidence(reset.ok);
+  const version = reset.data[0].version;
+  const lifecycleRace = await Promise.all([
+    lifecycleCall('set_outfit_trashed', version, { p_trashed: true }),
+    lifecycleCall('set_outfit_trashed', version, { p_trashed: true }, again.token),
+  ]);
+  eq(lifecycleRace.filter(reply => reply.ok).length, 1);
+  lifecycleRejected(lifecycleRace.find(reply => !reply.ok), 'Request conflict');
+  const deleted = await lifecycleCall('delete_trashed_outfit', version + 1);
+  requireEvidence(deleted.ok); eq(deleted.data, { id: lifecycle.p_id, owner_id: owner.uid, version: version + 1, deleted: true });
+  eq((await h.read(lifecycle.p_id)), { parent: [], links: [] });
+  const keptHistory = await history();
+  eq(keptHistory.snapshots, originalHistory.snapshots);
+  eq({ ...keptHistory.event, outfit_id: lifecycle.p_id, version: originalHistory.event.version,
+    updated_at: originalHistory.event.updated_at }, originalHistory.event);
+  eq(keptHistory.event.outfit_id, null);
+  eq(keptHistory.event.version, originalHistory.event.version + 1);
+  const keptGarments = await client.request(owner.token, `/rest/v1/items?owner_id=eq.${owner.uid}&select=*&order=id`);
+  requireEvidence(keptGarments.ok); eq(keptGarments.data, garments.data);
 }
 
 export async function outfitIntegration(env) {
