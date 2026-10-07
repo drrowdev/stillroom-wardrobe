@@ -5,11 +5,12 @@ export type OutfitAction = 'trash' | 'restore' | 'delete';
 export type OutfitIntent = { baseline: OutfitRecord; epoch: number; action: OutfitAction };
 export type OutfitOutcome =
   | { kind: 'saved'; record: OutfitRecord | null }
-  | { kind: 'unknown' | 'notSaved' | 'conflict' | 'unavailable' | 'expired' | 'busy' };
+  | { kind: 'unknown' | 'notSaved' | 'conflict' | 'unavailable' | 'expired' | 'busy' | 'wearPending' };
 
 export const outfitProblems: Record<Exclude<OutfitOutcome['kind'], 'saved'>, MessageKey> = {
   unknown: 'outfitTrash.unknown', notSaved: 'outfitTrash.notSaved', conflict: 'outfitTrash.conflict',
   unavailable: 'error.unavailable', expired: 'outfitTrash.expired', busy: 'outfitTrash.busy',
+  wearPending: 'calendar.unknown',
 };
 export function recoverableOutfit(record: OutfitRecord, now = Date.now()): boolean {
   const deleted = record.deletedAt === null ? NaN : Date.parse(record.deletedAt);

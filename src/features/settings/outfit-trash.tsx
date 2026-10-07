@@ -4,7 +4,7 @@ import type { AppClient } from '../../data/client';
 import { outfitRecoveryDays, recoverableOutfit } from '../../domain/outfit-lifecycle';
 import type { OutfitRecord } from '../../domain/outfits';
 import { pluralText, type Language, type Translate } from '../../i18n';
-import { OutfitLifecycleDialog } from '../outfits/lifecycle-controls';
+import { OutfitLifecycleDialog, OutfitWearCheck } from '../outfits/lifecycle-controls';
 import type { OutfitLifecycle } from '../outfits/use-outfit-lifecycle';
 import { useOutfitTrash } from '../outfits/use-outfits';
 
@@ -28,12 +28,13 @@ export function OutfitTrash({ client, scope, online, invalidation, lifecycle, di
     {list.data && !list.data.length && <p>{t('outfitTrash.empty')}</p>}
     <ul className="trash-list">{list.data?.map(record => <li key={record.id} className="settings-card">
       <h3><a href={`#/outfits/${record.id}`}>{record.title}</a></h3>
+      <OutfitWearCheck id={record.id} scope={scope} lifecycle={lifecycle} online={online} t={t} />
       {recoverableOutfit(record, now) && <p className="muted">{pluralText(language, 'outfitTrash.days', outfitRecoveryDays(record, now))}</p>}
       <div className="settings-actions">
-        {recoverableOutfit(record, now) ? <button type="button" className="button button-primary" disabled={locked}
+        {recoverableOutfit(record, now) ? <button type="button" className="button button-primary" disabled={locked || !!lifecycle.pendingWear(record.id)}
           onClick={() => { void lifecycle.execute([record], 'restore'); }}>{t('trash.restore')}</button>
           : <p className="muted">{t('outfitTrash.expired')}</p>}
-        <button type="button" className="text-button trash-delete" disabled={locked}
+        <button type="button" className="text-button trash-delete" disabled={locked || !!lifecycle.pendingWear(record.id)}
           onClick={event => { event.currentTarget.focus(); setConfirmation(structuredClone(record)); }}>{t('lifecycle.delete')}</button>
       </div>
     </li>)}</ul>

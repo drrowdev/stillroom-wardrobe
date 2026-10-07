@@ -10,7 +10,7 @@ import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import type { OutfitRecord } from '../../domain/outfits';
 import type { OutfitLifecycle } from './use-outfit-lifecycle';
-import { OutfitLifecycleDialog } from './lifecycle-controls';
+import { OutfitLifecycleDialog, OutfitWearCheck } from './lifecycle-controls';
 
 function LoadedThumb({ path, alt, images, t }: { path: string; alt: string; images: PrivateImages; t: Translate }) {
   const { ref, url, failed } = usePrivateImage(images, path);
@@ -51,8 +51,9 @@ export function OutfitsScreen({ client, scope, invalidation, images, online, lan
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [confirmation, setConfirmation] = useState<OutfitRecord[] | null>(null);
   const visible = data?.outfits ?? [];
-  if (!lifecycle.locked && data && [...selected].some(id => !visible.some(record => record.id === id)))
-    setSelected(new Set([...selected].filter(id => visible.some(record => record.id === id))));
+  const eligible = visible.filter(record => !lifecycle.pendingWear(record.id));
+  if (!lifecycle.locked && data && [...selected].some(id => !eligible.some(record => record.id === id)))
+    setSelected(new Set([...selected].filter(id => eligible.some(record => record.id === id))));
   function cancel() { if (!lifecycle.busy) { setSelecting(false); setSelected(new Set()); document.getElementById('outfits-title')?.focus(); } }
   return <section className="outfits-page" aria-labelledby="outfits-title" onKeyDown={event => {
     if (event.key === 'Escape' && !confirmation && selecting) { event.preventDefault(); cancel(); }
@@ -68,8 +69,8 @@ export function OutfitsScreen({ client, scope, invalidation, images, online, lan
     {selecting && <div className="outfit-selection">
       <p role="status">{pluralText(language, 'wardrobe.selected', selected.size)}</p>
       <div className="outfit-actions">
-        <button type="button" className="text-button" disabled={lifecycle.locked || !visible.length}
-          onClick={() => setSelected(new Set(visible.map(record => record.id)))}>{t('outfitTrash.selectAll')}</button>
+        <button type="button" className="text-button" disabled={lifecycle.locked || !eligible.length}
+          onClick={() => setSelected(new Set(eligible.map(record => record.id)))}>{t('outfitTrash.selectAll')}</button>
         <button type="button" className="button button-danger" disabled={!online || lifecycle.locked || !selected.size || list.loading || !!list.error}
           onClick={event => { event.currentTarget.focus(); setConfirmation(visible.filter(record => selected.has(record.id)).map(record => structuredClone(record))); }}>{t('wardrobe.moveSelected')}</button>
         <button type="button" className="button button-secondary" disabled={lifecycle.busy} onClick={cancel}>{t('common.cancel')}</button>
@@ -93,11 +94,12 @@ export function OutfitsScreen({ client, scope, invalidation, images, online, lan
             </div>
           </>;
           return <li key={outfit.id} className="outfit-card">{selecting
-            ? <button type="button" className="outfit-card-link outfit-select" disabled={lifecycle.locked} aria-pressed={selected.has(outfit.id)}
+            ? <button type="button" className="outfit-card-link outfit-select" disabled={lifecycle.locked || !!lifecycle.pendingWear(outfit.id)} aria-pressed={selected.has(outfit.id)}
               aria-label={t('wardrobe.selectItem', { title: outfit.title })} onClick={() => setSelected(current => {
                 const next = new Set(current); if (next.has(outfit.id)) next.delete(outfit.id); else next.add(outfit.id); return next;
               })}>{content}</button>
-            : <a className="outfit-card-link" href={`#/outfits/${outfit.id}`}>{content}</a>}</li>;
+            : <a className="outfit-card-link" href={`#/outfits/${outfit.id}`}>{content}</a>}
+            <OutfitWearCheck id={outfit.id} scope={scope} lifecycle={lifecycle} online={online} t={t} /></li>;
         })}
       </ul>
       : !list.error && <div className="outfits-empty">

@@ -268,3 +268,48 @@ actual review remain pending; current pre-commit images are not acceptance.
 The writer stays text-only.
 Independent Opus5.5/high code review, coordinator exact-head visual review,
 normal-owner acceptance and owner-run R5 deployment remain separate gates.
+
+### OUTFIT1 review repair
+
+The independent Opus5.5/high review at
+`83dc250030956b66ee5512ad23c3a62e1b6dc802` requested changes: a kept
+Wear today attempt was protected only on detail, not list/bulk or Trash.
+The coordinator's actual four-capture review also rejected cramped,
+midword-breaking Finnish Undo controls at320px. Neither was waived.
+The coordinator authorized one scoped repair in the same writer/branch.
+
+- List selection and Select all exclude kept Wear today targets. The data
+  boundary rechecks every frozen target before Trash, Restore or permanent
+  deletion, refusing it without an RPC. List and Trash retain an explicit
+  read-only Check and the existing explanation. Check uses the same
+  owner-scoped kept-attempt store with `resend=false`; a missing row stays
+  guarded until explicit Start over, following the existing calendar pattern.
+  No check resubmits a wear event or calls a provider.
+- Outfit Undo now gives its status full width and lets controls wrap without
+  shrinking their labels. Bounded scenes additionally assert full-width
+  status and single-line action labels at normal and200% text size.
+- The second [CI run37619938722](https://github.com/drrowdev/stillroom-wardrobe/actions/runs/37619938722)
+  passed real backend, every browser shard, PWA, performance and deletion
+  rehearsals. Static checks found one coupled old unit assertion expecting
+  29 migrations. It now checks unique catalogue names and the approved
+  outfit migration's presence; historical ninth-migration byte, body and
+  privilege pins are retained unchanged.
+- A focused CI-only try-on probe reuses its already-approved synthetic
+  claim/clock fixtures. Ordinary-owner lifecycle RPC assertions refuse
+  deleting a trashed outfit with an unexpired running chain, keep its chain
+  and accounting unchanged, then allow deletion after the same running
+  chain is aged past expiry. Usage remains until normal expiry settlement.
+  No fixture/provider/setup authority was expanded. This new live probe is
+  not run locally and remains a fresh-CI gate.
+
+Repair validation: mandatory lint, typecheck and translations passed;
+the ten earlier unit selectors plus
+`tests\unit\item-lifecycle-schema.test.ts` passed1660 tests.
+`npm run test:unit -- tests\unit\tryon-schema.test.ts
+tests\unit\tryon-stop-schema.test.ts` passed17 tests;
+`node --check tests\integration\tryon.sessions.mjs` passed syntax only.
+The same three-project focused browser command above, with added
+lost-wear/navigation, confirmed-missing Start over, Trash Restore/delete
+guards and label-layout assertions, passed51 tests.
+Final committed-head regeneration, actual visual re-review, the same
+reviewer's bounded delta check and full fresh CI remain required.

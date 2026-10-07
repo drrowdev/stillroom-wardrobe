@@ -956,6 +956,105 @@ test.describe('OUTFIT1 outfit lifecycle', () => {
     await page.evaluate(() => { location.hash = '#/trash'; });
     await expect(page.locator('#trash-title')).toBeVisible();
   };
+  test('lost Wear today stays checkable after navigation and cannot be orphaned by Select all or bulk Trash', async ({ page }) => {
+    let id = '', ordinary = '';
+    const { api, clothes } = await start(page, 'en', (api, clothes) => {
+      id = seedOutfit(api, [clothes.top.id]);
+      ordinary = seedOutfit(api, [clothes.shoes.id], { title: 'Office' });
+    });
+    let blocked = true;
+    await page.route(url => url.pathname === '/rest/v1/wear_events' && url.searchParams.has('id'), async route => {
+      if (blocked) await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ invalid: true }) });
+      else await route.fallback();
+    });
+    await openOutfits(page); await page.locator(`a[href="#/outfits/${id}"]`).click();
+    api.wearControl.next = { mode: 'committedLost' };
+    await button(page, 'calendar.wearToday').click();
+    await expect(page.getByRole('alert')).toContainText(text('calendar.unknown'));
+    await openOutfits(page);
+    const kept = page.locator('.outfit-card').filter({ has: page.getByRole('heading', { name: 'Weekend', exact: true }) });
+    await expect(kept.locator('.outfit-wear-check')).toContainText(text('calendar.unknown'));
+    await button(page, 'wardrobe.select').click(); await button(page, 'outfitTrash.selectAll').click();
+    await expect(page.getByRole('status').filter({ hasText: '1 selected' })).toBeVisible();
+    await expect(kept.locator('.outfit-select')).toBeDisabled();
+    await expect(kept.locator('.outfit-select')).toHaveAttribute('aria-pressed', 'false');
+    await button(page, 'wardrobe.moveSelected').click();
+    await confirm(page).getByRole('button', { name: text('wardrobe.moveSelected'), exact: true }).click();
+    await expect(page.locator('.outfit-card')).toHaveCount(1);
+    expect(api.outfitLifecycleControl.writes.map(write => write.body.p_id)).toEqual([ordinary]);
+    expect(api.outfits.find(row => row.id === id)).toMatchObject({ deleted_at: null, version: 1 });
+    blocked = false;
+    await kept.getByRole('button', { name: text('lifecycle.check'), exact: true }).click();
+    await expect(kept.locator('.outfit-wear-check')).toHaveCount(0);
+    expect(api.wearControl.saves).toBe(1); expect(api.wearEvents).toHaveLength(1);
+    await button(page, 'wardrobe.select').click(); await button(page, 'outfitTrash.selectAll').click();
+    await button(page, 'wardrobe.moveSelected').click();
+    await confirm(page).getByRole('button', { name: text('wardrobe.moveSelected'), exact: true }).click();
+    await expect(page.locator('.outfit-card')).toHaveCount(0);
+    expect(api.outfitLifecycleControl.writes.map(write => write.body.p_id)).toEqual([ordinary, id]);
+    expect(api.wearEvents[0]).toMatchObject({ outfit_id: id, deleted_at: null, version: 1 });
+    expect(api.items.find(row => row.id === clothes.top.id)).toMatchObject({ deleted_at: null });
+  });
+
+  test('a read-only Check that finds no Wear today keeps the target guarded until explicit Start over', async ({ page }) => {
+    let id = '';
+    const { api } = await start(page, 'en', (api, clothes) => { id = seedOutfit(api, [clothes.top.id]); });
+    let blocked = true;
+    await page.route(url => url.pathname === '/rest/v1/wear_events' && url.searchParams.has('id'), async route => {
+      if (blocked) await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ invalid: true }) });
+      else await route.fallback();
+    });
+    await openOutfits(page); await page.locator(`a[href="#/outfits/${id}"]`).click();
+    api.wearControl.next = { mode: 'lost' };
+    await button(page, 'calendar.wearToday').click();
+    await expect(page.getByRole('alert')).toContainText(text('calendar.unknown'));
+    await openOutfits(page); await button(page, 'wardrobe.select').click();
+    blocked = false;
+    await page.locator('.outfit-wear-check').getByRole('button', { name: text('lifecycle.check'), exact: true }).click();
+    await expect(page.locator('.outfit-wear-check')).toContainText(text('calendar.notSaved'));
+    await expect(page.locator('.outfit-select')).toBeDisabled();
+    expect(api.wearControl.saves).toBe(1); expect(api.wearEvents).toHaveLength(0);
+    await button(page, 'calendar.startOver').click();
+    await expect(page.locator('.outfit-select')).toBeEnabled();
+    await expect(page.locator('.outfit-wear-check')).toHaveCount(0);
+    await button(page, 'outfitTrash.selectAll').click(); await button(page, 'wardrobe.moveSelected').click();
+    await confirm(page).getByRole('button', { name: text('wardrobe.moveSelected'), exact: true }).click();
+    await expect(page.locator('.outfit-card')).toHaveCount(0);
+    expect(api.wearControl.saves).toBe(1); expect(api.wearEvents).toHaveLength(0);
+    expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+  });
+
+  for (const action of ['restore', 'delete'] as const) test(`Trash ${action} refuses a kept Wear today until read-only Check resolves it`, async ({ page }) => {
+    let id = '';
+    const { api } = await start(page, 'en', (api, clothes) => { id = seedOutfit(api, [clothes.top.id]); });
+    let blocked = true;
+    await page.route(url => url.pathname === '/rest/v1/wear_events' && url.searchParams.has('id'), async route => {
+      if (blocked) await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ invalid: true }) });
+      else await route.fallback();
+    });
+    await openOutfits(page); await page.locator(`a[href="#/outfits/${id}"]`).click();
+    api.wearControl.next = { mode: 'committedLost' };
+    await button(page, 'calendar.wearToday').click();
+    await expect(page.getByRole('alert')).toContainText(text('calendar.unknown'));
+    // Another device moved this outfit to Trash while this browser's Wear today remains uncertain.
+    Object.assign(api.outfits.find(row => row.id === id)!, { deleted_at: new Date().toISOString(), version: 2 });
+    await goTrash(page);
+    const row = trashGroup(page).getByRole('listitem');
+    await expect(row.getByRole('button', { name: text('trash.restore'), exact: true })).toBeDisabled();
+    await expect(row.getByRole('button', { name: text('lifecycle.delete'), exact: true })).toBeDisabled();
+    await expect(row).toContainText(text('calendar.unknown'));
+    expect(api.outfitLifecycleControl.writes).toHaveLength(0);
+    blocked = false;
+    await row.getByRole('button', { name: text('lifecycle.check'), exact: true }).click();
+    await expect(row.locator('.outfit-wear-check')).toHaveCount(0);
+    await row.getByRole('button', { name: text(action === 'restore' ? 'trash.restore' : 'lifecycle.delete'), exact: true }).click();
+    if (action === 'delete') await confirm(page).getByRole('button', { name: text('lifecycle.delete'), exact: true }).click();
+    await expect(trashGroup(page)).toContainText(text('outfitTrash.empty'));
+    expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+    expect(api.wearControl.saves).toBe(1); expect(api.wearEvents).toHaveLength(1);
+    expect(api.wearEvents[0]).toMatchObject({ outfit_id: action === 'restore' ? id : null, deleted_at: null });
+  });
+
   for (const language of languages) test(`single removal, Undo and reloaded Trash Restore preserve clothes/history (${language})`, async ({ page }) => {
     let id = '';
     const { api } = await start(page, language, (api, clothes) => {
@@ -1274,6 +1373,19 @@ test.describe('bounded I11 visual evidence', () => {
       await expect(group.getByRole('listitem')).toHaveCount(4);
       await expect(group.getByRole('button', { name: text('trash.restore', language), exact: true })).toHaveCount(3);
       await expect(group.getByText(text('outfitTrash.expired', language), { exact: true })).toBeVisible();
+      const readableUndo = () => page.evaluate(() => {
+        const notice = document.querySelector<HTMLElement>('.outfit-undo');
+        const status = notice?.querySelector('p');
+        if (!notice || !status) return false;
+        const style = getComputedStyle(notice);
+        const width = notice.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+        const labels = [...notice.querySelectorAll('button,a')];
+        return status.getBoundingClientRect().width >= width - 1 && labels.every(label => {
+          const range = document.createRange(); range.selectNodeContents(label);
+          return range.getClientRects().length === 1;
+        });
+      });
+      expect(await readableUndo()).toBe(true);
       await capture(selected.suffix === 'en-desktop' ? 'outfit-trash' : 'outfit-phone-trash');
       const expired = group.getByRole('listitem').filter({ has: page.getByRole('heading', { name: 'Expired', exact: true }) });
       await expired.getByRole('button', { name: text('lifecycle.delete', language), exact: true }).click();
@@ -1281,6 +1393,7 @@ test.describe('bounded I11 visual evidence', () => {
       if (selected.suffix === 'en-desktop') await capture('outfit-delete-confirm');
       await dialog.getByRole('button', { name: text('common.cancel', language), exact: true }).click();
       await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 2rem; }' });
+      expect(await readableUndo()).toBe(true);
       await expired.getByRole('button', { name: text('lifecycle.delete', language), exact: true }).click();
       await expect(dialog).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth

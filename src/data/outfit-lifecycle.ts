@@ -3,6 +3,10 @@ import { confirmsOutfitReply, reconcileOutfit, type OutfitIntent, type OutfitOut
 import type { AppClient } from './client';
 import { throwIfAborted } from './errors';
 import { loadOutfit } from './outfits';
+import { pendingCreate } from './wear-events';
+
+export const outfitWearKey = (id: string) => `wear-today:${id}`;
+export const pendingOutfitWear = (scope: OwnerScope, id: string) => pendingCreate(scope, outfitWearKey(id));
 
 function owned(scope: OwnerScope, intent: OutfitIntent, signal: AbortSignal) {
   throwIfAborted(signal);
@@ -21,6 +25,7 @@ export async function checkOutfitAction(client: AppClient, scope: OwnerScope, in
 }
 export async function changeOutfit(client: AppClient, scope: OwnerScope, intent: OutfitIntent): Promise<OutfitOutcome> {
   owned(scope, intent, scope.signal);
+  if (pendingOutfitWear(scope, intent.baseline.id)) return { kind: 'wearPending' };
   let result;
   try {
     const args = { p_id: intent.baseline.id, p_expected_version: intent.baseline.version };

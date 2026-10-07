@@ -3,6 +3,9 @@ import { describe, expect, it } from 'vitest';
 import type { Database } from '../../src/data/database.types';
 import type { OwnerScope } from '../../src/auth/session';
 import { changeOutfit, checkOutfitAction } from '../../src/data/outfit-lifecycle';
+import { outfitWearKey } from '../../src/data/outfit-lifecycle';
+import { createLook } from '../../src/data/wear-events';
+import type { LookAttempt } from '../../src/domain/wear-events';
 import { loadTrashedOutfits } from '../../src/data/outfits';
 import { confirmsOutfitReply, outfitRecoveryDays, reconcileOutfit, recoverableOutfit, type OutfitIntent } from '../../src/domain/outfit-lifecycle';
 import type { OutfitRecord } from '../../src/domain/outfits';
@@ -101,6 +104,19 @@ describe('OUTFIT1 checked lifecycle', () => {
     const other = harness([]);
     await expect(changeOutfit(other.client, other.scope, { ...trash, epoch: 5 })).rejects.toMatchObject({ name: 'AbortError' });
     expect(other.requests).toHaveLength(0);
+  });
+  it('rechecks frozen lifecycle targets against a kept Wear today attempt before any RPC', async () => {
+    const h = harness([{ data: 'malformed' }, { data: { invalid: true } }]);
+    const attempt: LookAttempt = { id: '44444444-4444-4444-8444-444444444444', ownerId: owner, epoch: 4,
+      baselineVersion: null, outfitId: id, itemIds: before.links.map(link => link.itemId), state: 'worn',
+      localDate: '2026-10-07', timezone: 'Europe/Helsinki', label: 'Weekend' };
+    const frozen = structuredClone(before);
+    expect((await createLook(h.client, h.scope, outfitWearKey(id), attempt, true, h.scope.signal))?.reply).toEqual({ kind: 'unknown' });
+    const requests = h.requests.length;
+    for (const action of ['trash', 'restore', 'delete'] as const)
+      expect(await changeOutfit(h.client, h.scope, { baseline: frozen, epoch: 4, action })).toEqual({ kind: 'wearPending' });
+    expect(h.requests).toHaveLength(requests);
+    h.abort.abort();
   });
   it('lists only owner-scoped Trash with a validated embedded payload', async () => {
     const h = harness([{ data: [row(after)] }]);

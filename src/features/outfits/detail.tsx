@@ -16,7 +16,7 @@ import { ComponentText, OutfitThumb } from './outfits-screen';
 import { useOutfit, usePickerItems, type OutfitView } from './use-outfits';
 import { recoverableOutfit } from '../../domain/outfit-lifecycle';
 import type { OutfitLifecycle } from './use-outfit-lifecycle';
-import { OutfitLifecycleDialog } from './lifecycle-controls';
+import { OutfitLifecycleDialog, OutfitWearCheck } from './lifecycle-controls';
 
 type Shared = {
   client: AppClient; scope: OwnerScope; images: PrivateImages; online: boolean; t: Translate; invalidation: number; paused: boolean;
@@ -83,6 +83,7 @@ export function OutfitDetail(props: Shared & { id: string | null; timeZone: stri
         : <p role="status">{t('common.loading')}</p>
       : trashed ? <div className="notice outfit-in-trash">
         <p>{t('outfitTrash.inTrash')}</p>
+        <OutfitWearCheck id={record.id} scope={scope} lifecycle={props.lifecycle} online={online} t={t} />
         {recoverableOutfit(record) ? <button type="button" className="button button-primary" disabled={!online || blocked}
           onClick={() => { void props.lifecycle.execute([record], 'restore'); }}>{t('trash.restore')}</button> : <p>{t('outfitTrash.expired')}</p>}
         <a className="text-button" href="#/trash">{t('nav.trash')}</a>

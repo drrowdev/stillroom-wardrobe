@@ -915,6 +915,29 @@ export async function tryonProbes(snapshot, sql, mark, service) {
     await freeSlots();
     }
 
+    mark('outfit-lifecycle-delete');
+    // Use the existing synthetic claim/clock fixture, but every lifecycle access assertion is an ordinary owner RPC.
+    const lifecycleOutfit = await saveOutfit(a, [aTop, aBottom]), lifecycleChain = randomUUID(), lifecycleRequest = randomUUID();
+    equal((await claim(a, lifecycleChain, 1, lifecycleRequest, { outfit: lifecycleOutfit })).code, 'OK');
+    equal((await dispatch(a, lifecycleRequest)).code, 'AUTHORISED');
+    const trashed = await rpc(a, 'set_outfit_trashed', { p_id: lifecycleOutfit, p_expected_version: 1, p_trashed: true });
+    requireEvidence(trashed.id === lifecycleOutfit && trashed.version === 2 && trashed.deleted_at !== null);
+    const beforeBlocked = await ledger(a, lifecycleRequest), beforeChain = await chainRows(a, lifecycleChain, [lifecycleRequest]);
+    const blockedDelete = await client.request(a.token, '/rest/v1/rpc/delete_trashed_outfit', { method: 'POST',
+      body: { p_id: lifecycleOutfit, p_expected_version: 2 } });
+    requireEvidence(!blockedDelete.ok && blockedDelete.status === 400 && blockedDelete.data?.code === '22023'
+      && blockedDelete.data.message === 'Try-on running');
+    equal(await ledger(a, lifecycleRequest), beforeBlocked);
+    equal(await chainRows(a, lifecycleChain, [lifecycleRequest]), beforeChain);
+    await ageChain(a, lifecycleChain);
+    equal(await rpc(a, 'delete_trashed_outfit', { p_id: lifecycleOutfit, p_expected_version: 2 }),
+      { id: lifecycleOutfit, owner_id: a.uid, version: 2, deleted: true });
+    equal(Number(await scalar(`select count(*) from private.tryon_chains where owner_id=${literal(a.uid)} and chain_id=${literal(lifecycleChain)};`)), 0);
+    equal(await ledger(a, lifecycleRequest), beforeBlocked);
+    await backdate(a, lifecycleRequest, '4 minutes');
+    await expireDue();
+    equal((await ledger(a, lifecycleRequest)).state, 'estimated');
+
     mark('outfit-delete');
     // An outfit deletion removes its chains and pictures; held usage still settles through the expiry.
     const c8 = randomUUID(), d1 = randomUUID();
