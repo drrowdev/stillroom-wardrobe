@@ -248,16 +248,21 @@ export function checkLimits(limits: Limits): FieldErrors {
 }
 /** The values the admin edits; the per-request value is never shown and is always sent exactly as read. */
 export const EDITABLE_KEYS = ['monthlyAllowanceMicro', 'maxRequestsPerHour'] as const;
-/** Errors as the form shows them: one against the hidden per-request value moves to that feature's monthly limit. */
-export function visibleErrors(errors: FieldErrors): FieldErrors {
+/**
+ * Errors as the form shows them. A monthly limit below the hidden per-request value is a problem with the monthly limit.
+ * Any other problem with the hidden value cannot be fixed on this screen, so it is reported as `setup` instead of on a field.
+ */
+export function visibleErrors(errors: FieldErrors): { errors: FieldErrors; setup: boolean } {
   const shown: FieldErrors = {};
+  let setup = false;
   for (const feature of LIMIT_FEATURES) for (const key of LIMIT_KEYS) {
     const reason = errors[`${feature}.${key}`];
     if (!reason) continue;
     if (key !== 'maxRequestMicro') shown[`${feature}.${key}`] ??= reason;
-    else shown[`${feature}.monthlyAllowanceMicro`] ??= reason === 'ABOVE_MONTHLY' ? 'BELOW_RESERVATION' : reason;
+    else if (reason === 'ABOVE_MONTHLY') shown[`${feature}.monthlyAllowanceMicro`] ??= 'BELOW_RESERVATION';
+    else setup = true;
   }
-  return shown;
+  return { errors: shown, setup };
 }
 export const sameLimits = (left: Limits, right: Limits) => LIMIT_FEATURES.every((feature) => LIMIT_KEYS.every((key) => left[feature][key] === right[feature][key]));
 export type LimitChange = { feature: LimitFeature; key: LimitKey; from: string | number; to: string | number };

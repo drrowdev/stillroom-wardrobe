@@ -229,14 +229,17 @@ describe('limits form', () => {
     }
     expect(limitChanges(current, result.limits!).map((change) => change.key)).toEqual(['maxRequestsPerHour', 'monthlyAllowanceMicro']);
   });
-  it('shows a problem with the hidden per-request amount on that feature\'s monthly limit', () => {
-    expect(visibleErrors({ 'stylist.maxRequestMicro': 'ABOVE_MONTHLY' })).toEqual({ 'stylist.monthlyAllowanceMicro': 'BELOW_RESERVATION' });
-    expect(visibleErrors({ 'tryOn.maxRequestMicro': 'BELOW_RESERVATION' })).toEqual({ 'tryOn.monthlyAllowanceMicro': 'BELOW_RESERVATION' });
+  it('shows a monthly limit below the hidden per-request amount on that limit, and any other hidden problem as a setup fix', () => {
+    expect(visibleErrors({ 'stylist.maxRequestMicro': 'ABOVE_MONTHLY' })).toEqual({ errors: { 'stylist.monthlyAllowanceMicro': 'BELOW_RESERVATION' }, setup: false });
+    // An unchanged per-request amount below the floor cannot be fixed by changing a visible limit.
+    expect(visibleErrors({ 'tryOn.maxRequestMicro': 'BELOW_RESERVATION' })).toEqual({ errors: {}, setup: true });
+    expect(visibleErrors({ 'shared.maxRequestMicro': 'NOT_POSITIVE', 'shared.maxRequestsPerHour': 'RANGE' }))
+      .toEqual({ errors: { 'shared.maxRequestsPerHour': 'RANGE' }, setup: true });
     // The monthly limit's own problem comes first; other fields are unchanged.
     expect(visibleErrors({ 'stylist.monthlyAllowanceMicro': 'ABOVE_SHARED', 'stylist.maxRequestMicro': 'ABOVE_MONTHLY', 'shared.maxRequestsPerHour': 'RANGE' }))
-      .toEqual({ 'stylist.monthlyAllowanceMicro': 'ABOVE_SHARED', 'shared.maxRequestsPerHour': 'RANGE' });
+      .toEqual({ errors: { 'stylist.monthlyAllowanceMicro': 'ABOVE_SHARED', 'shared.maxRequestsPerHour': 'RANGE' }, setup: false });
     const lowered = limits(); lowered.stylist.monthlyAllowanceMicro = '100000';
-    expect(visibleErrors(checkLimits(lowered))).toEqual({ 'stylist.monthlyAllowanceMicro': 'BELOW_RESERVATION' });
+    expect(visibleErrors(checkLimits(lowered))).toEqual({ errors: { 'stylist.monthlyAllowanceMicro': 'BELOW_RESERVATION' }, setup: false });
   });
 });
 

@@ -97,6 +97,7 @@ function SpendRow({ label, spend, language, t, total }: { label: string; spend: 
 }
 
 type Message = { key: MessageKey; tone: 'status' | 'alert'; belowUse?: boolean };
+const formMessages = new Set<MessageKey>(['admin.invalid', 'admin.setupFix']);
 type Edit = { base: Limits; version: string; initial: LimitDraft; draft: LimitDraft; errors: FieldErrors };
 type Confirm = { limits: Limits; changes: LimitChange[] };
 
@@ -144,8 +145,9 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
   const review = () => {
     if (!edit) return;
     const { limits: next, errors } = limitsFromDraft(edit.draft, edit.initial, edit.base, language);
-    setEdit({ ...edit, errors: visibleErrors(errors) });
-    if (!next) { setMessage({ key: 'admin.invalid', tone: 'alert' }); focusNext.current = 'summary'; return; }
+    const shown = visibleErrors(errors);
+    setEdit({ ...edit, errors: shown.errors });
+    if (!next) { setMessage({ key: shown.setup ? 'admin.setupFix' : 'admin.invalid', tone: 'alert' }); focusNext.current = 'summary'; return; }
     if (sameLimits(next, edit.base)) { setMessage({ key: 'admin.unchanged', tone: 'status' }); focusNext.current = 'message'; return; }
     setMessage(null);
     setConfirm({ limits: next, changes: limitChanges(edit.base, next) });
@@ -161,8 +163,9 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
       if (controller.signal.aborted) return;
       if (result.code === 'INVALID_LIMITS') {
         setConfirm(null);
-        setEdit({ ...edit, errors: visibleErrors({ [result.field]: result.reason }) });
-        setMessage({ key: 'admin.invalid', tone: 'alert' });
+        const shown = visibleErrors({ [result.field]: result.reason });
+        setEdit({ ...edit, errors: shown.errors });
+        setMessage({ key: shown.setup ? 'admin.setupFix' : 'admin.invalid', tone: 'alert' });
         focusNext.current = 'summary';
         return;
       }
@@ -205,8 +208,8 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
       {canEdit && <button ref={editButton} type="button" className="button button-secondary" disabled={!online || reconciling} onClick={open}>{t('admin.edit')}</button>}
     </> : <LimitsForm id={id} edit={edit} t={t} online={online} saving={saving} firstField={firstField} reviewButton={reviewButton}
       onChange={(draft) => setEdit({ ...edit, draft })} onReview={review} onCancel={() => { setMessage(null); close('edit'); }}
-      summary={message?.key === 'admin.invalid' ? <div ref={summary} tabIndex={-1} role="alert" className="notice notice-error"><p>{t('admin.invalid')}</p></div> : null} />}
-    {message && message.key !== 'admin.invalid' && <p ref={messageRef} tabIndex={-1} role={message.tone} className={message.tone === 'alert' ? 'notice notice-error' : 'settings-success'}>
+      summary={message && formMessages.has(message.key) ? <div ref={summary} tabIndex={-1} role="alert" className="notice notice-error"><p>{t(message.key)}</p></div> : null} />}
+    {message && !formMessages.has(message.key) && <p ref={messageRef} tabIndex={-1} role={message.tone} className={message.tone === 'alert' ? 'notice notice-error' : 'settings-success'}>
       {t(message.key)}{message.belowUse ? ` ${t('admin.belowUse')}` : ''}</p>}
     {reconciling && readFailed && <div className="notice notice-error"><span>{t('admin.checkFailed')}</span>
       <button type="button" className="text-button" disabled={!online} onClick={reconcile}>{t('admin.checkAgain')}</button></div>}

@@ -305,20 +305,22 @@ test.describe('AD1b admin spending and limits', () => {
     await writes(api, 1);
   });
 
-  test('a server refusal of the hidden per-request amount is shown on the monthly limit', async ({ page }) => {
+  test('a server refusal of the unchanged hidden per-request amount asks for a setup fix, not a different monthly limit', async ({ page }) => {
     const api = await start(page);
     await openScreen(page);
     api.adminControl.writeReplies.push({ status: 200, body: { code: 'INVALID_LIMITS', field: 'stylist.maxRequestMicro', reason: 'BELOW_RESERVATION' } });
     await edit(page, 1);
-    await field(page, 1, 'stylist', 'monthlyAllowanceMicro').fill('0.2');
+    await field(page, 1, 'stylist', 'monthlyAllowanceMicro').fill('3');
     await button(account(page, 1), 'admin.review').click();
     await button(dialog(page), 'admin.confirm').click();
-    await expect(page.locator('#admin-account-1-stylist-monthlyAllowanceMicro-error')).toHaveText(text('admin.belowMinimum'));
-    await expect(field(page, 1, 'stylist', 'monthlyAllowanceMicro')).toHaveAttribute('aria-invalid', 'true');
-    await expect(field(page, 1, 'stylist', 'monthlyAllowanceMicro')).toHaveValue('0.2');
-    await expect(account(page, 1).getByRole('alert')).toBeFocused();
+    const alert = account(page, 1).getByRole('alert');
+    await expect(alert).toHaveText(text('admin.setupFix'));
+    await expect(alert).toBeFocused();
+    await expect(account(page, 1).locator('[aria-invalid="true"]')).toHaveCount(0);
+    await expect(account(page, 1).getByText(text('admin.belowMinimum'))).toHaveCount(0);
+    await expect(field(page, 1, 'stylist', 'monthlyAllowanceMicro')).toHaveValue('3');
     await writes(api, 1);
-    expect(api.adminControl.writes[0]!.body.p_limits).toMatchObject({ stylist: { monthlyAllowanceMicro: '200000', maxRequestMicro: '129360' } });
+    expect(api.adminControl.writes[0]!.body.p_limits).toMatchObject({ stylist: { monthlyAllowanceMicro: '3000000', maxRequestMicro: '129360' } });
   });
 
   test('warns when the new limit is below this month\'s use', async ({ page }) => {
