@@ -36,7 +36,7 @@ export function itemFacts(values: GarmentValues, language: Language, t: Translat
   add('material', 'item.material', values.material);
   if (values.formality !== null) {
     const occasion = occasionOptions.find(([value]) => value === String(values.formality));
-    add('formality', 'item.occasion', occasion ? t(occasion[1]) : String(values.formality));
+    add('formality', 'item.formality', occasion ? t(occasion[1]) : String(values.formality));
   }
   if (values.warmth !== null) {
     const key = warmthKeys[String(values.warmth)];

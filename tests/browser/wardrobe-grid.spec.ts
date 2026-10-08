@@ -108,9 +108,12 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await expect(page.locator('.item-card')).toHaveCount(1);
     await page.locator('input[name="favourite"][value="no"]').check();
     await expect(page.locator('.item-card')).toHaveCount(0);
+    const dressCodes = ['home', 'everyday', 'smart', 'business', 'formal'].map(code => translate(language, `occasion.${code}` as keyof typeof messages));
+    await expect(page.locator('label.wardrobe-choice:has(input[name="formality"])')).toHaveText([...dressCodes, translate(language, 'item.unknown')]);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await closeFilters(page);
     await expect(page.locator('.item-card')).toHaveCount(0);
+    await expect(page.locator('.filter-chip > span:first-child').filter({ hasText: dressCodes[0]! })).toHaveText(translate(language, 'wardrobe.facetValue', { group: translate(language, 'item.formality'), value: dressCodes[0]! }));
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     await button(page, 'wardrobe.clearSearchFilters', language).click();
     await expect(page.locator('.item-card')).toHaveCount(4);
@@ -473,6 +476,41 @@ test('layout boundaries, translated filters, 200% text and exactly two bounded s
   expect(await page.locator('.item-caption > span').evaluateAll(labels => labels.every(label => Number.parseFloat(getComputedStyle(label).fontSize) >= 14))).toBe(true);
 });
 
+test.describe('DRESS1 bounded synthetic captures', () => {
+  const scenes = [
+    { name: 'dress-code-sheet-en-desktop', language: 'en', width: 1280, height: 800, sheet: true },
+    { name: 'dress-code-chip-fi-mobile', language: 'fi', width: 390, height: 844, sheet: false },
+  ] as const;
+  for (const scene of scenes) {
+    test(`${scene.name} shows the dress-code names; chromium writes the capture`, async ({ page }, info) => {
+      const api = await mockBackend(page, { initialLanguage: scene.language });
+      Object.assign(api.seedSavedItem('a', 'Linen').item, { formality: 2 });
+      api.seedSavedItem('a', 'Wool');
+      await page.setViewportSize({ width: scene.width, height: scene.height });
+      await open(page, api);
+      await openFilters(page);
+      const smart = translate(scene.language, 'occasion.smart');
+      const box = filterSheet(page).locator('input[name="formality"][value="2"]');
+      await box.check();
+      await expect(box.locator('xpath=..')).toHaveText(smart);
+      await expect(filterSheet(page).locator('input[name="formality"]:checked')).toHaveCount(1);
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      if (scene.sheet) await box.scrollIntoViewIfNeeded();
+      else {
+        await closeFilters(page);
+        await expect(page.locator('.filter-chip > span:first-child')).toHaveText(translate(scene.language, 'wardrobe.facetValue', { group: translate(scene.language, 'item.formality'), value: smart }));
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      if (info.project.name !== 'chromium') return;
+      const directory = path.resolve('test-results/dress1-visual');
+      await mkdir(directory, { recursive: true });
+      const file = path.join(directory, `${scene.name}.png`);
+      await page.screenshot({ path: file, fullPage: false, animations: 'disabled', scale: 'css' });
+      const stat = await lstat(file);
+      expect(stat.isFile() && stat.size > 24 && stat.size <= 1024 * 1024).toBe(true);
+    });
+  }
+});
 test.describe('UX6 active-filter chips and the result-count announcement', () => {
   async function seeded(page: Page) {
     const api = await mockBackend(page, { initialLanguage: 'en' });

@@ -1,7 +1,8 @@
 import { categories, categoryKeys, type WardrobeItem } from '../../domain/wardrobe';
 import { colours } from '../../domain/preferences';
 import { availability, lifecycle, seasons } from '../../domain/garment-fields';
-import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
+import { occasionOptions } from '../../domain/item-details';
+import { type Language, type MessageKey, type Translate } from '../../i18n';
 import { colourLabel, ordinal, type Facets } from './search';
 
 export type FacetKey = 'category' | 'colour' | 'season' | 'formality' | 'availability' | 'lifecycle';
@@ -19,7 +20,7 @@ export function facetGroups(items: readonly WardrobeItem[], language: Language, 
     { key: 'category', label: t('item.category'), options: categories.map(code => [code, t(categoryKeys[code])] as const) },
     { key: 'colour', label: t('item.colour'), options: colourOptions.map(code => [code, colourLabel(code, language)] as const) },
     { key: 'season', label: t('item.season'), options: seasons.map(code => [code, t(`season.${code}`)] as const) },
-    { key: 'formality', label: t('item.formality'), options: [...Array.from({ length: 5 }, (_, number) => [String(number), new Intl.NumberFormat(locales[language]).format(number)] as const), ['unknown', t('item.unknown')] as const] },
+    { key: 'formality', label: t('item.formality'), options: [...occasionOptions.map(([code, key]) => [code, t(key)] as const), ['unknown', t('item.unknown')] as const] },
     { key: 'availability', label: t('item.availability'), options: availability.map(code => [code, t(`availability.${code}`)] as const) },
     { key: 'lifecycle', label: t('item.status'), options: lifecycle.map(code => [code, t(`lifecycle.${code}`)] as const) },
   ];

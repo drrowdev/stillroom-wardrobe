@@ -13,7 +13,7 @@ import type { AiDerivation } from '../../domain/ai-draft';
 const labels: Partial<Record<GarmentField, MessageKey>> = {
   title: 'item.title', category: 'item.category', colours: 'item.colours', seasons: 'item.seasons',
   subcategory: 'item.type', pattern: 'item.pattern', brand: 'item.brand', size_label: 'item.size',
-  material: 'item.material', formality: 'item.occasion', warmth: 'item.warmth', purchase_price: 'item.price',
+  material: 'item.material', formality: 'item.formality', warmth: 'item.warmth', purchase_price: 'item.price',
   purchase_date: 'item.purchaseDate', notes: 'item.notes', tags: 'item.tags', style_tags: 'item.tags',
   favourite: 'item.favourite',
 };
