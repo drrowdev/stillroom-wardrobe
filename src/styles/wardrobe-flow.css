@@ -2,7 +2,8 @@
 
 /* Step 1: the photo on its own, centred. */
 .capture-layout.capture-step-photo { grid-template-columns: minmax(0, 560px); justify-content: center; }
-.capture-step-cancel { display: block; min-height: 44px; margin: 12px auto 0; }
+.capture-secondary-action { display: flex; justify-content: center; min-width: 0; margin-top: 12px; }
+.capture-secondary-action > .text-button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 
 /* Photo options: one toggle, then plain buttons in DOM order. */
 .photo-menu { flex-direction: column; align-items: center; }

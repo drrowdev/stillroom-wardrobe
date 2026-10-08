@@ -96,8 +96,8 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           {/* Before a photo, and after a replacement fails, the two choices stay outside any disclosure. */}
           {!photo && !review && !editing && <PhotoChoice t={t} disabled={frozen || preparing} chooseId="choose-photo"
             onLibrary={() => library.current?.click()} onCamera={() => camera.current?.click()} />}
-          {!photo && !review && !editing && onSeveral && <button id="add-several" className="text-button capture-step-cancel" type="button"
-            disabled={frozen || preparing} onClick={onSeveral}>{t('bulk.entry')}</button>}
+          {!photo && !review && !editing && onSeveral && <div className="capture-secondary-action"><button id="add-several" className="text-button" type="button"
+            disabled={frozen || preparing} onClick={onSeveral}>{t('bulk.entry')}</button></div>}
           {photo && !editing && <PhotoMenu t={t} disabled={frozen || preparing}>
             <button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => library.current?.click()}><Icon name="photo" />{t('capture.replace')}</button>
             <button className="button button-quiet" type="button" disabled={frozen || preparing} onClick={() => camera.current?.click()}><Icon name="camera" />{t('capture.camera')}</button>
@@ -119,7 +119,7 @@ export function AddItem({ client, scope, currency, online, t, language, onSaved,
           {invalid && !photo && <p className="field-error">{t('common.required')}</p>}
           {error && (!advanced || !photo) && <div className="notice notice-error" role="alert"><p>{t(error)}</p></div>}
           {cameraTrouble && !photo && <CameraHelp t={t} />}
-          {!advanced && <button className="text-button capture-step-cancel" type="button" onClick={onBack} disabled={busy}>{t('common.cancel')}</button>}
+          {!advanced && <div className="capture-secondary-action"><button className="text-button" type="button" onClick={onBack} disabled={busy}>{t('common.cancel')}</button></div>}
         </div>
         {advanced && <div className="details-panel">
           <div className="details-heading"><h2 id="capture-basics" tabIndex={-1}>{t('capture.detailsTitle')}</h2></div>

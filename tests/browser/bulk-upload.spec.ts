@@ -75,6 +75,102 @@ async function holdStatus(page: Page) {
 
 test.beforeEach(({ page }, info) => { void page; expect(info.retry, 'New bulk-upload flakiness blocks acceptance').toBe(0); });
 
+async function captureActionsGeometry(page: Page, language: Language) {
+  const panel = page.locator('.photo-panel');
+  const several = button(page, 'bulk.entry', language);
+  const cancel = panel.getByRole('button', { name: messages['common.cancel'][language], exact: true });
+  await expect(several).toBeVisible();
+  await expect(cancel).toBeVisible();
+  const boxes = await several.or(cancel).evaluateAll(controls => controls.map(control => {
+    const box = control.getBoundingClientRect(), parent = control.closest('.photo-panel')!.getBoundingClientRect();
+    const range = document.createRange(); range.selectNodeContents(control);
+    const text = [...range.getClientRects()].filter(rect => rect.width > 0);
+    return { top: box.top, bottom: box.bottom, width: box.width, height: box.height,
+      centered: Math.abs(box.left + box.width / 2 - parent.left - parent.width / 2),
+      contained: text.every(rect => rect.left >= box.left - 1 && rect.right <= box.right + 1
+        && rect.top >= box.top - 1 && rect.bottom <= box.bottom + 1),
+      wraps: getComputedStyle(control).whiteSpace === 'normal' };
+  }));
+  expect(boxes).toHaveLength(2);
+  for (const box of boxes) {
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.centered).toBeLessThanOrEqual(1);
+    expect(box.contained).toBe(true);
+    expect(box.wraps).toBe(true);
+  }
+  expect(boxes[1]!.top - boxes[0]!.bottom).toBeGreaterThanOrEqual(12);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}
+
+for (const language of ['en', 'fi', 'sv'] as const) {
+  for (const width of [320, 1280]) {
+    test(`CAPTURE1 geometry and entry actions ${language} ${width}`, async ({ page }) => {
+      const api = await aiFixture(page, language);
+      await page.setViewportSize({ width, height: width === 320 ? 568 : 900 });
+      await button(page, 'wardrobe.add', language).first().click();
+      await captureActionsGeometry(page, language);
+      const choices = page.locator('.photo-actions');
+      await expect(choices.getByRole('button', { name: messages['capture.library'][language], exact: true })).toBeVisible();
+      const camera = choices.getByRole('button', { name: messages['capture.camera'][language], exact: true });
+      await expect(camera).toBeVisible();
+      await expect(page.locator('#photo-menu')).toHaveCount(0);
+      await camera.focus();
+      await page.keyboard.press('Tab');
+      await expect(button(page, 'bulk.entry', language)).toBeFocused();
+      await page.keyboard.press('Tab');
+      const cancel = page.locator('.photo-panel').getByRole('button', { name: messages['common.cancel'][language], exact: true });
+      await expect(cancel).toBeFocused();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Enter');
+      await expect(page.locator('#bulk-title')).toBeFocused();
+      await page.locator('.bulk-page .back-button').click();
+      await expect(page.locator('#capture-title')).toBeVisible();
+      await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 1rem; }' });
+      await captureActionsGeometry(page, language);
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      await page.locator('.photo-panel input[type=file][capture]').setInputFiles({
+        name: 'synthetic-invalid.jpg', mimeType: 'image/jpeg', buffer: api.fixture.subarray(0, -2),
+      });
+      const error = page.locator('.photo-panel [role=alert]');
+      await expect(error).toBeVisible();
+      await captureActionsGeometry(page, language);
+      const severalBox = (await button(page, 'bulk.entry', language).boundingBox())!;
+      const errorBox = (await error.boundingBox())!;
+      const cancelBox = (await cancel.boundingBox())!;
+      expect(errorBox.y).toBeGreaterThanOrEqual(severalBox.y + severalBox.height);
+      expect(cancelBox.y).toBeGreaterThanOrEqual(errorBox.y + errorBox.height);
+      await cancel.click();
+      await expect(page.locator('#wardrobe-title')).toBeVisible();
+      expect(posts(api)).toHaveLength(0);
+      expect(saves(api)).toHaveLength(0);
+      expect(api.items).toHaveLength(0);
+      expect(api.images).toHaveLength(0);
+    });
+
+    test(`CAPTURE1 visual evidence ${language} ${width}`, async ({ page }, info) => {
+      const project = width === 320 ? 'mobile' : 'chromium';
+      test.skip(info.project.name !== project, 'Only the six approved Chromium captures are written.');
+      const api = await aiFixture(page, language);
+      await page.setViewportSize({ width, height: width === 320 ? 568 : 900 });
+      await button(page, 'wardrobe.add', language).first().click();
+      await captureActionsGeometry(page, language);
+      expect(posts(api)).toHaveLength(0);
+      expect(api.items).toHaveLength(0);
+      expect(api.images).toHaveLength(0);
+      await page.locator('.photo-panel').getByRole('button', { name: messages['common.cancel'][language], exact: true }).scrollIntoViewIfNeeded();
+      await expect(page.locator('.photo-actions')).toBeInViewport({ ratio: 1 });
+      await expect(button(page, 'bulk.entry', language)).toBeInViewport({ ratio: 1 });
+      const directory = path.resolve('test-results/capture1-visual');
+      await mkdir(directory, { recursive: true });
+      const file = path.join(directory, `empty-${language}-${width === 320 ? 'mobile' : 'desktop'}.png`);
+      await page.screenshot({ path: file, fullPage: false, animations: 'disabled', scale: 'css' });
+      const stat = await lstat(file);
+      expect(stat.isFile() && stat.size > 24 && stat.size <= 1024 * 1024).toBe(true);
+    });
+  }
+}
+
 test('three photos: one analysis each on its final photo, nothing saved until Save all, then all three saved', async ({ page }) => {
   const api = await aiFixture(page);
   await startBatch(page, api, 3);
