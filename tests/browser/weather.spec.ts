@@ -4,7 +4,7 @@ import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { locales, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { mockBackend, owners, signIn } from './mock-backend';
-import { accountMenu, expectIdentity, expectSignedIn, openAccountMenu } from './shell-support';
+import { accountMenu, expectIdentity, expectSignedIn, openAccountMenu, settleShell } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -30,6 +30,28 @@ async function footerFits(page: Page) {
       fits: [...footer.children].every(child => child.scrollWidth <= child.clientWidth), width: innerWidth };
   });
   expect(layout.separator === 'none' && layout.ownLine && layout.fits, JSON.stringify(layout)).toBe(true);
+}
+async function detailsFit(page: Page) {
+  await expect(bar(page)).toBeVisible();
+  const layout = await bar(page).evaluate(panel => {
+    const bounds = (element: Element) => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+    };
+    const group = panel.querySelector('.weather-place')!, line = panel.querySelector('.weather-line')!;
+    const buttons = [...panel.querySelectorAll('button')];
+    return { panel: bounds(panel), group: bounds(group), line: bounds(line),
+      scrollWidth: panel.scrollWidth, clientWidth: panel.clientWidth,
+      controlsFit: buttons.every(button => button.scrollWidth <= button.clientWidth && button.getBoundingClientRect().height >= 44),
+      readable: [line, ...buttons].every(element => parseFloat(getComputedStyle(element).fontSize) >= 14) };
+  });
+  expect(layout.group.bottom, JSON.stringify(layout)).toBeLessThanOrEqual(layout.line.top);
+  for (const child of [layout.group, layout.line]) {
+    expect(child.left).toBeGreaterThanOrEqual(layout.panel.left);
+    expect(child.right).toBeLessThanOrEqual(layout.panel.right);
+  }
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+  expect(layout.controlsFit && layout.readable, JSON.stringify(layout)).toBe(true);
 }
 const user = { kind: 'user', revision: 1 };
 const oulu = { weather_enabled: true, weather_city: 'Oulu, Finland', latitude: 65, longitude: 25.5 };
@@ -971,8 +993,14 @@ test.describe('bounded I16 visual evidence', () => {
     // Indoors shows no weather line since UI1, so only the other Today scenes have one to place the choice against.
     else if (selected.scene.startsWith('today')) {
       // The place choice leads the forecast inside the header disclosure at every width.
-      const [group, line] = await Promise.all([bar(page).locator('.weather-place').boundingBox(), bar(page).locator('.weather-line').first().boundingBox()]);
-      expect(group && line && group.y + group.height <= line.y).toBe(true);
+      await detailsFit(page);
+      if (selected.scene === 'today-forecast' && selected.zoom) {
+        await page.setViewportSize({ width: selected.width, height: 568 });
+        await settleShell(page);
+        await detailsFit(page);
+        await page.setViewportSize({ width: selected.width, height: 900 });
+        await settleShell(page);
+      }
     }
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(await page.evaluate(({ expectedLanguage, width }) => {

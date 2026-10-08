@@ -6,7 +6,7 @@
 .weather-trigger > .icon { flex: 0 0 auto; }
 .weather-trigger > .icon:last-child { width: 14px; height: 14px; }
 .weather-trigger:hover, .weather-trigger[aria-expanded="true"] { background: var(--well); }
-.weather-widget .weather-bar { position: absolute; z-index: 10; top: calc(100% + 8px); right: 0; display: flex; flex-direction: column; align-items: stretch; gap: 12px; width: min(24rem, calc(100vw - 32px)); max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 16px; box-shadow: 0 8px 28px #24332E24; font-size: .875rem; }
+.weather-widget .weather-bar { position: absolute; z-index: 10; top: calc(100% + 8px); right: 0; display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 12px; width: min(24rem, calc(100vw - 32px)); max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 16px; box-shadow: 0 8px 28px #24332E24; font-size: .875rem; }
 .weather-widget .weather-bar[hidden] { display: none; }
 .weather-details-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .weather-details-heading h2 { margin: 0; font-size: 1rem; }

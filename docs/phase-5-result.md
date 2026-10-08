@@ -385,3 +385,45 @@ preserved, not reused as WEATHER1 acceptance.
 - Independent code review, required exact-head CI, visual acceptance, real
   provider/device checks and owner-run Pages deployment are not claimed.
   No hosted, integration/security or full browser suite ran locally.
+
+### Exact-head CI repair
+
+CI `37737696377` failed on published head
+`5f58f70a30b84a9359669ab587ca6806ca00d172`. No Actions rerun or merge was
+attempted. The coordinator approved adding only the presentation interaction
+in `tests/browser/stylist.spec.ts` to the existing packet scope.
+
+- The stylist manual-temperature privacy test still tried to use a hidden
+  weather control. It now opens the disclosure first; the manual value,
+  null-weather request assertion and timeouts are unchanged. Targeted
+  weather-control consumer searches found no additional unadapted spec.
+- The historical I16 Finnish 320 px / 200% forecast ordering check failed in
+  CI. Its first local text-only diagnostic at height 900 passed: group
+  `(x=33,y=224.765625,h=65.390625)`, forecast
+  `(x=33,y=302.15625,h=355.953125)`, horizontal scroll/client widths both 286,
+  zero page/panel scroll and no transform. That exact CI failure was not
+  reproduced locally; no assertion or timeout was weakened to conceal it.
+- A bounded height-568 probe demonstrated a real coupled source defect:
+  the column disclosure inherited the old card's `flex-wrap: wrap`. With
+  panel height 336, the forecast wrapped beside the controls:
+  group `(x=33,y=389.984375,h=65.390625)`, forecast
+  `(x=276.390625,y=153.375,h=355.953125)`, scroll/client widths 529/286.
+  The disclosure now explicitly uses `flex-wrap: nowrap` and vertical
+  scrolling. No claim is made that local font/viewport measurements prove
+  the precise CI height-900 failure's cause.
+- The historical assertion retains strict group-before-forecast ordering,
+  measured together in one DOM snapshot, and adds horizontal containment,
+  no horizontal overflow, readable text and whole 44 px button targets.
+  Its Finnish zoomed forecast also checks height 568, restoring height 900
+  before the existing capture path. Temporary probe logging was removed.
+- `npm run test:browser -- tests/browser/weather.spec.ts --project=webkit-photo --workers=2 --retries=0 --grep "bounded I16 visual evidence.*today-forecast fi-320-200"`:
+  post-repair, 1 passed, with no image writes in this project.
+- `npm run test:browser -- tests/browser/stylist.spec.ts tests/browser/shell-layout.spec.ts --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep "a manual temperature on Today is not sent while weather is turned off|WEATHER1 Today header geometry"`:
+  11 passed: 2 stylist checks and 9 EN/FI/SV header checks. The existing
+  WebKit project does not select `stylist.spec.ts`; no WebKit stylist pass or
+  config/CI change is claimed. Fixture port 5197, no retries or captures.
+- Post-repair `npm run lint`, `npm run typecheck`,
+  `npm run check:translations` (1105 keys) and `git diff --check`: pass.
+  Independent repair-delta review, publication and natural new-head CI
+  remain pending. No additional local images were
+  generated; final exact-head CI captures and coordinator review remain open.
