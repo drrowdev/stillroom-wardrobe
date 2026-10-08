@@ -8242,3 +8242,93 @@ Tests: a `UX L1c saved item layout` block in `tests/browser/ux-l1a.spec.ts` chec
 Deviations and known limits:
 - The 200% text coverage is emulated through CSS font sizes. Real 200% browser zoom still needs a manual check.
 - Captures reuse the existing slots in `ux-l1a` (`saved-item-*`) and `item-details`, with no new artifact. The writer has not opened them. Visual acceptance awaits coordinator review.
+
+## CAPTURE1 secondary action spacing - local candidate (8 October 2026)
+
+Owner packet [#84 c6066777750](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6066777750)
+and coordinator [approval + START c6066866805](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6066866805).
+Base/unchanged HEAD `fd47778e68b036cf52274bf9e660c9e97f1eaae3`;
+branch `drrowdev-capture1-action-spacing`. App session
+`efcdea5b-ccde-446d-8c51-84885d619da0`, CLI session
+`077c2feb-4f0a-41e6-84e6-b8cae83baf71`, local GPT-6.1 Sol/medium.
+This is an unstaged four-path candidate, not reviewed, published, deployed or
+accepted. R04/R16/R17/R27 scope preserves R28/I29 explicit Save.
+
+The empty Add screen's Add several photos and Cancel now each have a scoped
+flex-centering container at their original DOM positions. A 12px block gap
+separates them; translated labels wrap within the panel and retain minimum
+44px targets. This removes reliance on equal-specificity button display rules
+in differently ordered stylesheets. Conditions, IDs, handlers, disabled
+expressions, keyboard order and intervening statuses/errors/camera help are
+unchanged. Choose photo and Take photo remain exposed, not in Photo options.
+No copy, global CSS, dependency, CI, account/data, AI/provider, photo-pipeline,
+schema or storage change.
+
+Validation used process-local pinned Node 24.19.0/npm 11.17.0. Initial
+`npm run typecheck` failed because `tsc` was absent; only then
+`npm ci --ignore-scripts --no-audit --no-fund` restored 216 locked packages.
+One initial readiness probe used a nonexported Playwright internal subpath
+and failed; the corrected read-only manifest/executable probe matched locked
+Chromium/headless revision1243 and WebKit2359 and launched both successfully.
+Fixture port5197 was free before each invocation; browser workers2/retries0.
+`ALLOW_HOSTED_SMOKE` stayed unset; no Docker, backend or hosted operation.
+
+Actual command chronology (all browser selections use the three explicit
+projects `--project=chromium --project=mobile --project=webkit-photo`,
+`--workers=2 --retries=0`):
+
+- Before product edits:
+  `npm run test:browser -- 'bulk-upload\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'CAPTURE1 geometry and entry actions en 320'`
+  failed all3 projects: the first secondary button's center was 82.828125px
+  away from the panel center. No captures were written.
+- After the layout repair:
+  `npm run test:browser -- 'bulk-upload\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'CAPTURE1 geometry|three photos: one analysis each'`
+  passed3 existing bulk cases and failed18 new cases: the photo-choice role
+  locator also matched the hidden file input. Scoping it to PhotoChoice fixed
+  the harness ambiguity.
+- `npm run test:browser -- 'bulk-upload\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'CAPTURE1 geometry'`
+  then failed18 cases because the new test incorrectly expected Bulk Back to
+  return to wardrobe. Actual existing navigation returns to Add; correcting
+  that expectation yielded18 passes on the next identical command.
+- Final
+  `npm run test:browser -- 'bulk-upload\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'CAPTURE1|three photos: one analysis each'`:
+  **27 passed, 12 intentional capture-project skips, zero failures**. The
+  18 functional geometry/journey cases ran on every project; skips restrict
+  capture-only cases to the six approved outputs and are not functional passes.
+- `npm run test:browser -- 'ai-photo-first\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'Save excludes Cancel until its finalizer has settled'`:
+  **3 passed**, preserving busy-Save/disabled-Cancel behavior.
+- Final `npm run lint`, `npm run typecheck`, `npm run check:translations`
+  (1131 EN/FI/SV keys, 217 source files) and `git diff --check`: **PASS**.
+
+New tests measure actual control/text rectangles, centering, minimum44px
+dimensions, >=12px separation, wrapping and horizontal overflow at320 and1280
+in EN/FI/SV, including200% text resizing and malformed synthetic camera-photo
+error placement. Axe passes; keyboard entry, Bulk Back and Cancel retain their
+existing behavior. The initial/failed entry creates no item/image or analysis
+request. Existing three-photo explicit-Save and held finalizer tests use mock
+routes only, never a paid provider. No unit logic changed, so no affected unit
+suite was selected. Full browser/integration/security/build/scans remain CI
+gates, not claimed local passes. Fixture GoTrue multiple-instance warnings
+were observed without a test failure; no unrelated Auth change was made.
+
+Exactly six synthetic PNGs were written once under ignored
+`test-results/capture1-visual/`: EN/FI/SV320x568 mobile (20092-22203bytes) and
+1280x900 Chromium (23224-24782bytes), each <=1MiB. Captures scroll the empty
+screen to show the photo choices and secondary actions; no owner photo is
+used. WebKit writes none. Writer inspected file metadata only, never images.
+Existing CI copies all `test-results/*-visual` directories into exact-head
+`app-visual-shard-*` artifacts; no dedicated CAPTURE1 upload/CI edit is needed.
+Coordinator actual exact-head visual review is still pending.
+
+Own machine-readable evidence remains in this CLI session's `events.jsonl`
+and `C:\Users\mlagus\.copilot\logs\process-1791485349198-60376.log`:
+matching session.start Sol/medium/cwd, actual model-bearing assistant messages,
+and API response model/usage plus matching response_session_id. Coordinator
+must independently cross-match it with the app session/branch/base/scope.
+Local telemetry is not tamper-proof or native-platform-equivalent.
+
+Remaining: coordinator ONE read-only Opus5.5/high review before commit/push/PR,
+separate publication instruction, all required exact-head CI, actual six-image
+coordinator review, normal guarded merge and owner-run deployment. Synthetic
+geometry/text resizing do not establish real phone/browser zoom, native-language
+or owner acceptance. Held #27/R6F1 and existing release gates remain untouched.
