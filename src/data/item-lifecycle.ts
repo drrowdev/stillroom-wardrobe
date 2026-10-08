@@ -79,6 +79,12 @@ export class ItemLifecycleClient {
     return rows[0]!;
   }
   statusOf(id: string, signal?: AbortSignal) { return this.bounded(signal, work => this.status(work, id)); }
+  findStatus(id: string, signal?: AbortSignal): Promise<DeletionStatus | null> {
+    return this.bounded(signal, async work => {
+      const rows = await this.statuses(work, [id]);
+      return rows[0] ?? null;
+    });
+  }
   list(after: string | null, signal?: AbortSignal): Promise<{ rows: DeletionStatus[]; next: string | null }> {
     return this.bounded(signal, async work => {
       if (after !== null && !canonicalId(after)) throw new AppError('error.unavailable');

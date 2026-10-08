@@ -66,6 +66,36 @@ function harness(options: { deleteReply?: () => Promise<Response> | Response; lo
   return { client, api, requests, controller, scope, session, transport, intent: deletionIntent(initial, 1, nonce) };
 }
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+describe('findStatus reads absence without weakening statusOf', () => {
+  it('returns null only for validated empty status and leaves statusOf strict', async () => {
+    const h = harness(); h.transport.mockImplementation(async () => json([]));
+    expect(await h.api.findStatus(id)).toBeNull();
+    await expect(h.api.statusOf(id)).rejects.toThrow('error.unavailable');
+  });
+  it('returns exactly the requested owned status', async () => {
+    const h = harness();
+    expect(await h.api.findStatus(id)).toEqual(status);
+  });
+  for (const [name, data] of [
+    ['two', [status, status]], ['mismatched', [{ ...status, id: nonce }]],
+    ['foreign', [{ ...status, owner_id: nonce }]], ['malformed', [{ id }]],
+    ['nonarray', null],
+  ] as const) {
+    it(`rejects ${name} instead of returning absence`, async () => {
+      const h = harness(); h.transport.mockImplementation(async () => json(data));
+      await expect(h.api.findStatus(id)).rejects.toThrow('error.unavailable');
+    });
+  }
+  it('rejects RPC errors, invalid IDs, owner changes and aborts', async () => {
+    const h = harness(); h.transport.mockImplementation(async () => json({ code: '42501', message: 'Denied' }, 403));
+    await expect(h.api.findStatus(id)).rejects.toThrow();
+    await expect(h.api.findStatus('invalid')).rejects.toThrow();
+    h.scope.epoch++;
+    await expect(h.api.findStatus(id)).rejects.toThrow();
+    h.controller.abort();
+    await expect(h.api.findStatus(id)).rejects.toThrow();
+  });
+});
 function operationReceipt(phase: DeletionOperation['phase'] = 'prepared', total = 2): DeletionOperation {
   return { itemId: id, requestId: nonce, phase, expectedVersion: phase === 'completed' ? null : 2,
     inventoryHash: ['prepared', 'authorized', 'removing_registered'].includes(phase) ? hash : null,

@@ -10,7 +10,8 @@ import type { OutfitRecord } from '../../domain/outfits';
 import type { MessageKey } from '../../i18n';
 
 type Failure = { id: string; key: MessageKey };
-type Results = { done: string[]; failed: string[] };
+type TargetResult = { id: string; outcome: OutfitOutcome | { kind: 'not-started' } };
+type Results = { done: string[]; failed: string[]; outcomes: TargetResult[] };
 type Notice = { records: OutfitRecord[]; expiresAt: number };
 
 // Owner-lived, not route-lived: uncertain intents survive navigation but never an owner/epoch change.
@@ -25,6 +26,7 @@ export function useOutfitLifecycle({ client, scope, online, onChanged, onWriting
   const running = useRef(false);
   const pending = useRef(new Map<string, OutfitIntent>());
   const connected = useRef(online); connected.current = online;
+  const currentFailures = useRef(failures); currentFailures.current = failures;
   useEffect(() => {
     const clear = () => { pending.current.clear(); running.current = false; };
     scope.signal.addEventListener('abort', clear, { once: true });
@@ -32,11 +34,11 @@ export function useOutfitLifecycle({ client, scope, online, onChanged, onWriting
   }, [scope]);
 
   async function run(intents: OutfitIntent[], checking: boolean, undoing = false): Promise<Results> {
-    const results: Results = { done: [], failed: [] };
+    const results: Results = { done: [], failed: [], outcomes: intents.map(intent => ({ id: intent.baseline.id, outcome: { kind: 'not-started' } })) };
     if (running.current || !connected.current || scope.signal.aborted || !checking && pending.current.size
       && (!undoing || intents.some(intent => pending.current.has(intent.baseline.id)))) return results;
     const affected = new Set(intents.map(intent => intent.baseline.id));
-    const failed = failures.filter(failure => pending.current.has(failure.id) && !affected.has(failure.id));
+    const failed = currentFailures.current.filter(failure => pending.current.has(failure.id) && !affected.has(failure.id));
     running.current = true; setBusy(true); setReading(checking); onWriting(true); setFailures(failed);
     const undo: OutfitRecord[] = [];
     try {
@@ -55,6 +57,7 @@ export function useOutfitLifecycle({ client, scope, online, onChanged, onWriting
           }
         }
         if (scope.signal.aborted) break;
+        results.outcomes = results.outcomes.map(result => result.id === id ? { id, outcome: reply } : result);
         if (reply.kind !== 'unknown') pending.current.delete(id);
         if (reply.kind === 'saved') {
           results.done.push(id);
@@ -63,7 +66,8 @@ export function useOutfitLifecycle({ client, scope, online, onChanged, onWriting
         } else { results.failed.push(id); failed.push({ id, key: outfitProblems[reply.kind] }); }
       }
       if (!scope.signal.aborted) {
-        setFailures(failed); setUnknown([...pending.current.values()]);
+        setFailures(current => [...current.filter(failure => !affected.has(failure.id) && pending.current.has(failure.id)),
+          ...failed.filter(failure => affected.has(failure.id))]); setUnknown([...pending.current.values()]);
         if (undo.length) setNotice({ records: undo, expiresAt: performance.now() + undoMs });
         // Refresh failures too; stale versions may only be used again after a fresh, explicit confirmation.
         onChanged();
@@ -100,7 +104,7 @@ export function useOutfitLifecycle({ client, scope, online, onChanged, onWriting
     undoBlocked: busy || unknown.some(intent => notice?.records.some(record => record.id === intent.baseline.id)),
     check: () => run([...pending.current.values()], true),
     undo: () => notice && performance.now() < notice.expiresAt
-      ? run(intentsFor(notice.records, 'restore'), false, true) : Promise.resolve({ done: [], failed: [] }),
+      ? run(intentsFor(notice.records, 'restore'), false, true) : Promise.resolve<Results>({ done: [], failed: [], outcomes: [] }),
     dismiss: () => { if (!running.current) { setFailures(current => current.filter(failure => pending.current.has(failure.id))); setNotice(null); } },
   };
 }

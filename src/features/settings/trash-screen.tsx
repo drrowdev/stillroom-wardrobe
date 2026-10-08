@@ -1,14 +1,42 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { LifecycleError } from '../../data/item-lifecycle';
 import { AppError } from '../../data/errors';
 import { preparedDeletionIntent, reversibleDeletion, type PreparedDeletionIntent, type DeletionOperation, type DeletionStatus, type TrashIntent } from '../../domain/item-lifecycle';
-import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
+import { locales, pluralText, type Language, type MessageKey, type Translate } from '../../i18n';
 import { Failure, type Shared } from './trash';
 import { useAction } from './use-action';
 import '../../styles/data-flow.css';
 import type { AppClient } from '../../data/client';
 import type { OutfitLifecycle } from '../outfits/use-outfit-lifecycle';
 import { OutfitTrash } from './outfit-trash';
+import { checkOutfitAction } from '../../data/outfit-lifecycle';
+import { loadOutfit, loadTrashedOutfits } from '../../data/outfits';
+import { reconcileOutfit } from '../../domain/outfit-lifecycle';
+import { emptyTrashFor, observeTrashNavigation, type EmptyTrashDependencies, type EmptyTrashState } from './empty-trash';
+
+function EmptyTrashDialog({ state, language, t, onCancel, onConfirm }: {
+  state: EmptyTrashState; language: Language; t: Translate; onCancel: () => void; onConfirm: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const element = dialog.current!; element.showModal();
+    return () => { element.close(); document.getElementById('empty-trash-button')?.focus(); };
+  }, []);
+  return <dialog ref={dialog} className="dialog lifecycle-dialog" aria-labelledby="empty-trash-title" aria-describedby="empty-trash-body"
+    onCancel={event => { event.preventDefault(); onCancel(); }}>
+    <h2 id="empty-trash-title">{t('emptyTrash.confirm')}</h2>
+    <div id="empty-trash-body">
+      <ul><li>{pluralText(language, 'emptyTrash.items', state.targets.filter(target => target.kind === 'clothes').length)}</li>
+        <li>{pluralText(language, 'emptyTrash.outfits', state.targets.filter(target => target.kind === 'outfit').length)}</li></ul>
+      {state.blockers.length ? <div role="alert"><p>{t('emptyTrash.blocked')}</p>{state.blockers.map(key => <p key={key}>{t(key)}</p>)}</div>
+        : <><p>{t('emptyTrash.consequences')}</p><p>{t('deletion.garmentWarning')}</p></>}
+    </div>
+    <div className="dialog-actions">
+      <button type="button" autoFocus className="button button-secondary" onClick={onCancel}>{t('common.cancel')}</button>
+      <button type="button" className="button button-danger" disabled={state.blockers.length > 0} onClick={onConfirm}>{t('emptyTrash.action')}</button>
+    </div>
+  </dialog>;
+}
 
 function DeleteDialog({ preview, busy, t, language, returnFocus, onCancel, onConfirm }: {
   preview: DeletionStatus; busy: boolean; t: Translate; language: Language; returnFocus: HTMLButtonElement | null; onCancel: () => void; onConfirm: () => void;
@@ -38,6 +66,9 @@ export function Trash(props: Shared & { client: AppClient; outfitLifecycle: Outf
   const { lifecycle, scope, images, online, t, language } = props;
   const action = useAction(scope, online);
   const { run } = action;
+  const [batchController] = useState(() => emptyTrashFor(scope));
+  const batch = useSyncExternalStore(batchController.subscribe, batchController.getSnapshot);
+  const [batchInvalidation, setBatchInvalidation] = useState(0);
   const [rows, setRows] = useState<DeletionStatus[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -48,6 +79,26 @@ export function Trash(props: Shared & { client: AppClient; outfitLifecycle: Outf
   const [uncertain, setUncertain] = useState(false);
   const [restore, setRestore] = useState<TrashIntent | null>(null);
   const [notice, setNotice] = useState<MessageKey | null>(null);
+  const dependencies: EmptyTrashDependencies = {
+    items: lifecycle, outfits: props.outfitLifecycle, online,
+    listOutfits: signal => loadTrashedOutfits(props.client, scope, signal),
+    readOutfit: (id, signal) => loadOutfit(props.client, scope, id, signal, false),
+    checkOutfit: intent => checkOutfitAction(props.client, scope, intent),
+    invalidate: paths => images.invalidate(paths), onDeleting: props.onDeleting,
+    onSettled: ids => {
+      for (const id of ids) props.onDeleting(id);
+      if (ids[0]) props.onChanged(ids[0]);
+      props.outfitLifecycle.refresh(); setLoaded(false); setBatchInvalidation(value => value + 1);
+    },
+  };
+  const currentDependencies = useRef(dependencies);
+  useLayoutEffect(() => { currentDependencies.current = dependencies; batchController.updateDependencies(dependencies); });
+  useLayoutEffect(() => {
+    const detach = batchController.attach(currentDependencies.current);
+    const stopObserving = observeTrashNavigation(batchController.pause);
+    return () => { stopObserving(); detach(); };
+  }, [batchController]);
+  useEffect(() => { if (!online) batchController.pause(); }, [online, batchController]);
   const deleteTrigger = useRef<HTMLButtonElement | null>(null);
   const cancelledFocus = useRef<string | null>(null);
   useEffect(() => {
@@ -98,12 +149,48 @@ export function Trash(props: Shared & { client: AppClient; outfitLifecycle: Outf
       }
     });
   }
-  const locked = action.busy || intent !== null || restore !== null || props.outfitLifecycle.locked;
+  const batchLocked = batch.working || batch.phase === 'reviewing';
+  const individualLocked = action.busy || intent !== null || restore !== null;
+  const locked = individualLocked || props.outfitLifecycle.locked || batchLocked;
+  const pendingBatch = batch.targets.find(target => target.result !== 'deleted' && target.result !== 'skipped');
+  const checkingBatchOutfit = pendingBatch?.kind === 'outfit' && pendingBatch.sent && props.outfitLifecycle.unknown.length === 1
+    && props.outfitLifecycle.unknown.every(intent => intent.action === 'delete' && intent.epoch === pendingBatch.intent.epoch
+      && reconcileOutfit(pendingBatch.intent, intent.baseline).kind === 'notSaved');
+  const batchActionLocked = individualLocked || props.outfitLifecycle.locked;
+  const batchCheckLocked = individualLocked || props.outfitLifecycle.busy || props.outfitLifecycle.locked && !checkingBatchOutfit;
   return <section className="trash-page" aria-labelledby="trash-title">
-    <button className="text-button" onClick={props.onBack}>{t('common.back')}</button>
+    <button className="text-button" onClick={() => { batchController.pause(); props.onBack(); }}>{t('common.back')}</button>
     <div className="page-heading"><h1 id="trash-title" tabIndex={-1}>{t('nav.trash')}</h1>
-      <button className="text-button" disabled={!online || action.busy} onClick={() => { void action.run(signal => load(signal, null)); }}>{t('common.refresh')}</button></div>
+      <button className="text-button" disabled={!online || action.busy || batchLocked} onClick={() => { void action.run(signal => load(signal, null)); }}>{t('common.refresh')}</button></div>
     <p className="muted">{t('trash.retention')}</p>
+    <button id="empty-trash-button" type="button" className="button button-secondary" disabled={!online || locked || batch.phase !== 'idle'}
+      onClick={() => { void batchController.discover(); }}>{t('emptyTrash.action')}</button>
+    {batch.phase === 'discovering' && <p role="status">{t('common.loading')}</p>}
+    {batch.phase !== 'idle' && batch.phase !== 'reviewing' && batch.phase !== 'discovering' && <section className="settings-card empty-trash-progress" aria-label={t('emptyTrash.action')}>
+      <div role="status" aria-live="polite">
+        <p>{pluralText(language, 'emptyTrash.deletedItems', batch.targets.filter(target => target.kind === 'clothes' && target.result === 'deleted').length)}</p>
+        <p>{pluralText(language, 'emptyTrash.deletedOutfits', batch.targets.filter(target => target.kind === 'outfit' && target.result === 'deleted').length)}</p>
+        <p>{t('emptyTrash.remaining', { count: new Intl.NumberFormat(locales[language]).format(batch.targets.filter(target => target.result !== 'deleted' && target.result !== 'skipped').length) })}</p>
+        {batch.phase === 'finished' && <p>{t('emptyTrash.finished')}</p>}
+      </div>
+      {batch.error && <p role="alert">{t(batch.error)}</p>}
+      {pendingBatch?.problem && pendingBatch.problem !== batch.error && <p>{t('emptyTrash.targetProblem', { name: pendingBatch.title, problem: t(pendingBatch.problem) })}</p>}
+      {batch.targets.filter(target => target.result === 'skipped').map(target => <p key={`${target.kind}:${target.id}`}>{t('emptyTrash.targetProblem', { name: target.title, problem: t('emptyTrash.skipped') })}</p>)}
+      <div className="settings-actions">
+        {batch.phase !== 'finished' && <>
+          {(pendingBatch?.sent || pendingBatch?.kind === 'clothes' && pendingBatch.existing) &&
+            <button type="button" className="button button-secondary" disabled={!online || batch.working || batchCheckLocked}
+            onClick={() => { void batchController.check(); }}>{t('lifecycle.check')}</button>}
+          <button type="button" className="button button-danger" disabled={!online || batch.working || batchActionLocked || batch.targets.some(target => target.result === 'unknown' || target.result === 'changed')}
+            onClick={() => { void batchController.resume(); }}>{t('lifecycle.resume')}</button>
+          {pendingBatch?.kind === 'clothes' && !pendingBatch.existing && pendingBatch.receipt && reversibleDeletion(pendingBatch.receipt)
+            && pendingBatch.result !== 'unknown' && <button type="button" className="text-button" disabled={!online || batch.working || batchActionLocked}
+            onClick={() => { void batchController.cancelPreparation(); }}>{t('deletion.cancel')}</button>}
+        </>}
+        <button type="button" className="text-button" disabled={batch.working} onClick={batchController.clear}>{t(batch.phase === 'finished' ? 'common.close' : 'emptyTrash.end')}</button>
+      </div>
+    </section>}
+    {batch.phase === 'idle' && batch.error && <p role="alert">{t(batch.error)}</p>}
     <h2>{t('outfitTrash.clothes')}</h2>
     <Failure action={action} t={t} />
     {notice && <p role="status" className="notice">{t(notice)}</p>}
@@ -166,8 +253,10 @@ export function Trash(props: Shared & { client: AppClient; outfitLifecycle: Outf
       </div>}
     </li>)}</ul>
     {next && <button className="button button-secondary" disabled={locked || !online} onClick={() => { void action.run(signal => load(signal, next)); }}>{t('wardrobe.more')}</button>}
-    <OutfitTrash client={props.client} scope={scope} online={online} invalidation={props.invalidation}
-      lifecycle={props.outfitLifecycle} disabled={action.busy || intent !== null || restore !== null} language={language} t={t} />
+    <OutfitTrash client={props.client} scope={scope} online={online} invalidation={props.invalidation + batchInvalidation}
+      lifecycle={props.outfitLifecycle} disabled={action.busy || intent !== null || restore !== null || batchLocked} language={language} t={t} />
+    {batch.phase === 'reviewing' && <EmptyTrashDialog state={batch} language={language} t={t}
+      onCancel={batchController.clear} onConfirm={() => { void batchController.confirm(); }} />}
     {dialog && intent && operation?.phase === 'prepared' && !uncertain && <DeleteDialog preview={intent.preview}
       busy={action.busy} t={t} language={language} returnFocus={deleteTrigger.current} onCancel={cancel} onConfirm={() => {
       void action.run(async signal => {

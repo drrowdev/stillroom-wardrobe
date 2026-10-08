@@ -956,6 +956,37 @@ test.describe('OUTFIT1 outfit lifecycle', () => {
     await page.evaluate(() => { location.hash = '#/trash'; });
     await expect(page.locator('#trash-title')).toBeVisible();
   };
+  test('TRASH1 pending Wear must resolve before the all-entry confirmation', async ({ page }) => {
+    let id = '';
+    const { api, clothes } = await start(page, 'en', (api, clothes) => { id = seedOutfit(api, [clothes.top.id]); });
+    let blocked = true;
+    await page.route(url => url.pathname === '/rest/v1/wear_events' && url.searchParams.has('id'), async route => {
+      if (blocked) await route.fulfill({ status: 200, json: { invalid: true } }); else await route.fallback();
+    });
+    await openOutfits(page); await page.locator(`a[href="#/outfits/${id}"]`).click();
+    api.wearControl.next = { mode: 'committedLost' };
+    await button(page, 'calendar.wearToday').click();
+    await expect(page.getByRole('alert')).toContainText(text('calendar.unknown'));
+    Object.assign(api.outfits.find(row => row.id === id)!, { deleted_at: new Date().toISOString(), version: 2 });
+    Object.assign(clothes.trousers, { deleted_at: new Date().toISOString(), version: 2 });
+    await goTrash(page);
+    await page.locator('#empty-trash-button').click();
+    const dialog = page.locator('dialog[aria-labelledby="empty-trash-title"]');
+    await expect(dialog).toContainText(text('emptyTrash.blocked'));
+    await expect(dialog.getByRole('button', { name: text('emptyTrash.action'), exact: true })).toBeDisabled();
+    expect(api.deletionOperations).toHaveLength(0); expect(api.outfitLifecycleControl.writes).toHaveLength(0);
+    await dialog.getByRole('button', { name: text('common.cancel'), exact: true }).click();
+    blocked = false;
+    await page.locator('.outfit-wear-check').getByRole('button', { name: text('lifecycle.check'), exact: true }).click();
+    await expect(page.locator('.outfit-wear-check')).toHaveCount(0);
+    await page.locator('#empty-trash-button').click();
+    await expect(dialog.getByRole('button', { name: text('emptyTrash.action'), exact: true })).toBeEnabled();
+    await dialog.getByRole('button', { name: text('emptyTrash.action'), exact: true }).click();
+    await expect(page.locator('.empty-trash-progress')).toContainText(text('emptyTrash.finished'));
+    expect(api.wearEvents[0]).toMatchObject({ outfit_id: null, state: 'worn' });
+    expect(api.items.find(row => row.id === clothes.trousers.id)).toBeUndefined();
+    expect(api.items.find(row => row.id === clothes.top.id)).toMatchObject({ deleted_at: null });
+  });
   test('lost Wear today stays checkable after navigation and cannot be orphaned by Select all or bulk Trash', async ({ page }) => {
     let id = '', ordinary = '';
     const { api, clothes } = await start(page, 'en', (api, clothes) => {

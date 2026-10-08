@@ -1,4 +1,5 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type TestInfo, type Route } from '@playwright/test';
+import { randomUUID } from 'node:crypto';
 import { codePreloaded } from './lazy-support';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, lstat, readdir } from 'node:fs/promises';
@@ -111,6 +112,383 @@ test('I10b preparation stays reversible but an ambiguous authorization removes t
 });
 function checkRetry(page: Page, retry: number) {
   expect(!page.isClosed() && retry === 0, 'New lifecycle flakiness blocks acceptance').toBe(true);
+}
+type TrashApi = Awaited<ReturnType<typeof mockBackend>>;
+function seedTrashOutfit(api: TrashApi, itemId: string, title = 'Saved outfit', now = new Date().toISOString()) {
+  const id = randomUUID();
+  api.outfits.push({ id, owner_id: owners.a, title, occasion: 'everyday', notes: '', favourite: false,
+    deleted_at: now, version: 1, created_at: now, updated_at: now });
+  api.outfitItems.push({ owner_id: owners.a, outfit_id: id, item_id: itemId, position: 0 });
+  return id;
+}
+async function batchSetup(page: Page, language: Language = 'en', count = 1, withOutfit = true, options: MockOptions = {}) {
+  const api = await mockBackend(page, { ...options, initialLanguage: language });
+  const clothes = Array.from({ length: count }, (_, n) => {
+    const saved = api.seedSavedItem('a', `Trashed shirt ${n + 1}`);
+    saved.item.deleted_at = new Date().toISOString(); return saved;
+  });
+  const active = api.seedSavedItem('a', 'Active shirt'), peer = api.seedSavedItem('b', 'Robin private');
+  const outfitId = withOutfit ? seedTrashOutfit(api, String(clothes[0]!.item.id)) : null;
+  await page.goto('/'); await signIn(page);
+  await expect(page.locator('#wardrobe-title')).toBeVisible();
+  await trashPage(page, language);
+  await expect(page.locator('.trash-list').first().getByRole('listitem')).toHaveCount(Math.min(count, 40));
+  return { api, clothes, active, peer, outfitId };
+}
+const batchDialog = (page: Page) => page.locator('dialog[aria-labelledby="empty-trash-title"]');
+const progress = (page: Page) => page.locator('.empty-trash-progress');
+async function confirmBatch(page: Page, language: Language = 'en') {
+  await page.locator('#empty-trash-button').click();
+  await expect(batchDialog(page)).toBeVisible();
+  await batchDialog(page).getByRole('button', { name: messages['emptyTrash.action'][language], exact: true }).click();
+}
+async function batchCapture(page: Page, info: TestInfo, name: string, language: Language) {
+  expect(info.retry).toBe(0);
+  await page.setViewportSize({ width: 320, height: 900 });
+  expect(await page.evaluate(({ origin, language }) => location.origin === origin && location.hash === '#/trash'
+    && document.documentElement.lang === language && document.documentElement.scrollWidth <= innerWidth
+    && !document.querySelector('#email,input[type=password]'), { origin: new URL(info.project.use.baseURL!).origin, language })).toBe(true);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+  if (info.project.name === 'chromium') {
+    const directory = path.resolve('test-results', 'trash1-visual'); await mkdir(directory, { recursive: true });
+    const buffer = await page.screenshot({ path: path.join(directory, `${name}.png`), fullPage: false });
+    expect(buffer.length).toBeLessThanOrEqual(1024 * 1024);
+    expect(buffer.readUInt32BE(16)).toBe(320); expect(buffer.readUInt32BE(20)).toBe(900);
+  }
+  await page.addStyleTag({ content: 'html { font-size: 200%; }' });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+}
+for (const language of ['en', 'fi', 'sv'] as const) {
+  test(`TRASH1 one mixed confirmation is reversible before consent (${language})`, async ({ page }, info) => {
+    const { api } = await batchSetup(page, language);
+    await page.locator('#empty-trash-button').click();
+    await expect(batchDialog(page)).toContainText(messages['emptyTrash.consequences'][language]);
+    await expect(batchDialog(page)).toContainText(messages['deletion.garmentWarning'][language]);
+    expect(api.deletionOperations).toHaveLength(0); expect(api.outfitLifecycleControl.writes).toHaveLength(0);
+    await batchCapture(page, info, `confirmation-${language}`, language);
+    await expect(batchDialog(page).getByRole('button', { name: messages['common.cancel'][language], exact: true })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(batchDialog(page)).toHaveCount(0);
+    await expect(page.locator('#empty-trash-button')).toBeFocused();
+    expect(api.requests.some(call => call.method === 'DELETE')).toBe(false);
+    expect(api.deletionOperations).toHaveLength(0); expect(api.outfitLifecycleControl.writes).toHaveLength(0);
+  });
+}
+test('TRASH1 includes every clothes page, preserves active/peer/history and excludes new trash', async ({ page }) => {
+  const { api, clothes, active, peer, outfitId } = await batchSetup(page, 'en', 41);
+  const intact = structuredClone({ active: active.item, peer: peer.item, image: peer.image });
+  const event = randomUUID();
+  api.wearEvents.push({ id: event, owner_id: owners.a, outfit_id: outfitId, local_date: '2026-01-01', timezone: 'Europe/Helsinki',
+    state: 'worn', label: 'Historical outfit', deleted_at: null, version: 1, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' });
+  api.wearLinks.push({ id: randomUUID(), owner_id: owners.a, event_id: event, item_id: clothes[0]!.item.id, title_snapshot: 'Historical shirt', category_snapshot: 'top' });
+  await page.locator('#empty-trash-button').click(); await expect(batchDialog(page)).toContainText('41 items');
+  const added = api.seedSavedItem('a', 'Added after confirmation snapshot'); added.item.deleted_at = new Date().toISOString();
+  await batchDialog(page).getByRole('button', { name: messages['emptyTrash.action'].en, exact: true }).click();
+  for (const itemId of clothes.map(saved => String(saved.item.id)).sort()) {
+    await expect.poll(() => api.deletionOperations.find(value => value.receipt.itemId === itemId)?.receipt.phase).toBe('completed');
+  }
+  await expect(progress(page)).toContainText(messages['emptyTrash.finished'].en);
+  expect(api.deletionOperations.filter(value => value.receipt.phase === 'completed')).toHaveLength(41);
+  expect(api.items.some(row => row.id === added.item.id)).toBe(true);
+  expect(api.outfits.some(row => row.id === outfitId)).toBe(false);
+  expect({ active: active.item, peer: peer.item, image: peer.image }).toEqual(intact);
+  expect(api.wearEvents[0]).toMatchObject({ outfit_id: null, label: 'Historical outfit', local_date: '2026-01-01', state: 'worn' });
+  expect(api.wearLinks[0]).toMatchObject({ title_snapshot: 'Historical shirt', category_snapshot: 'top' });
+  const writes = api.requests.filter(call => call.path.endsWith('/delete_trashed_outfit') || call.path.endsWith('/prepare_item_deletion'));
+  expect(writes[0]!.path).toContain('delete_trashed_outfit');
+  expect(api.requests.some(call => call.path.startsWith('/functions/'))).toBe(false);
+});
+test('TRASH1 restored targets are skipped, and bounded photos require deliberate Resume', async ({ page }, info) => {
+  const { api, clothes } = await batchSetup(page, 'en', 2, false);
+  const saved = clothes[0]!, targetId = String(saved.item.id);
+  for (let n = 0; n < 21; n++) {
+    const imageId = randomUUID(), main = `${owners.a}/${targetId}/${imageId}/main.jpg`, thumb = `${owners.a}/${targetId}/${imageId}/thumb.jpg`;
+    api.images.push({ ...saved.image, id: imageId, item_id: targetId, main_path: main, thumb_path: thumb, state: 'retired', retired_at: new Date().toISOString() });
+    api.files.set(main, api.fixture); api.files.set(thumb, api.fixture);
+  }
+  await page.locator('#empty-trash-button').click(); await expect(batchDialog(page)).toBeVisible();
+  Object.assign(clothes[1]!.item, { deleted_at: null, version: 2 });
+  await batchDialog(page).getByRole('button', { name: messages['emptyTrash.action'].en, exact: true }).click();
+  await expect(progress(page).getByRole('button', { name: messages['lifecycle.resume'].en, exact: true })).toBeEnabled();
+  expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(40);
+  await batchCapture(page, info, 'progress-en', 'en');
+  await progress(page).getByRole('button', { name: messages['lifecycle.resume'].en, exact: true }).click();
+  await expect(progress(page)).toContainText(messages['emptyTrash.finished'].en);
+  await expect(progress(page)).toContainText(messages['emptyTrash.skipped'].en);
+  expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(44);
+  expect(api.items.some(row => row.id === clothes[1]!.item.id)).toBe(true);
+});
+for (const checkWith of ['batch', 'global'] as const) {
+  test(`TRASH1 lost outfit reply uses ${checkWith} Check without resending`, async ({ page }) => {
+    const { api } = await batchSetup(page);
+    await page.route('**/rest/v1/rpc/delete_trashed_outfit', async route => {
+      api.outfitControl.readFailures = 100; await route.fallback();
+    });
+    api.outfitLifecycleControl.scripts.push({ mode: 'committedLost' });
+    await confirmBatch(page);
+    await expect(progress(page).getByRole('alert')).toContainText(messages['emptyTrash.checkFirst'].en);
+    expect(api.requests.some(call => call.method === 'DELETE')).toBe(false);
+    api.outfitControl.readFailures = 0;
+    if (checkWith === 'global') {
+      await page.locator('.notice-error').getByRole('button', { name: messages['lifecycle.check'].en, exact: true }).click();
+      await expect(page.locator('.notice-error').getByRole('button', { name: messages['lifecycle.check'].en, exact: true })).toHaveCount(0);
+    }
+    await progress(page).getByRole('button', { name: messages['lifecycle.check'].en, exact: true }).click();
+    await expect(progress(page).getByRole('button', { name: messages['lifecycle.resume'].en, exact: true })).toBeEnabled();
+    expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+    expect(api.requests.some(call => call.method === 'DELETE')).toBe(false);
+    await progress(page).getByRole('button', { name: messages['lifecycle.resume'].en, exact: true }).click();
+    await expect(progress(page)).toContainText(messages['emptyTrash.finished'].en);
+    expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+  });
+}
+test('TRASH1 transient outfit conflict resumes same confirmed intent, running try-on blocks clothes', async ({ page }) => {
+  const { api, outfitId } = await batchSetup(page);
+  api.outfitLifecycleControl.scripts.push({ mode: 'error', status: 400, body: { code: '22023', message: 'Request conflict' } });
+  await confirmBatch(page);
+  await expect(progress(page)).toContainText(messages['outfitTrash.notSaved'].en);
+  expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+  api.tryonControl.chains.push({ id: randomUUID(), owner: owners.a, outfitId: outfitId!, steps: [], nextStep: 1, state: 'running', resultId: null, expiresAtMs: Date.now() + 60000 });
+  await progress(page).getByRole('button', { name: messages['lifecycle.resume'].en, exact: true }).click();
+  await expect(progress(page)).toContainText(messages['outfitTrash.busy'].en);
+  expect(api.requests.some(call => call.method === 'DELETE')).toBe(false);
+  api.tryonControl.chains[0]!.expiresAtMs = Date.now() - 1;
+  await progress(page).getByRole('button', { name: messages['lifecycle.resume'].en, exact: true }).click();
+  await expect(progress(page)).toContainText(messages['emptyTrash.finished'].en);
+  expect(api.outfitLifecycleControl.writes.map(write => write.body.p_id)).toEqual([outfitId, outfitId, outfitId]);
+  await expect(batchDialog(page)).toHaveCount(0);
+});
+for (const navigation of ['back-write', 'back-check', 'tab-write', 'back-clothes'] as const) {
+  test(`TRASH1 ${navigation} commits navigation and stops all later targets`, async ({ page }, info) => {
+    expect(info.retry).toBe(0);
+    const { api } = await batchSetup(page, 'en', 2, navigation !== 'back-clothes');
+    const dispatches: string[] = [];
+    page.on('request', request => {
+      const pathname = new URL(request.url()).pathname;
+      if (request.method() === 'DELETE' || /\/(prepare_item_deletion|inventory_item_deletion|authorize_item_deletion|begin_prepared_item_deletion|finish_item_deletion|delete_trashed_outfit)$/.test(pathname))
+        dispatches.push(pathname);
+    });
+    let held: Route | null = null;
+    if (navigation === 'back-check') {
+      await page.route('**/rest/v1/rpc/delete_trashed_outfit', async route => { api.outfitControl.readFailures = 100; await route.fallback(); });
+      api.outfitLifecycleControl.scripts.push({ mode: 'committedLost' });
+      await confirmBatch(page);
+      await expect(progress(page).getByRole('alert')).toContainText(messages['emptyTrash.checkFirst'].en);
+      api.outfitControl.readFailures = 0;
+      await page.route(url => url.pathname === '/rest/v1/outfits' && url.searchParams.has('id'), async route => {
+        if (!held) held = route; else await route.fallback();
+      });
+      await progress(page).getByRole('button', { name: messages['lifecycle.check'].en, exact: true }).click();
+    } else {
+      await page.route(navigation === 'back-clothes' ? '**/rest/v1/rpc/prepare_item_deletion' : '**/rest/v1/rpc/delete_trashed_outfit',
+        async route => { if (!held) held = route; else await route.fallback(); });
+      await confirmBatch(page);
+    }
+    await expect.poll(() => held !== null).toBe(true);
+    const before = [...dispatches];
+    // Row locks must span pre-reads, outfit settlement and garment calls, not just the hook busy flag.
+    await expect(page.locator('.trash-list').first().getByRole('button', { name: messages['trash.restore'].en, exact: true }).first()).toBeDisabled();
+    if (navigation === 'tab-write') await page.getByRole('navigation').getByRole('link', { name: messages['nav.outfits'].en, exact: true }).click();
+    else await page.goBack();
+    if (navigation !== 'back-clothes') await expect(page.locator('#trash-title')).toBeVisible();
+    await held!.fallback();
+    await expect(page.locator(navigation === 'tab-write' ? '#outfits-title' : '#wardrobe-title')).toBeVisible();
+    await trashPage(page);
+    await expect(progress(page)).toContainText(messages['emptyTrash.paused'].en);
+    expect(dispatches).toEqual(before);
+    expect(api.deletionOperations.filter(value => value.receipt.phase === 'completed')).toHaveLength(0);
+    expect(api.requests.some(call => call.method === 'DELETE')).toBe(false);
+  });
+}
+test('TRASH1 row actions stay locked between outfit settlement and clothing pre-read', async ({ page }) => {
+  const { api } = await batchSetup(page);
+  await page.locator('#empty-trash-button').click(); await expect(batchDialog(page)).toBeVisible();
+  let held: Route | null = null;
+  await page.route('**/rest/v1/rpc/item_deletion_status', async route => { if (!held) held = route; else await route.fallback(); });
+  await batchDialog(page).getByRole('button', { name: messages['emptyTrash.action'].en, exact: true }).click();
+  await expect.poll(() => held !== null).toBe(true);
+  expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+  await expect(page.locator('.trash-list').first().getByRole('button', { name: messages['trash.restore'].en, exact: true })).toBeDisabled();
+  await expect(page.locator('.trash-list').first().getByRole('button', { name: messages['deletion.prepare'].en, exact: true })).toBeDisabled();
+  expect(api.deletionOperations).toHaveLength(0);
+  await held!.fallback();
+  await expect(progress(page)).toContainText(messages['emptyTrash.finished'].en);
+});
+test('TRASH1 known cleanup blockers prevent destructive consent without silently excluding items', async ({ page }) => {
+  const { api, clothes } = await batchSetup(page);
+  api.files.set(`${owners.a}/${clothes[0]!.item.id}/unsafe name.jpg`, api.fixture);
+  await page.locator('#empty-trash-button').click();
+  await expect(batchDialog(page)).toContainText(messages['emptyTrash.blocked'].en);
+  await expect(batchDialog(page)).toContainText(messages['deletion.blocked'].en);
+  await expect(batchDialog(page).getByRole('button', { name: messages['emptyTrash.action'].en, exact: true })).toBeDisabled();
+  expect(api.outfitLifecycleControl.writes).toHaveLength(0);
+  expect(api.deletionOperations).toHaveLength(0);
+  await page.keyboard.press('Escape');
+});
+test('TRASH1 double consent clicks dispatch once; no-op empty and offline never authorize', async ({ page }) => {
+  const { api } = await batchSetup(page);
+  await page.context().setOffline(true); await expect(page.locator('#empty-trash-button')).toBeDisabled();
+  await page.context().setOffline(false);
+  await page.locator('#empty-trash-button').click();
+  await batchDialog(page).getByRole('button', { name: messages['emptyTrash.action'].en, exact: true })
+    .evaluate(element => { (element as HTMLButtonElement).click(); (element as HTMLButtonElement).click(); });
+  await expect(progress(page)).toContainText(messages['emptyTrash.finished'].en);
+  expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+  expect(api.deletionOperations).toHaveLength(1);
+  await progress(page).getByRole('button', { name: messages['common.close'].en, exact: true }).click();
+  await expect(page.locator('#empty-trash-button')).toBeEnabled();
+  await page.locator('#empty-trash-button').click();
+  await expect(page.locator('#empty-trash-button')).toBeEnabled();
+  await expect(batchDialog(page)).toHaveCount(0);
+  expect(api.outfitLifecycleControl.writes).toHaveLength(1); expect(api.deletionOperations).toHaveLength(1);
+});
+test('TRASH1 full reload requires new remaining-only consent and resumes durable receipts without repeat DELETE', async ({ page }) => {
+  const { api } = await batchSetup(page, 'en', 1, true, { lifecycleLoss: 'delete' });
+  await confirmBatch(page);
+  await expect(progress(page).getByRole('alert')).toContainText(messages['lifecycle.unconfirmed'].en);
+  expect(api.outfitLifecycleControl.writes).toHaveLength(1);
+  expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(1);
+  await page.reload(); await expect(page.locator('#trash-title')).toBeVisible();
+  await expect(page.locator('.empty-trash-progress')).toHaveCount(0);
+  expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(1);
+  await page.locator('#empty-trash-button').click();
+  await expect(batchDialog(page)).toContainText('1 item'); await expect(batchDialog(page)).toContainText('0 outfits');
+  await batchDialog(page).getByRole('button', { name: messages['emptyTrash.action'].en, exact: true }).click();
+  await expect(progress(page)).toContainText(messages['emptyTrash.finished'].en);
+  const paths = api.requests.filter(call => call.method === 'DELETE').map(call => call.path);
+  expect(paths).toHaveLength(2); expect(new Set(paths).size).toBe(2);
+});
+for (const existing of [false, true]) {
+  test(`TRASH1 repair legacy claim with existing prepared operation ${existing}`, async ({ page }) => {
+    const { api, clothes } = await batchSetup(page, 'en', 1, false);
+    const item = clothes[0]!.item, itemId = String(item.id), requestId = randomUUID();
+    const expectedVersion = Number(item.version);
+    api.deletionClaims.set(itemId, { request_id: requestId, expected_version: expectedVersion, started_at: new Date().toISOString() });
+    item.version = expectedVersion + 1;
+    await page.locator('.trash-page .page-heading').getByRole('button', { name: messages['common.refresh'].en, exact: true }).click();
+    const rowCheck = page.locator('.trash-list').first().getByRole('button', { name: messages['lifecycle.check'].en, exact: true });
+    await expect(rowCheck).toBeEnabled();
+    if (existing) {
+      await rowCheck.click();
+      await expect(page.locator('dialog[aria-labelledby="delete-item-heading"]')).toBeVisible();
+      expect(api.deletionOperations[0]?.receipt).toMatchObject({ phase: 'prepared', expectedVersion: expectedVersion + 1,
+        begin: { request_id: requestId, expected_version: expectedVersion, version: expectedVersion + 1 } });
+      await page.reload(); await expect(page.locator('#trash-title')).toBeVisible();
+    }
+    const preparedBefore = api.requests.filter(call => call.path.endsWith('/prepare_item_deletion')).length;
+    await confirmBatch(page);
+    await expect(progress(page)).toContainText(messages['emptyTrash.finished'].en);
+    expect(api.deletionOperations).toHaveLength(1);
+    expect(api.deletionOperations[0]?.receipt).toMatchObject({ requestId, itemId, phase: 'completed' });
+    expect(api.requests.filter(call => call.path.endsWith('/prepare_item_deletion'))).toHaveLength(preparedBefore + (existing ? 0 : 1));
+    const deletes = api.requests.filter(call => call.method === 'DELETE').map(call => call.path);
+    expect(deletes).toHaveLength(2); expect(new Set(deletes).size).toBe(2);
+  });
+}
+for (const individual of ['prepare', 'finish', 'restore', 'restore-unknown', 'outfit', 'outfit-unknown'] as const) {
+  test(`TRASH1 repair paused controls serialize an individual ${individual}`, async ({ page }) => {
+    const { api, clothes, active } = await batchSetup(page, 'en', 1, false, individual === 'restore-unknown' ? { lifecycleLoss: 'change' } : {});
+    const batchId = String(clothes[0]!.item.id);
+    await page.locator('#empty-trash-button').click(); await expect(batchDialog(page)).toBeVisible();
+    const other = api.seedSavedItem('a', 'Independent shirt'); other.item.deleted_at = new Date().toISOString();
+    const otherId = String(other.item.id);
+    if (individual.startsWith('outfit')) seedTrashOutfit(api, String(active.item.id), 'Independent outfit', new Date(Date.now() - 60_000).toISOString());
+    let conflict = true;
+    await page.route('**/rest/v1/rpc/authorize_item_deletion', async route => {
+      if (conflict && route.request().postDataJSON().p_item_id === batchId) {
+        conflict = false; await route.fulfill({ status: 400, json: { code: '22023', message: 'Request conflict' } });
+      } else await route.fallback();
+    });
+    await batchDialog(page).getByRole('button', { name: messages['emptyTrash.action'].en, exact: true }).click();
+    const controls = [
+      progress(page).getByRole('button', { name: messages['lifecycle.check'].en, exact: true }),
+      progress(page).getByRole('button', { name: messages['lifecycle.resume'].en, exact: true }),
+      progress(page).getByRole('button', { name: messages['deletion.cancel'].en, exact: true }),
+    ];
+    for (const control of controls) await expect(control).toBeEnabled();
+    const ownOperation = api.deletionOperations.find(operation => operation.receipt.itemId === batchId)!;
+    const original = structuredClone(ownOperation.receipt);
+    const otherRow = page.locator('.trash-list li').filter({ has: page.getByRole('heading', { name: 'Independent shirt', exact: true }) });
+    let held: Route | null = null;
+    const heldRpc = individual.startsWith('outfit') ? 'set_outfit_trashed'
+      : individual.startsWith('restore') ? 'set_item_trashed' : individual === 'finish' ? 'authorize_item_deletion' : 'prepare_item_deletion';
+    await page.route(`**/rest/v1/rpc/${heldRpc}`, async route => {
+      const body = route.request().postDataJSON();
+      if (!held && (individual.startsWith('outfit') || body.p_item_id === otherId)) held = route;
+      else await route.fallback();
+    });
+    if (individual.startsWith('outfit')) {
+      if (individual === 'outfit-unknown') {
+        api.outfitLifecycleControl.scripts.push({ mode: 'committedLost' });
+      }
+      await page.locator('.outfit-trash .trash-list li').filter({ has: page.getByRole('heading', { name: 'Independent outfit', exact: true }) })
+        .getByRole('button', { name: messages['trash.restore'].en, exact: true }).click();
+    } else if (individual.startsWith('restore')) {
+      await otherRow.getByRole('button', { name: messages['trash.restore'].en, exact: true }).click();
+    } else {
+      await otherRow.getByRole('button', { name: messages['deletion.prepare'].en, exact: true }).click();
+      if (individual === 'finish') {
+        const dialog = page.locator('dialog[aria-labelledby="delete-item-heading"]');
+        await expect(dialog).toBeVisible();
+        await dialog.getByRole('button', { name: messages['lifecycle.delete'].en, exact: true }).click();
+      }
+    }
+    await expect.poll(() => held !== null).toBe(true);
+    for (const control of controls) await expect(control).toBeDisabled();
+    expect(ownOperation.receipt).toEqual(original);
+    expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(0);
+    if (individual === 'outfit-unknown') api.outfitControl.readFailures = 100;
+    await held!.fallback();
+    if (individual === 'prepare') {
+      const dialog = page.locator('dialog[aria-labelledby="delete-item-heading"]');
+      await expect(dialog).toBeVisible();
+      for (const control of controls) await expect(control).toBeDisabled();
+      await dialog.getByRole('button', { name: messages['common.cancel'].en, exact: true }).click();
+      await expect(dialog).toHaveCount(0);
+      await expect.poll(() => api.deletionOperations.find(operation => operation.receipt.itemId === otherId)?.receipt.phase).toBe('cancelled');
+    } else if (individual === 'outfit-unknown') {
+      const globalCheck = page.locator('.notice-error').getByRole('button', { name: messages['lifecycle.check'].en, exact: true });
+      await expect(globalCheck).toBeEnabled();
+      for (const control of controls) await expect(control).toBeDisabled();
+      expect(ownOperation.receipt).toEqual(original);
+      api.outfitControl.readFailures = 0;
+      await globalCheck.click(); await expect(globalCheck).toHaveCount(0);
+    } else if (individual === 'finish') {
+      await expect(page.locator('.lifecycle-resume')).toHaveCount(0);
+      expect(api.deletionOperations.find(operation => operation.receipt.itemId === otherId)?.receipt.phase).toBe('completed');
+    } else if (individual === 'restore-unknown') {
+      await expect(page.locator('.trash-page > .notice-error')).toBeVisible();
+      const restoreCheck = page.locator('.trash-page > button').filter({ hasText: messages['lifecycle.check'].en });
+      await expect(restoreCheck).toBeEnabled();
+      for (const control of controls) await expect(control).toBeDisabled();
+      expect(ownOperation.receipt).toEqual(original);
+      await restoreCheck.click(); await expect(restoreCheck).toHaveCount(0);
+      await expect(otherRow).toHaveCount(0); expect(other.item.deleted_at).toBeNull();
+      expect(api.trashControl.calls).toHaveLength(1);
+    } else if (individual === 'restore') {
+      await expect(otherRow).toHaveCount(0); expect(other.item.deleted_at).toBeNull();
+    } else {
+      await expect(page.locator('.outfit-trash .trash-list li')).toHaveCount(0);
+    }
+    for (const control of controls) await expect(control).toBeEnabled();
+    const beforeCheck = api.requests.filter(call => call.method === 'DELETE').length;
+    await controls[0]!.click();
+    await expect(controls[1]!).toBeEnabled();
+    expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(beforeCheck);
+    expect(ownOperation.receipt).toEqual(original);
+    if (individual === 'prepare') {
+      await controls[2]!.click();
+      await expect.poll(() => ownOperation.receipt.phase).toBe('cancelled');
+      expect(api.requests.filter(call => call.method === 'DELETE')).toHaveLength(0);
+    } else {
+      await controls[1]!.click();
+      await expect(progress(page)).toContainText(messages['emptyTrash.finished'].en);
+      expect(ownOperation.receipt.phase).toBe('completed');
+      const paths = api.requests.filter(call => call.method === 'DELETE').map(call => call.path);
+      expect(paths).toHaveLength(individual === 'finish' ? 4 : 2); expect(new Set(paths).size).toBe(paths.length);
+      expect(api.items.some(row => row.id === otherId)).toBe(individual !== 'finish');
+    }
+  });
 }
 test('account-menu Trash navigation remains unique alongside the Undo notice link', async ({ page }) => {
   const { item } = await setup(page);
