@@ -170,6 +170,20 @@ Bulk actions (owner decision, 5 October 2026, BULK1): the wardrobe offers bulk
 **Move to Trash** only, with one Undo, through the same per-item owner/version-checked
 `set_item_trashed` path. There is no permanent bulk delete and no other bulk action.
 
+TRASH1 (owner decision, 8 October 2026) separately adds **Empty Trash** for all
+trashed clothes and outfits after one irreversible confirmation. It does not
+extend the wardrobe bulk toolbar. Read-only discovery includes every page;
+known blockers must be resolved before confirmation. Frozen owner/version
+targets use the existing checked outfit and durable garment deletion protocols,
+outfits first, with sequential progress, explicit partial/error states and
+read-only Check followed by deliberate Resume. Entries restored before dispatch
+are skipped, not counted as deleted; later additions are excluded. Wear/calendar
+history remains. Navigation/disconnection stops new work; browser closure loses
+the memory-only batch consent, not existing durable garment receipts. Requirements:
+R03, R06, R07/R08, R11/R12, R16/R17, R19/R20, R23 and R27. Applicable targeted
+unit/browser coverage, normal-owner/backend CI and actual coordinator visual
+review remain acceptance gates, not implied by this source amendment.
+
 Target files: `src/features/wardrobe/item-form.tsx`; `src/features/wardrobe/item-detail.tsx`; `src/features/settings/trash.tsx`.
 
 Test files: `tests/browser/items.spec.ts`; `tests/integration/item-lifecycle.test.ts`.

@@ -23,7 +23,7 @@ export function OutfitTrash({ client, scope, online, invalidation, lifecycle, di
   return <section aria-labelledby="outfit-trash-title" className="outfit-trash">
     <h2 id="outfit-trash-title">{t('nav.outfits')}</h2>
     {list.error && <div className="notice notice-error" role="alert"><span>{t('outfits.loadFailed')}</span>
-      <button type="button" className="text-button" disabled={!online || lifecycle.busy} onClick={list.reload}>{t('common.retry')}</button></div>}
+      <button type="button" className="text-button" disabled={!online || lifecycle.busy || disabled} onClick={list.reload}>{t('common.retry')}</button></div>}
     {!list.data && !list.error && <p role="status">{t('common.loading')}</p>}
     {list.data && !list.data.length && <p>{t('outfitTrash.empty')}</p>}
     <ul className="trash-list">{list.data?.map(record => <li key={record.id} className="settings-card">
