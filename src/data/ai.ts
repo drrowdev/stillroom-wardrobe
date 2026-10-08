@@ -112,6 +112,13 @@ export class AiClient {
     if (reply.status !== 200 || !value) throw new AiError('UNAVAILABLE');
     return value;
   }
+  /** The Settings read: asks for status version 2 and requires its notice field. Other callers use status. */
+  async settingsStatus(signal?: AbortSignal) {
+    const reply = await this.request('/rest/v1/rpc/ai_status', {}, 5000, { 'X-Stillroom-AI-Status-Version': '2' }, signal);
+    const value = parseAiStatus(reply.value, true);
+    if (reply.status !== 200 || !value) throw new AiError('UNAVAILABLE');
+    return value;
+  }
   async consent(write: AiConsentWrite, signal?: AbortSignal): Promise<string> {
     if (!Number.isSafeInteger(write.expectedVersion) || write.expectedVersion < 1
       || (write.enabled ? !isAiCounter(write.noticeRevision) : write.noticeRevision !== null)) throw new AiError('INVALID_INPUT');

@@ -447,7 +447,6 @@ async function main() {
       }
       for (const [n, usage] of [
         [16, { ...analysisUsage, input: null, cacheRead: 1, controlObservation: 'cache_read' }],
-        [18, { ...analysisUsage, modelObservation: 'response_missing_model' }],
         [19, { ...analysisUsage, cacheWrite: 1, controlObservation: 'cache_write' }],
       ]) {
         const anomaly = await finish(owner, n, usage);
@@ -460,6 +459,18 @@ async function main() {
         equal((await finish(owner, n)).code, 'USAGE_CONFLICT');
         equal(await record(owner, n), saved);
         await privilegedLocalSql(`update private.ai_controls set activated=true where owner_id=${literal(owner.uid)};`);
+      }
+      for (const [n, observation] of [[18, 'response_missing_model'], [17, 'response_unrecognised_model']]) {
+        const failed = await finish(owner, n, { ...analysisUsage, modelObservation: observation });
+        equal(failed, { code: 'FAILED', stored: false,
+          accounting: { basis: 'estimated', amountMicro: '1034', currency: 'USD' } });
+        const saved = await record(owner, n);
+        requireEvidence(saved.evidence[0].model_observation === observation && saved.evidence[0].anomaly === false
+          && saved.request.length === 0);
+        equal((await client.rpc(owner, 'ai_status', {})).policy.activated, true);
+        equal((await finish(owner, n, { ...analysisUsage, modelObservation: observation })).code, 'TERMINAL');
+        equal((await finish(owner, n)).code, 'USAGE_CONFLICT');
+        equal(await record(owner, n), saved);
       }
       const invalidFacts = await finish(owner, 32, analysisUsage, 'SUCCESS', { outcome: 'ready', fields: {} });
       equal(invalidFacts, { code: 'INVALID_FACTS', stored: false,

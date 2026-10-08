@@ -259,7 +259,8 @@ async function main() {
     }
 
     stage = 'analyze-modes';
-    // Runs after the analyzed Save: a provider-usage anomaly deactivates the owner's AI controls.
+    // Runs after the analyzed Save. A reply without a usable model name fails only that photo; only a cache or
+    // contradictory-control observation deactivates the owner's AI controls (the last case below).
     const unclear = await analyze(A.token, gateId('A', 9), gateId('A', 9), jpegHeaderFixture(121, 80));
     const malformed = await analyze(A.token, gateId('A', 10), gateId('A', 10), jpegHeaderFixture(122, 80));
     const serverError = await analyze(A.token, gateId('A', 11), gateId('A', 11), jpegHeaderFixture(123, 80));
@@ -267,12 +268,23 @@ async function main() {
     const failed = (r) => r.status === 502 && isDeepStrictEqual(r.data, { code: 'ANALYSIS_FAILED' });
     check(PROVIDER, 'analyze-malformed-provider-response', failed(malformed), summary(malformed));
     check(PROVIDER, 'analyze-provider-5xx', failed(serverError), summary(serverError));
+    const missingModel = await analyze(A.token, gateId('A', 12), gateId('A', 12), jpegHeaderFixture(124, 80));
+    const unrecognisedModel = await analyze(A.token, gateId('A', 14), gateId('A', 14), jpegHeaderFixture(125, 80));
+    check(PROVIDER, 'analyze-missing-model-fails-photo', failed(missingModel), summary(missingModel));
+    check(PROVIDER, 'analyze-unrecognised-model-fails-photo', failed(unrecognisedModel), summary(unrecognisedModel));
+    const stillActive = await client.rpc(A, 'ai_status', {});
+    check(PROVIDER, 'analyze-model-identity-keeps-ai-on', stillActive?.policy?.activated === true, stillActive?.policy);
+    const nextPhoto = await analyze(A.token, gateId('A', 15), gateId('A', 15));
+    check(PROVIDER, 'analyze-next-photo-after-model-failure', ready(nextPhoto, gateId('A', 15), gateId('A', 15)), summary(nextPhoto));
+    const cacheRead = await analyze(A.token, gateId('A', 16), gateId('A', 16), jpegHeaderFixture(126, 80));
+    check(PROVIDER, 'analyze-cache-observation-fails-photo', failed(cacheRead), summary(cacheRead));
     const afterAnomaly = await analyze(A.token, gateId('A', 13), gateId('A', 13));
     check(PROVIDER, 'analyze-inactive-after-anomaly', afterAnomaly.status === 503 && isDeepStrictEqual(afterAnomaly.data, { code: 'INACTIVE' }),
       summary(afterAnomaly));
     counted = await count();
-    check(PROVIDER, 'double-totals', counted.served === 10 && counted.rejected === 0 && counted.refused === 0
-      && isDeepStrictEqual(counted.modes, { ready: 7, unclear: 1, malformed: 1, 'server-error': 1 }), counted);
+    check(PROVIDER, 'double-totals', counted.served === 14 && counted.rejected === 0 && counted.refused === 0
+      && isDeepStrictEqual(counted.modes, { ready: 8, unclear: 1, malformed: 1, 'server-error': 1, 'missing-model': 1,
+        'unrecognised-model': 1, 'cache-read': 1 }), counted);
 
     stage = 'stylist';
     // ST1a: the production stylist-chat handler with the provider double. Ordinary A/B sessions only; the owner comes

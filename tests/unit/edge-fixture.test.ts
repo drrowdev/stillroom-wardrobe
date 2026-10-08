@@ -150,6 +150,9 @@ describe('provider double', () => {
     expect(double.requestMode(headers, azureBody(jpeg(121)))).toBe('unclear');
     expect(double.requestMode(headers, azureBody(jpeg(122)))).toBe('malformed');
     expect(double.requestMode(headers, azureBody(jpeg(123)))).toBe('server-error');
+    expect(double.requestMode(headers, azureBody(jpeg(124)))).toBe('missing-model');
+    expect(double.requestMode(headers, azureBody(jpeg(125)))).toBe('unrecognised-model');
+    expect(double.requestMode(headers, azureBody(jpeg(126)))).toBe('cache-read');
   });
   it('refuses anything that is not the pinned request shape', () => {
     expect(double.requestMode({ ...headers, 'api-key': 'real' }, azureBody(jpeg(120)))).toBeNull();
@@ -172,6 +175,10 @@ describe('provider double', () => {
     expect(double.READY_FACTS).toEqual(analysisFacts);
     expect(JSON.parse(double.completion('ready').choices[0].message.content)).toEqual(analysisFacts);
     expect(() => JSON.parse(double.completion('malformed').choices[0].message.content)).toThrow();
+    expect(Object.hasOwn(double.completion('missing-model'), 'model')).toBe(false);
+    expect(double.completion('unrecognised-model').model).not.toBe(double.RETURNED_MODEL);
+    expect(double.completion('cache-read').usage.prompt_tokens_details.cached_tokens).toBeGreaterThan(0);
+    expect(double.completion('ready').model).toBe(double.RETURNED_MODEL);
   });
 });
 

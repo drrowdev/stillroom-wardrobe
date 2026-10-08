@@ -26,12 +26,13 @@ const HOSTED_SOURCE_VERSION = '20260910070000';
 const IMAGE_CHANGE_VERSION = '20260922020000';
 const COLOUR_VERSION = '20260924100000';
 const TRYON_STOP_VERSION = '20261004090000';
+const SAVE1_PRIOR_VERSION = '20261007090000';
 // Exact applied prefix per labelled stage; 'target' is the full source inventory.
 const STAGE_VERSIONS = Object.freeze({ base: '20260905000000', 'hosted-source': HOSTED_SOURCE_VERSION,
   'prior-main': PRIOR_MAIN_VERSION, 'azure-target': AZURE_TARGET_VERSION, 'image-change': IMAGE_CHANGE_VERSION,
-  colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, target: null });
+  colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, 'save1-prior': SAVE1_PRIOR_VERSION, target: null });
 const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], 'image-change': ['azure-target', 'hosted-source'],
-  colours: ['image-change'], 'tryon-stop': ['colours'], target: ['colours', 'tryon-stop'] });
+  colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], target: ['save1-prior'] });
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -64,6 +65,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261004090000_tryon_stop_before_claim.sql', version: '20261004090000', time: '2026-10-04 09:00:00', bytes: 21601, sha256: SOURCE_HASHES.tryOnStopBeforeClaim },
   { name: '20261005090000_provider_refusal.sql', version: '20261005090000', time: '2026-10-05 09:00:00', bytes: 38858, sha256: SOURCE_HASHES.providerRefusal },
   { name: '20261007090000_outfit_lifecycle.sql', version: '20261007090000', time: '2026-10-07 09:00:00', bytes: 3754, sha256: '243c41376a2c3d708e2cd78739a3352e5461c441a41eb5b50b3e535a14e432ef' },
+  { name: '20261008080000_analysis_model_identity.sql', version: '20261008080000', time: '2026-10-08 08:00:00', bytes: 11083, sha256: '1a3b8c3d1723378f0734dd1828bddf235a68af5e6fe1c7711ff7fa2a4a952e19' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1297,14 +1299,24 @@ async function main() {
       stage = 'FILT1-upgrade-seed';
       const { refusalUpgradeSeed, refusalUpgradeVerify } = await import('../tests/integration/tryon.sessions.mjs');
       const refusalSeed = await refusalUpgradeSeed(colourSnapshot, privilegedLocalSql);
-      stage = 'FILT1-tryon-stop-to-target';
-      await migrateToStage(run, 'tryon-stop', 'target');
+      stage = 'FILT1-tryon-stop-to-save1-prior';
+      await migrateToStage(run, 'tryon-stop', 'save1-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
-      await history('target'); await verifyCiStorageGuard();
+      await history('save1-prior'); await verifyCiStorageGuard();
       stage = 'FILT1-upgrade-verify';
       await refusalUpgradeVerify(refusalSeed, privilegedLocalSql);
-      stage = 'COL1-A5-fifteen-compare';
+      // The colour comparison pins the photo-analysis finisher body, which SAVE1 replaces; it runs before that migration.
+      stage = 'COL1-A5-prior-compare';
       await verifyColourStage(colourSnapshot, privilegedLocalSql, 'target');
+      stage = 'SAVE1-seed';
+      const { analysisModelSeed, analysisModelVerify } = await import('../tests/integration/analysis-missing-model.sessions.mjs');
+      const modelSeed = await analysisModelSeed(colourSnapshot, privilegedLocalSql);
+      stage = 'SAVE1-prior-to-target';
+      await migrateToStage(run, 'save1-prior', 'target');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('target'); await verifyCiStorageGuard();
+      stage = 'SAVE1-verify';
+      await analysisModelVerify(modelSeed, privilegedLocalSql, (label) => { stage = `SAVE1-${label}`; });
       stage = 'COL1-A6-fifteen-probes';
       await colourProbes(sixEnv, privilegedLocalSql, 'target');
       colourFinalizer.assertRunning();

@@ -8,7 +8,7 @@ import { connect } from 'node:net';
 import { messages, type Language } from '../../src/i18n/all';
 import { aiFixture, addAiPhoto, openPhotoMenu } from './ai-photo-first-support';
 import { analysisPath, mockBackend, owners, signIn, type RawAnalysisObservation } from './mock-backend';
-import { openAccountMenu } from './shell-support';
+import { openAccountMenu, signOutThroughMenu } from './shell-support';
 
 type AiFixture = Awaited<ReturnType<typeof aiFixture>>;
 // A ready draft shows no status line: the filled fields and their "Suggested" markers are the signal.
@@ -1159,6 +1159,92 @@ test('Save excludes Cancel until its finalizer has settled', async ({ page }) =>
   await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(api.requests.some((call) => call.path.endsWith('/cancel_analyzed_item_save'))).toBe(false);
   release(); await expect(page.locator('#wardrobe-title')).toBeVisible();
+});
+// SAVE1: a reply without a model name fails only that photo; an unexpected model name also adds a time-limited Settings notice.
+const aiSection = (page: Page) => page.locator('section[aria-labelledby="ai-consent-title"]');
+async function openSettingsAi(page: Page) {
+  await page.evaluate(() => { location.hash = '#/settings'; });
+  await expect(aiSection(page)).toBeVisible();
+}
+const refreshSettings = (page: Page) => page.evaluate(() => window.dispatchEvent(new Event('focus')));
+for (const language of ['en', 'fi', 'sv'] as const) {
+  test(`SAVE1 ${language}: a failed photo leaves photo analysis on; an unexpected model adds one Settings notice`, async ({ page }) => {
+    const api = await aiFixture(page, language);
+    api.mode('failed');
+    await addAiPhoto(page, api, language);
+    await expect(statusRegion(page).getByText(messages['aiC.fillFailed'][language], { exact: true })).toBeVisible();
+    await page.locator('#item-title').fill('Hand-filled top');
+    await page.locator('#item-category').selectOption('top');
+    await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    await openSettingsAi(page);
+    const section = aiSection(page), notice = section.getByText(messages['aiC.photoModelNotice'][language], { exact: true });
+    await expect(section.locator('[role="switch"][aria-checked="true"]')).toBeVisible();
+    await expect(notice).toHaveCount(0);
+    await expect(section.getByText(messages['aiC.inactive'][language], { exact: true })).toHaveCount(0);
+    api.photoModelNotice.until = Date.now() + 60_000;
+    await expect(async () => {
+      await refreshSettings(page);
+      await expect(notice).toBeVisible({ timeout: 1000 });
+    }).toPass();
+    await expect(notice).toHaveCount(1);
+    await expect(section.locator('[role="switch"][aria-checked="true"]')).toBeVisible();
+    await expect(section.getByText(messages['aiC.inactive'][language], { exact: true })).toHaveCount(0);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(posts(api)).toHaveLength(1);
+    expect(api.calls.filter((call) => call.route.endsWith('/ai_set_consent'))).toHaveLength(0);
+  });
+}
+test('SAVE1 the Settings notice hides at its deadline without another read, and a later read does not bring it back', async ({ page }) => {
+  const api = await aiFixture(page);
+  api.photoModelNotice.until = Date.now() + 2500;
+  await openSettingsAi(page);
+  const notice = aiSection(page).getByText(messages['aiC.photoModelNotice'].en, { exact: true });
+  await expect(notice).toBeVisible();
+  const reads = admissions(api).length;
+  await expect(notice).toBeHidden({ timeout: 8000 });
+  expect(admissions(api)).toHaveLength(reads);
+  await refreshSettings(page);
+  await expect.poll(() => admissions(api).length).toBeGreaterThan(reads);
+  await expect(notice).toHaveCount(0);
+  await expect(aiSection(page).locator('[role="switch"][aria-checked="true"]')).toBeVisible();
+});
+test('SAVE1 a Settings read without the notice field is a failed read; Try again recovers it', async ({ page }) => {
+  const api = await aiFixture(page);
+  api.photoModelNotice.omit = true;
+  await openSettingsAi(page);
+  const section = aiSection(page);
+  await expect(section.getByText(messages['aiC.loadFailed'].en, { exact: true })).toBeVisible();
+  await expect(section.getByText(messages['aiC.photoModelNotice'].en, { exact: true })).toHaveCount(0);
+  api.photoModelNotice.omit = false;
+  api.photoModelNotice.until = Date.now() + 60_000;
+  await section.getByRole('button', { name: messages['common.retry'].en, exact: true }).click();
+  await expect(section.getByText(messages['aiC.photoModelNotice'].en, { exact: true })).toBeVisible();
+  await expect(section.getByText(messages['aiC.loadFailed'].en, { exact: true })).toHaveCount(0);
+});
+test('SAVE1 another owner does not see the notice, not even while their own status read is pending', async ({ page }) => {
+  const api = await aiFixture(page);
+  api.photoModelNotice.until = Date.now() + 60_000;
+  await openSettingsAi(page);
+  const notice = page.getByText(messages['aiC.photoModelNotice'].en, { exact: true });
+  await expect(notice).toBeVisible();
+  let armed = false, release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route('**/rest/v1/rpc/ai_status', async (route) => {
+    if (armed && route.request().method() === 'POST') await gate;
+    await route.fallback().catch(() => undefined);
+  });
+  await signOutThroughMenu(page);
+  await expect(page.locator('#email')).toBeVisible();
+  await expect(notice).toHaveCount(0);
+  armed = true;
+  api.photoModelNotice.until = null;
+  await signIn(page, 'b');
+  await openSettingsAi(page);
+  await expect(notice).toHaveCount(0);
+  release();
+  await expect(aiSection(page).locator('[role="switch"]')).toBeVisible();
+  await expect(notice).toHaveCount(0);
 });
 test.describe('bounded C visual evidence', () => {
   test.describe.configure({ retries: 0 });

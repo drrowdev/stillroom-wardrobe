@@ -498,6 +498,45 @@ test.describe('bounded UI1 visual evidence', () => {
   }
 });
 
+// SAVE1: the Settings notice for a photo-analysis reply with an unexpected model name; two captures, written once in the
+// chromium (desktop) or mobile (narrow) project, with the same functional checks in every project.
+test.describe('SAVE1 visual evidence', () => {
+  test.describe.configure({ retries: 0 });
+  const scenes = [
+    { name: 'settings-model-notice-en-desktop', language: 'en', width: 1280, height: 900, project: 'chromium' },
+    { name: 'settings-model-notice-fi-mobile', language: 'fi', width: 320, height: 568, project: 'mobile' },
+  ] as const;
+  for (const scene of scenes) {
+    test(`SAVE1 visual ${scene.name} retains functional assertions in every project`, async ({ page }, testInfo: TestInfo) => {
+      const language: Language = scene.language;
+      const write = testInfo.project.name === scene.project;
+      const directory = path.resolve('test-results/save1-visual');
+      if (write) {
+        await mkdir(directory, { recursive: true });
+        const info = await lstat(directory); expect(info.isDirectory() && !info.isSymbolicLink()).toBe(true);
+      }
+      await page.setViewportSize({ width: scene.width, height: scene.height });
+      const { api } = await start(page, { language, analysis: true });
+      const notice = row(page, 'analysis').getByText(text('aiC.photoModelNotice', language), { exact: true });
+      api.photoModelNotice.until = Date.now() + 10 * 60_000;
+      await expect(async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+        await expect(notice).toBeVisible({ timeout: 1000 });
+      }).toPass();
+      await expect(toggle(page, 'analysis')).toHaveAttribute('aria-checked', 'true');
+      await expect(row(page, 'analysis').getByText(text('aiC.inactive', language), { exact: true })).toHaveCount(0);
+      await noViolations(page);
+      expect(await page.evaluate((width) => document.documentElement.scrollWidth <= innerWidth && innerWidth === width, scene.width)).toBe(true);
+      if (!write) return;
+      await notice.scrollIntoViewIfNeeded();
+      const png = await page.screenshot({ fullPage: false, animations: 'disabled', type: 'png', scale: 'css' });
+      expect(png.byteLength > 0 && png.byteLength <= 1048576).toBe(true);
+      expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && png.readUInt32BE(16) === scene.width).toBe(true);
+      const file = await open(path.join(directory, `${scene.name}.png`), 'wx');
+      try { await file.writeFile(png); } finally { await file.close(); }
+    });
+  }
+});
 // LANG1: a language change in Settings, a saved profile language, a passive refresh and Auth changes while a language
 // catalogue loads (plan rev3 §6).
 test.describe('LANG1 language catalogues in the workspace', () => {

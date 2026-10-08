@@ -8357,3 +8357,31 @@ matching `item facet i18n translat wardrobe` (1253 tests) and
 --project=chromium --project=mobile --project=webkit-photo --workers=2
 --retries=0` (116 passed; plus wardrobe-grid.spec.ts alone, 36 passed, with the captures) pass; `git diff --check` is clean. Full CI, the
 independent code review and visual acceptance are pending.
+
+## SAVE1 analysis model identity - local candidate (8 October 2026)
+
+**Local candidate; not committed, merged, installed or deployed.** Tier A packet under plan rev3 with its
+binding amendment, for the 8 October incident on #84
+([c6067944135](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6067944135)) and the
+owner decisions
+([c6068157962](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6068157962)).
+Built on `b120ea4690e799ff4db175b2e22e52ffaae3afd0`, rebased onto `d1bedb0f7bc4a83954f5ca57e6f64b846d672588` (DRESS1).
+
+Behaviour. An analysis reply without a model name now fails only that photo; photo analysis stays on and nothing is
+shown. A reply with an unrecognised model name also fails only that photo and stays on, and Settings shows a short
+notice for 7 days. The 7 days run from the newest such analysis request's dispatch time (its creation time when it
+was never dispatched), never from when it closed, so a later close, expiry or replay does not move the deadline. A
+control observation that contradicts the cache rules, a positive cache counter or a token-envelope overrun still
+switches photo analysis off for the account, and this check runs before a model-name failure. Metering and billing
+are unchanged.
+
+Source. Forward migration `20261008080000_analysis_model_identity.sql` redefines `ai_finish_analysis` and
+`ai_status` only. `ai_status` adds `photoModelNoticeUntilMs` only when the request carries
+`X-Stillroom-AI-Status-Version: 2`; the stored reply for every other caller keeps its exact earlier shape. Settings
+sends that header, requires the field, and treats a reply without it as a failed read. The migration is not
+installed on the hosted project; that install and the owner Pages deploy are separate steps after merge.
+
+Local checks and CI-only checks are listed in the pull request. Database, integration, security, rehearsal, edge and
+generated-type checks need the local Supabase stack and run in CI; none ran on this machine. Two synthetic captures
+(Settings notice, EN desktop and FI 320x568) are written once under ignored `test-results/save1-visual/`; the
+existing `*-visual` upload carries them, and the coordinator's exact-head visual review is pending.

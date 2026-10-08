@@ -58,7 +58,7 @@ async function start(page: Page, language: Language = 'en', enabled = false) {
     if (!api.admitAiStatus(request)) { await route.fulfill({ status: 401, json: { code: 'UNAUTHENTICATED' } }); return; }
     const stored = api.consent.get(owners.a)!, enabledNow = current.consent?.enabled ?? stored;
     const revision = current.consent && 'noticeRevision' in current.consent ? current.consent.noticeRevision : enabledNow ? 2 : null;
-    await route.fulfill({ json: {
+    await route.fulfill({ json: api.negotiatedStatus(request, {
       code: current.code ?? (enabledNow && revision === 2 ? 'OK' : 'CONSENT_REQUIRED'),
       ...statusStamp(Date.now(), current.serverTimeMs),
       consent: { enabled: enabledNow, noticeRevision: revision, consentedAt: enabledNow ? '2026-09-12T00:00:00Z' : null,
@@ -66,7 +66,7 @@ async function start(page: Page, language: Language = 'en', enabled = false) {
       policy: { activated: true, noticeRevision: 2, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1,
         executionManifestId: 'azure-eu-terra-devtest-v1', maxRequestMicro: '4097351', monthlyAllowanceMicro: allowance,
         maxRequestsPerHour: 200, resultTtlSeconds: 3600, ...current.policy },
-      usage: { accountedMicro: '0', requestsLastHour: 0, warning: false, ...current.usage } } });
+      usage: { accountedMicro: '0', requestsLastHour: 0, warning: false, ...current.usage } }) });
   });
   const log: Array<{ method: string; path: string; body: unknown }> = [];
   page.on('request', (request) => {

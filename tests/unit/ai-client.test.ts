@@ -298,3 +298,36 @@ describe('status validation and current policy', () => {
       expect(supportedAiPolicy({ ...good, policy }, at)).toBe(false);
   });
 });
+
+describe('Settings status version 2', () => {
+  const noticeStatus = (until: number | null, serverTimeMs = Date.now()) => ({ ...status(), serverTimeMs, photoModelNoticeUntilMs: until });
+  it('asks for version 2 and returns the notice deadline; the ordinary read sends no version', async () => {
+    const f = fixture(), until = Date.now() + 3 * 24 * 60 * 60 * 1000, stream = responseReader(JSON.stringify(noticeStatus(until)));
+    expect(await f.ai.settingsStatus()).toMatchObject({ code: 'OK', photoModelNoticeUntilMs: until });
+    const sent = new Headers((stream.fetcher.mock.calls[0]?.[1] as RequestInit).headers);
+    expect(sent.get('X-Stillroom-AI-Status-Version')).toBe('2');
+    const g = fixture(), plain = responseReader();
+    expect(await g.ai.status()).not.toHaveProperty('photoModelNoticeUntilMs');
+    expect(new Headers((plain.fetcher.mock.calls[0]?.[1] as RequestInit).headers).has('X-Stillroom-AI-Status-Version')).toBe(false);
+  });
+  it('accepts a null deadline', async () => {
+    const f = fixture(); responseReader(JSON.stringify(noticeStatus(null)));
+    expect(await f.ai.settingsStatus()).toMatchObject({ photoModelNoticeUntilMs: null });
+  });
+  it.each([
+    ['missing field', () => status()],
+    ['past deadline', () => noticeStatus(Date.now() - 60_000, Date.now())],
+    ['beyond the seven-day window', () => noticeStatus(Date.now() + 8 * 24 * 60 * 60 * 1000)],
+    ['fractional deadline', () => noticeStatus(Date.now() + 1000.5)],
+    ['string deadline', () => ({ ...status(), photoModelNoticeUntilMs: String(Date.now() + 1000) })],
+    ['extra key', () => ({ ...noticeStatus(null), extra: true })],
+  ])('rejects a malformed negotiated reply: %s', async (_name, build) => {
+    const f = fixture(); responseReader(JSON.stringify(build()));
+    await expect(f.ai.settingsStatus()).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+  });
+  it('keeps the ordinary parser exact: the notice field is refused without negotiation', () => {
+    expect(parseAiStatus(noticeStatus(null))).toBeNull();
+    expect(parseAiStatus(status())).not.toBeNull();
+    expect(parseAiStatus(noticeStatus(null), true)).toMatchObject({ photoModelNoticeUntilMs: null });
+  });
+});

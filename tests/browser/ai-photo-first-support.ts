@@ -20,6 +20,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
   const failed = new Set<string>();
   let analysisMode: 'ready' | 'pending' | 'timeout' | 'unclear' | 'failed' = 'ready';
   let ttl = 3600000;
+  let failNext = 0;
   let policy = { activated: true, noticeRevision: 2, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 2,
     executionManifestId: 'azure-eu-terra-devtest-v2',
     maxRequestMicro: '4097351', monthlyAllowanceMicro: '100000000', maxRequestsPerHour: 200, resultTtlSeconds: 3600 };
@@ -34,7 +35,8 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
       const imageSha256 = createHash('sha256').update(bytes).digest('hex');
       inputs.push({ owner, requestId, bytes: bytes.length, sha256: imageSha256 });
       calls.push({ route: '/functions/v1/analyze-clothing', body: { requestId } });
-      if (analysisMode === 'failed') {
+      if (analysisMode === 'failed' || failNext > 0) {
+        if (analysisMode !== 'failed') failNext -= 1;
         failed.add(requestId);
         return { body: { code: 'ANALYSIS_FAILED' }, status: 502 };
       }
@@ -68,11 +70,11 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
     if (path.endsWith('/ai_status')) {
       if (!api.admitAiStatus(request)) { await json({ code: 'UNAUTHENTICATED' }, 401); return; }
       calls.push({ route: path, body: {} });
-      await json({ code: consent.get(owner) ? 'OK' : 'CONSENT_REQUIRED', period: new Date().toISOString().slice(0, 7),
+      await json(api.negotiatedStatus(request, { code: consent.get(owner) ? 'OK' : 'CONSENT_REQUIRED', period: new Date().toISOString().slice(0, 7),
         serverTimeMs: Date.now(), consent: { enabled: consent.get(owner), noticeRevision: consent.get(owner) ? 2 : null,
           consentedAt: consent.get(owner) ? '2026-09-12T00:00:00Z' : null, profileVersion: String(profile.version) },
         policy,
-        usage: { accountedMicro: String(results.size * 1034), requestsLastHour: results.size, warning: false } }); return;
+        usage: { accountedMicro: String(results.size * 1034), requestsLastHour: results.size, warning: false } })); return;
     }
     if (path.endsWith('/ai_set_consent')) {
       const body = request.postDataJSON() as { p_enabled: boolean; p_notice_revision: number | null; p_expected_version: number };
@@ -101,6 +103,8 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
   await page.goto(start); await signIn(page);
   await expect(page.locator('#wardrobe-title')).toBeVisible();
   return { ...api, results, calls, inputs, consent, mode: (mode: typeof analysisMode) => { analysisMode = mode; },
+    /** The next `count` analyses fail, as a reply with a missing or unexpected model name does; the rest are unaffected. */
+    failNext: (count: number) => { failNext = count; },
     policy: (next: Partial<typeof policy>) => { policy = { ...policy, ...next }; },
     ttl: (milliseconds: number) => { if (milliseconds < 1 || milliseconds > 3600000) throw new Error('Invalid fixture TTL'); ttl = milliseconds; } };
 }
