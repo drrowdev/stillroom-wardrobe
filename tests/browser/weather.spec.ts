@@ -62,7 +62,8 @@ const places = {
 };
 
 // A reply for the city's local date at `now` and the next, 00:00 to 23:00, with daytime values as given.
-function forecastReply(weather: { temperature: number; rain?: number; wind?: number }, offset = 10800, now = Date.now()) {
+type FixtureWeather = { temperature: number; current?: number | null; rain?: number; wind?: number };
+function forecastReply(weather: FixtureWeather, offset = 10800, now = Date.now()) {
   const first = new Date(now + offset * 1000).toISOString().slice(0, 10);
   const time: string[] = [], temperature: number[] = [], rain: number[] = [], wind: number[] = [];
   for (let index = 0; index < 48; index++) {
@@ -75,6 +76,9 @@ function forecastReply(weather: { temperature: number; rain?: number; wind?: num
     wind.push(daytime ? weather.wind ?? 2 : 40);
   }
   return { latitude: 65, longitude: 25.5, timezone: 'Europe/Helsinki', utc_offset_seconds: offset,
+    current_units: { time: 'iso8601', temperature_2m: '°C' },
+    current: { time: new Date(Math.floor(now / 900_000) * 900_000 + offset * 1000).toISOString().slice(0, 16),
+      temperature_2m: weather.current === undefined ? weather.temperature : weather.current },
     hourly: { time, temperature_2m: temperature, precipitation_probability: rain, wind_speed_10m: wind } };
 }
 
@@ -90,8 +94,9 @@ test.afterEach(() => { expect(unexpected).toEqual([]); });
 async function service(page: Page) {
   const state = {
     requests: [] as URL[],
+    completedForecasts: 0,
     results: [places.oulu] as Row[],
-    weather: new Map<string, { temperature: number; rain?: number; wind?: number }>([['65.0', { temperature: 0 }], ['55.6', { temperature: 12 }]]),
+    weather: new Map<string, FixtureWeather>([['65.0', { temperature: 0 }], ['55.6', { temperature: 12 }]]),
     status: { search: 200, forecast: 200 },
     hold: { search: false, forecast: new Set<string>() },
     held: [] as { kind: 'search' | 'forecast'; url: URL; route: Route }[],
@@ -106,6 +111,12 @@ async function service(page: Page) {
     const url = new URL(request.url());
     if (url.hostname.endsWith('open-meteo.com')) state.requests.push(url);
   });
+  page.on('requestfinished', request => {
+    if (new URL(request.url()).hostname === 'api.open-meteo.com') state.completedForecasts++;
+  });
+  page.on('requestfailed', request => {
+    if (new URL(request.url()).hostname === 'api.open-meteo.com') state.completedForecasts++;
+  });
   await page.route(/^https:\/\/geocoding-api\.open-meteo\.com\//, async route => {
     const url = new URL(route.request().url());
     if (state.hold.search) { state.held.push({ kind: 'search', url, route }); return; }
@@ -119,13 +130,14 @@ async function service(page: Page) {
   });
   return {
     ...state,
+    completedForecasts: () => state.completedForecasts,
     searches: () => state.requests.filter(url => url.hostname === 'geocoding-api.open-meteo.com'),
     forecasts: () => state.requests.filter(url => url.hostname === 'api.open-meteo.com'),
-    async release(kind: 'search' | 'forecast', body: unknown) {
+    async release(kind: 'search' | 'forecast', body: unknown, status = 200) {
       const entry = state.held.find(held => held.kind === kind);
       if (!entry) throw new Error(`No held ${kind} reply.`);
       state.held.splice(state.held.indexOf(entry), 1);
-      await reply(entry.route, body);
+      await reply(entry.route, body, status);
     },
   };
 }
@@ -180,18 +192,24 @@ const celsius = (page: Page, value: number, language: Language = 'en') => page.e
 async function lowLine(page: Page, value: number, language: Language = 'en') {
   return text('weather.low', language, { temperature: await celsius(page, value, language) });
 }
+async function currentLine(page: Page, value: number, language: Language = 'en') {
+  return text('weather.current', language, { temperature: await celsius(page, value, language) });
+}
 async function search(page: Page, query: string, language: Language = 'en') {
   await page.locator('#weather-city').fill(query);
   await button(page, 'common.search', language).click();
 }
 
-for (const language of ['en', 'fi', 'sv'] as const) test(`WEATHER1 ${language}: the header shows the forecast low, not a current temperature`, async ({ page }) => {
+for (const language of ['en', 'fi', 'sv'] as const) test(`WEATHER2 ${language}: the header shows current temperature, distinct from the daytime low`, async ({ page }) => {
+  const at = Date.parse('2026-10-08T11:05:00Z');
+  await page.clock.install({ time: at });
   const { weather } = await start(page, { language, weather: oulu, details: false, seed: (api, service) => {
-    basics(api); service.weather.set('65.0', { temperature: 6, rain: 2, wind: 7 });
+    basics(api); service.clock.at = at; service.weather.set('65.0', { temperature: 6, current: 13, rain: 2, wind: 7 });
   } });
   const low = await lowLine(page, 6, language);
-  await expect(weatherTrigger(page)).toHaveText(low);
-  await expect(weatherTrigger(page)).toHaveAccessibleName(text('weather.summaryLabel', language, { summary: low }));
+  const current = await currentLine(page, 13, language);
+  await expect(weatherTrigger(page)).toHaveText(current);
+  await expect(weatherTrigger(page)).toHaveAccessibleName(text('weather.summaryLabel', language, { summary: current }));
   await expect(weatherTrigger(page)).toHaveAttribute('aria-expanded', 'false');
   await expect(page.locator('.workspace-header #weather-trigger')).toHaveCount(1);
   await expect(page.locator('.today-page .weather-bar')).toHaveCount(0);
@@ -203,6 +221,16 @@ for (const language of ['en', 'fi', 'sv'] as const) test(`WEATHER1 ${language}: 
     text('weather.wind', language, { speed: new Intl.NumberFormat(locales[language], { style: 'unit', unit: 'meter-per-second' }).format(7) }),
   ]);
   await expect(bar(page).getByRole('link', { name: 'Open-Meteo.com' })).toBeVisible();
+  const hours = bar(page).locator('.weather-hours li');
+  await expect(hours).toHaveCount(15);
+  await expect(hours.first().locator('time')).toHaveAttribute('datetime', '2026-10-08T07:00');
+  await expect(hours.last().locator('time')).toHaveAttribute('datetime', '2026-10-08T21:00');
+  await expect(hours.locator('span')).toHaveText(Array(15).fill(await celsius(page, 6, language)));
+  await expect(bar(page).locator('.weather-current-time')).toHaveText(text('weather.currentEstimate', language, {
+    time: await page.evaluate(({ locale, time }) => new Intl.DateTimeFormat(locale, {
+      timeZone: 'Europe/Helsinki', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(time), { locale: locales[language], time: at - 5 * 60_000 }),
+  }));
   await expect(bar(page).locator('.weather-footer')).toContainText(text('weather.updated', language, { time: '' }).trim());
   await bar(page).getByRole('button', { name: text('common.close', language), exact: true }).click();
   await expect(weatherTrigger(page)).toBeFocused();
@@ -272,8 +300,8 @@ test('WEATHER1 a forecast with unknown temperature never invents a header value'
   await expect(weatherTrigger(page)).toHaveText(text('weather.loadingSummary'));
   await expect.poll(() => weather.held.length).toBe(1);
   const reply = forecastReply({ temperature: 6, rain: 2, wind: 7 });
-  await weather.release('forecast', { ...reply, hourly: { ...reply.hourly, temperature_2m: reply.hourly.time.map(() => null) } });
-  await expect(weatherTrigger(page)).toHaveText(text('weather.unknownLow'));
+  await weather.release('forecast', { ...reply, current: null, hourly: { ...reply.hourly, temperature_2m: reply.hourly.time.map(() => null) } });
+  await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
   await openDetails(page);
   await expect(bar(page).locator('.weather-chips li')).toHaveCount(2);
   await expect(bar(page)).not.toContainText('°C');
@@ -283,17 +311,280 @@ test('WEATHER1 a forecast with unknown temperature never invents a header value'
 
 test('WEATHER1 leaving Today removes the portal; returning and changing language reuse the same forecast', async ({ page }) => {
   const { weather } = await start(page, { weather: oulu, seed: api => basics(api) });
-  await expect(weatherTrigger(page)).toHaveText(await lowLine(page, 0));
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 0));
   await goTo(page, 'settings');
   await expect(weatherTrigger(page)).toHaveCount(0);
   await expect(page.locator('#weather-header-slot')).toBeEmpty();
   await goTo(page, 'today');
-  await expect(weatherTrigger(page)).toHaveText(await lowLine(page, 0));
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 0));
   await openAccountMenu(page, 'en');
   await expect(bar(page)).toBeHidden();
   await accountMenu(page).getByRole('button', { name: 'Suomi', exact: true }).click();
-  await expect(weatherTrigger(page)).toHaveText(await lowLine(page, 0, 'fi'));
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 0, 'fi'));
   expect(weather.forecasts()).toHaveLength(1);
+});
+
+async function visibility(page: Page, hidden: boolean) {
+  await page.evaluate(hidden => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: hidden ? 'hidden' : 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);
+}
+
+async function gradualMinute(page: Page, weather: Service) {
+  const at = await page.evaluate(() => Date.now());
+  let failedAt: number | null = null;
+  for (let second = 0; second < 60; second++) {
+    weather.clock.at = at + (second + 1) * 1000;
+    const previous = weather.forecasts().length;
+    await page.clock.runFor(1000);
+    const requested = weather.forecasts().length;
+    if (requested !== previous) {
+      await expect.poll(weather.completedForecasts).toBe(requested);
+      if (weather.status.forecast === 503) {
+        await expect(bar(page).getByRole('button', { name: text('common.retry'), exact: true })).toBeDisabled();
+        failedAt = await page.evaluate(() => Date.now());
+      }
+    }
+  }
+  return failedAt;
+}
+
+test('WEATHER2 current expiry, held refresh and current-only changes preserve the chosen conservative idea', async ({ page }) => {
+  const at = Date.parse('2026-10-08T11:05:00Z');
+  await page.clock.install({ time: at });
+  const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => {
+    basics(api); add(api, 'Grey shirt', { colours: ['grey'] });
+    service.clock.at = at; service.weather.set('65.0', { temperature: 4, current: 13 });
+  } });
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13));
+  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  await button(page, 'today.more').click();
+  await openDetails(page);
+  const idea = await cards(page).first().innerText();
+  weather.hold.forecast.add('65.0');
+  await page.clock.fastForward('00:10:01');
+  await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
+  await expect(bar(page)).toContainText(await lowLine(page, 4));
+  expect(weather.forecasts()).toHaveLength(1);
+  await page.clock.fastForward('00:01:00');
+  await expect.poll(() => weather.held.length).toBe(1);
+  await expect(bar(page)).toContainText(await lowLine(page, 4));
+  await expect(cards(page).first()).toHaveText(idea, { useInnerText: true });
+  await weather.release('forecast', forecastReply({ temperature: 4, current: 18 }, 10800, at + 11 * 60_000));
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 18));
+  await expect(cards(page).first()).toHaveText(idea, { useInnerText: true });
+  expect(weather.forecasts()).toHaveLength(2);
+});
+
+test('WEATHER2 failed refresh and offline keep hourly forecast, with bounded retry and no stale-success loop', async ({ page }) => {
+  const at = Date.parse('2026-10-08T11:00:00Z');
+  await page.clock.install({ time: at });
+  const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => {
+    basics(api); service.clock.at = at; service.weather.set('65.0', { temperature: 4, current: 13 });
+  } });
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13));
+  weather.status.forecast = 503;
+  await page.clock.fastForward('00:16:01');
+  await expect(bar(page)).toContainText(text('weather.refreshFailed'));
+  await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
+  await expect(bar(page)).toContainText(await lowLine(page, 4));
+  await expect(bar(page).locator('.weather-hours li')).toHaveCount(15);
+  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  const retry = bar(page).getByRole('button', { name: text('common.retry'), exact: true });
+  await expect(retry).toBeDisabled();
+  expect(weather.forecasts()).toHaveLength(2);
+  await page.clock.fastForward('00:01:01');
+  await expect(retry).toBeEnabled();
+  expect(weather.forecasts()).toHaveLength(2);
+  await page.context().setOffline(true);
+  await expect(retry).toBeDisabled();
+  await page.clock.fastForward('00:05:00');
+  await expect(bar(page)).toContainText(await lowLine(page, 4));
+  expect(weather.forecasts()).toHaveLength(2);
+  await page.context().setOffline(false);
+  weather.status.forecast = 200;
+  // The successful reply's valid-time is deliberately old; it must not start a retry loop or claim Now.
+  await retry.click();
+  await expect(bar(page)).not.toContainText(text('weather.refreshFailed'));
+  await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
+  await expect(bar(page)).toContainText(await lowLine(page, 4));
+  expect(weather.forecasts()).toHaveLength(3);
+  await page.clock.fastForward('00:01:00');
+  expect(weather.forecasts()).toHaveLength(3);
+});
+
+test('WEATHER2 hidden completion and visible return reuse one refresh, without hidden polling', async ({ page }) => {
+  const at = Date.parse('2026-10-08T11:00:00Z');
+  await page.clock.install({ time: at });
+  const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => {
+    basics(api); service.clock.at = at;
+  } });
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 0));
+  await visibility(page, true);
+  await page.clock.fastForward('00:30:01');
+  await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
+  expect(weather.forecasts()).toHaveLength(1);
+  weather.hold.forecast.add('65.0');
+  await visibility(page, false);
+  await expect.poll(() => weather.held.length).toBe(1);
+  await visibility(page, true);
+  await weather.release('forecast', forecastReply({ temperature: 0, current: 13 }, 10800, at + 30 * 60_000));
+  weather.hold.forecast.delete('65.0');
+  await visibility(page, false);
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13));
+  expect(weather.forecasts()).toHaveLength(2);
+  await page.clock.fastForward('00:01:00');
+  expect(weather.forecasts()).toHaveLength(2);
+});
+
+test('WEATHER2 partial temperatures remain accessible unknown slots, not interpolated values', async ({ page }) => {
+  const at = Date.parse('2026-10-08T11:00:00Z');
+  await page.clock.install({ time: at });
+  const { weather } = await start(page, { weather: oulu, seed: (api, service) => {
+    basics(api); service.clock.at = at; service.hold.forecast.add('65.0');
+  } });
+  await expect.poll(() => weather.held.length).toBe(1);
+  const data = forecastReply({ temperature: -3, current: 0 }, 10800, at);
+  const temperatures: (number | null)[] = [...data.hourly.temperature_2m];
+  temperatures[8] = null;
+  await weather.release('forecast', { ...data, hourly: { ...data.hourly, temperature_2m: temperatures } });
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 0));
+  const hours = bar(page).locator('.weather-hours li');
+  await expect(hours).toHaveCount(15);
+  await expect(hours.nth(0).locator('span')).toHaveText(await celsius(page, -3));
+  await expect(hours.nth(1).locator('span')).toHaveText(text('weather.hourUnknown'));
+  await expect(hours.nth(2).locator('span')).toHaveText(await celsius(page, -3));
+  await expect(hours.last().locator('time')).toHaveAttribute('datetime', '2026-10-08T21:00');
+});
+
+test('WEATHER2 late-quarter cadence has brief grace gaps across successive quarters and retains the alternate idea', async ({ page }) => {
+  const at = Date.parse('2026-10-08T11:14:00Z');
+  await page.clock.install({ time: at });
+  const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => {
+    basics(api); add(api, 'Grey shirt', { colours: ['grey'] });
+    service.clock.at = at; service.weather.set('65.0', { temperature: 4, current: 13 });
+  } });
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13));
+  await button(page, 'today.more').click();
+  await openDetails(page);
+  const idea = await cards(page).first().innerText();
+  await page.clock.pauseAt(at + 10_000);
+  for (let minute = 1; minute <= 32; minute++) {
+    weather.weather.set('65.0', { temperature: 4, current: minute < 2 ? 13 : minute < 17 ? 18 : minute < 32 ? 19 : 20 });
+    await gradualMinute(page, weather);
+    const expectedRequests = minute < 2 ? 1 : minute < 17 ? 2 : minute < 32 ? 3 : 4;
+    await expect.poll(() => weather.forecasts().length).toBe(expectedRequests);
+    if ([1, 16, 31].includes(minute)) await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
+    else await expect(weatherTrigger(page)).toHaveText(await currentLine(page, minute < 17 ? 18 : minute < 32 ? 19 : 20));
+    await expect(bar(page)).toContainText(await lowLine(page, 4));
+    await expect(cards(page).first()).toHaveText(idea, { useInnerText: true });
+    await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  }
+});
+
+test('WEATHER2 gradual failure cadence retains forecast and retries no faster than the normal fifteen-minute fallback', async ({ page }) => {
+  const at = Date.parse('2026-10-08T11:14:00Z');
+  await page.clock.install({ time: at });
+  const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => {
+    basics(api); service.clock.at = at; service.weather.set('65.0', { temperature: 4, current: 13 });
+  } });
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13));
+  await page.clock.pauseAt(at + 10_000);
+  weather.status.forecast = 503;
+  for (let minute = 1; minute <= 33; minute++) {
+    await gradualMinute(page, weather);
+    await expect.poll(() => weather.forecasts().length).toBe(minute < 2 ? 1 : minute < 17 ? 2 : minute < 32 ? 3 : 4);
+    await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
+    await expect(bar(page)).toContainText(await lowLine(page, 4));
+    await expect(cards(page).first()).toContainText(text('today.addCoat'));
+    if (minute >= 2) {
+      await expect(bar(page)).toContainText(text('weather.refreshFailed'));
+      const retry = bar(page).getByRole('button', { name: text('common.retry'), exact: true });
+      if ([2, 17, 32].includes(minute)) await expect(retry).toBeDisabled();
+      else await expect(retry).toBeEnabled();
+    }
+  }
+});
+
+for (const outcome of ['missing', 'malformed', 'stale', 'future'] as const) test(`WEATHER2 partial-current cadence: ${outcome} success waits the normal interval without a storm`, async ({ page }) => {
+  const at = Date.parse('2026-10-08T11:14:00Z');
+  await page.clock.install({ time: at });
+  const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => {
+    basics(api); service.clock.at = at; service.weather.set('65.0', { temperature: 4, current: 13 });
+  } });
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13));
+  await page.clock.pauseAt(at + 10_000);
+  await page.route(/^https:\/\/api\.open-meteo\.com\//, async route => {
+    const now = weather.clock.at!;
+    const data = forecastReply({ temperature: 4, current: 18 }, 10800, now);
+    const body = { ...data, current: outcome === 'missing' ? undefined : outcome === 'malformed' ? { ...data.current, temperature_2m: '18' }
+      : { ...data.current, time: new Date((outcome === 'stale' ? at - 15 * 60_000 : now + 15 * 60_000) + 10800 * 1000).toISOString().slice(0, 16) } };
+    await reply(route, body);
+  });
+  for (let minute = 1; minute <= 33; minute++) {
+    await gradualMinute(page, weather);
+    await expect.poll(() => weather.forecasts().length).toBe(minute < 2 ? 1 : minute < 17 ? 2 : minute < 32 ? 3 : 4);
+    await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
+    await expect(bar(page)).toContainText(await lowLine(page, 4));
+    await expect(bar(page)).not.toContainText(text('weather.refreshFailed'));
+    await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  }
+});
+
+for (const status of [200, 503]) test(`WEATHER2 held refresh retry joins one request and restores normal cadence after ${status}`, async ({ page }) => {
+  const at = Date.parse('2026-10-08T11:14:00Z');
+  await page.clock.install({ time: at });
+  const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => {
+    basics(api); service.clock.at = at; service.weather.set('65.0', { temperature: 4, current: 13 });
+  } });
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13));
+  await page.clock.pauseAt(at + 10_000);
+  weather.status.forecast = 503;
+  let failedAt: number | null = null;
+  for (let minute = 0; minute < 16; minute++) {
+    const completedAt = await gradualMinute(page, weather);
+    if (completedAt !== null) failedAt = completedAt;
+  }
+  await expect(bar(page)).toContainText(text('weather.refreshFailed'));
+  const retry = bar(page).getByRole('button', { name: text('common.retry'), exact: true });
+  await expect(retry).toBeEnabled();
+  expect(weather.forecasts()).toHaveLength(2);
+  if (failedAt === null) throw new Error('No settled failed refresh.');
+  weather.hold.forecast.add('65.0');
+  const due = failedAt + 15 * 60_000 + 50;
+  const before = await page.evaluate(() => Date.now());
+  const steps = Math.ceil((due - before) / 1000);
+  for (let step = 0; step < steps && weather.held.length === 0; step++) {
+    weather.clock.at = before + (step + 1) * 1000;
+    await page.clock.runFor(1000);
+    if (weather.forecasts().length === 3) await expect.poll(() => weather.held.length).toBe(1);
+  }
+  await expect.poll(() => weather.held.length).toBe(1);
+  await retry.click();
+  expect(weather.forecasts()).toHaveLength(3);
+  expect(weather.held).toHaveLength(1);
+  const now = await page.evaluate(() => Date.now());
+  await weather.release('forecast', forecastReply({ temperature: 4, current: 18 }, 10800, now), status);
+  await expect.poll(weather.completedForecasts).toBe(3);
+  weather.hold.forecast.delete('65.0');
+  weather.status.forecast = 200;
+  weather.weather.set('65.0', { temperature: 4, current: 19 });
+  if (status === 200) {
+    await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 18));
+    await expect(bar(page)).not.toContainText(text('weather.refreshFailed'));
+  } else {
+    await expect(retry).toBeDisabled();
+    await expect(bar(page)).toContainText(text('weather.refreshFailed'));
+  }
+  for (let minute = 1; minute <= 16; minute++) {
+    await gradualMinute(page, weather);
+    await expect.poll(() => weather.forecasts().length).toBe(minute < 15 || minute === 15 && status === 503 ? 3 : 4);
+    await expect(bar(page)).toContainText(await lowLine(page, 4));
+    await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  }
+  await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 19));
+  await expect(bar(page)).not.toContainText(text('weather.refreshFailed'));
 });
 
 // Delays the lazy route's ready effect: once the city field is inserted, React's scheduler messages (which run the
@@ -410,7 +701,7 @@ test('I16 sends nothing until Search, then only the typed city; Use this city tu
   await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
   await expect(turnOn(page)).toHaveCount(0);
   expect(weather.forecasts().map(url => Object.fromEntries(url.searchParams))).toEqual([{ latitude: '65.0', longitude: '25.5',
-    hourly: 'temperature_2m,precipitation_probability,wind_speed_10m', wind_speed_unit: 'ms', timezone: 'auto', forecast_days: '2' }]);
+    current: 'temperature_2m', hourly: 'temperature_2m,precipitation_probability,wind_speed_10m', wind_speed_unit: 'ms', timezone: 'auto', forecast_days: '2' }]);
   // Going back to Today, focus and a language change reuse the forecast held in memory.
   await goTo(page, 'settings'); await goTo(page, 'today');
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
@@ -500,16 +791,20 @@ test('I16 a forecast stops counting after three hours; suggestions drop it and i
   const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => { basics(api); service.clock.at = at; } });
   await expect(bar(page)).toContainText(await lowLine(page, 0));
   await expect(cards(page).first()).toContainText(text('today.addCoat'));
-  weather.hold.forecast.add('65.0');
+  weather.status.forecast = 503;
   await page.clock.fastForward('02:59:00');
   await expect(bar(page)).toContainText(await lowLine(page, 0));
-  expect(weather.forecasts()).toHaveLength(1);
+  await expect(bar(page)).toContainText(text('weather.refreshFailed'));
+  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  expect(weather.forecasts()).toHaveLength(2);
+  weather.status.forecast = 200;
+  weather.hold.forecast.add('65.0');
   await page.clock.fastForward('00:01:01');
   await expect(bar(page)).toContainText(text('weather.loading'));
   await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
   await expect(cards(page).first()).not.toContainText(text('today.addCoat'));
   // "Loading" renders before the mocked route logs the new request.
-  await expect.poll(() => weather.forecasts().length).toBe(2);
+  await expect.poll(() => weather.forecasts().length).toBe(3);
   await weather.release('forecast', forecastReply({ temperature: 10 }, 10800, at + 3 * 3600_000));
   await expect(bar(page)).toContainText(await lowLine(page, 10));
 });
@@ -896,7 +1191,7 @@ test.describe('WEATHER1 visual', () => {
       await button(page, 'weather.useTemperature').click();
       await expect(page.locator('#weather-temperature-error')).toHaveText(text('weather.invalidTemperature'));
     } else {
-      await expect(weatherTrigger(page)).toHaveText(await lowLine(page, 6, selected.language));
+      await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 6, selected.language));
       await expect(bar(page)).toBeHidden();
       if (selected.scene === 'details') {
         await openDetails(page);
@@ -1017,5 +1312,69 @@ test.describe('bounded I16 visual evidence', () => {
     expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && png.readUInt32BE(16) === selected.width).toBe(true);
     const file = await open(path.join(directory, `${selected.scene}-${selected.suffix}.png`), 'wx');
     try { await file.writeFile(png); } finally { await file.close(); }
+  });
+
+});
+
+test.describe('WEATHER2 visual', () => {
+    test.describe.configure({ retries: 0 });
+    const scenes = (['en', 'fi', 'sv'] as const).flatMap(language => [
+      { language, width: 320, height: 568, project: 'mobile', suffix: `${language}-narrow` },
+      { language, width: 1280, height: 900, project: 'chromium', suffix: `${language}-wide` },
+    ]);
+    for (const selected of scenes) test(`current and hourly ${selected.suffix}`, async ({ page }, testInfo) => {
+      const at = Date.parse('2026-10-08T11:05:00Z');
+      await page.clock.install({ time: at });
+      await page.setViewportSize({ width: selected.width, height: selected.height });
+      const { weather } = await start(page, { language: selected.language, weather: oulu, tokenSeconds: twoDays,
+        seed: (api, service) => { basics(api); service.clock.at = at; service.hold.forecast.add('65.0'); } });
+      await expect.poll(() => weather.held.length).toBe(1);
+      const data = forecastReply({ temperature: 6, current: 13, rain: 2, wind: 7 }, 10800, at);
+      data.hourly.temperature_2m = data.hourly.time.map(time => {
+        const hour = Number(time.slice(11, 13));
+        return hour < 10 ? 6 : hour < 13 ? 10 : hour < 17 ? 14 : 8;
+      });
+      await weather.release('forecast', data);
+      await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13, selected.language));
+      await expect(bar(page)).toContainText(await lowLine(page, 6, selected.language));
+      const hours = bar(page).locator('.weather-hours li');
+      await expect(hours).toHaveCount(15);
+      await expect(hours.first().locator('time')).toHaveAttribute('datetime', '2026-10-08T07:00');
+      await expect(hours.last().locator('time')).toHaveAttribute('datetime', '2026-10-08T21:00');
+      await expect(hours.first().locator('span')).toHaveText(await celsius(page, 6, selected.language));
+      await expect(hours.nth(7).locator('span')).toHaveText(await celsius(page, 14, selected.language));
+      await expect(hours.last().locator('span')).toHaveText(await celsius(page, 8, selected.language));
+      await expectIdentity(page, 'Alex');
+      await openDetails(page);
+      await detailsFit(page);
+      await footerFits(page);
+      expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+      const zoom = await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });
+      await detailsFit(page);
+      await hours.last().scrollIntoViewIfNeeded();
+      expect(await bar(page).locator('.weather-hours').evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await zoom.evaluate(element => { element.parentNode?.removeChild(element); });
+      await bar(page).evaluate(element => { element.scrollTop = 0; });
+      await detailsFit(page);
+      expect(weather.forecasts()).toHaveLength(1);
+      expect(await page.evaluate(({ language, width, height }) => {
+        const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
+        const fields = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea')]
+          .filter(field => field.getClientRects().length).map(field => field.value).join('\n');
+        return location.hostname === '127.0.0.1' && document.documentElement.lang === language && innerWidth === width && innerHeight === height
+          && document.documentElement.scrollWidth <= innerWidth && !document.querySelector('input[type=password],#email,#password')
+          && !privatePattern.test(document.body.innerText) && !privatePattern.test(fields);
+      }, selected)).toBe(true);
+      if (testInfo.project.name !== selected.project) return;
+      const directory = path.resolve('test-results/weather2-visual');
+      await mkdir(directory, { recursive: true });
+      const info = await lstat(directory); expect(info.isDirectory() && !info.isSymbolicLink()).toBe(true);
+      const png = await page.screenshot({ fullPage: false, animations: 'disabled', type: 'png', scale: 'css' });
+      expect(png.byteLength > 0 && png.byteLength <= 1048576).toBe(true);
+      expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+        && png.readUInt32BE(16) === selected.width && png.readUInt32BE(20) === selected.height).toBe(true);
+      const file = await open(path.join(directory, `current-hourly-${selected.suffix}.png`), 'wx');
+      try { await file.writeFile(png); } finally { await file.close(); }
   });
 });

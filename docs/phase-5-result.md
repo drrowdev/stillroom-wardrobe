@@ -427,3 +427,262 @@ in `tests/browser/stylist.spec.ts` to the existing packet scope.
   Independent repair-delta review, publication and natural new-head CI
   remain pending. No additional local images were
   generated; final exact-head CI captures and coordinator review remain open.
+
+## WEATHER2: current temperature and daytime progression (8 October 2026)
+
+Status: **implemented locally; awaiting independent review and publication.**
+Owner scope is [#84 c6059311590](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6059311590);
+the coordinator's [approval and START c6059455401](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6059455401)
+released this writer's read-only gate. Base and unchanged local HEAD:
+`f6f657351e7c06e9ee9eb7c1e8d6edc43ca0a169`, branch
+`drrowdev-weather2-current-temperature`. Requirements: R10 optional weather,
+R09 deterministic suggestions, R17 accessibility, R27 localization; I16/S03.
+The newer D21/R6 deployment evidence does not rewrite the historical release
+ledger or establish this packet's deployment or acceptance.
+
+### Behavior and boundaries
+
+- The existing bounded forecast request also asks for
+  `current=temperature_2m`. No new endpoint, provider, geolocation, persistence,
+  credentials or dependency. Rounded coordinates, request privacy, two-day
+  forecast, size bounds and deadline remain unchanged.
+- The header shows the supplied current temperature, not the day's low or a
+  nearest-hour guess: current 13 C and low 6 C remain distinct. Missing,
+  malformed, future, stale, wrong-date or mismatched timezone/offset current
+  is unavailable without discarding usable forecast data. Real calendar and
+  DST validity are checked; the details identify a model estimate and its
+  city-local valid time.
+- Current validity and fetch age are each strictly less than 15 minutes.
+  The current-expiry timer only clears the label; refreshes use the same
+  single-flight request at a bounded 15-minute attempt/fetch interval while
+  visible and online. Hidden completion is retained only for the still-owned
+  city; visible return joins pending work or makes one due request.
+- The three-hour/date-bound forecast and conservative low/rain/wind engine
+  inputs remain usable during refresh, offline and refresh failure. Errors
+  stay visible, with the existing 60-second explicit-retry cooldown; stale
+  successful current data does not cause an immediate retry loop. Once the
+  forecast itself expires, its recommendation inputs stop counting.
+- A dependency-free semantic list presents every city-local hour 07:00-21:00
+  inclusive, including elapsed morning hours. Missing points remain unknown;
+  no interpolation. All missing hourly temperatures have an explicit
+  unavailable state. Values/times are readable to screen readers, with
+  wrapping and vertical disclosure scrolling at 320 px, 200% text and
+  height 568. Manual and Indoors overrides, disclosure/focus, credit and
+  owner/city/off guards remain intact. EN/FI/SV use typed keys and Intl.
+
+### Local validation and diagnosed repairs
+
+Pinned Node `24.19.0` / npm `11.17.0` were scoped to each command. The initial
+`npm run typecheck` failed because `tsc` was absent; only then
+`npm ci --ignore-scripts --no-audit --no-fund` restored locked dependencies.
+Locked Playwright `1.63.0` Chromium/headless `1243` and WebKit `2359`
+matched the existing cache and launched successfully. Browser runs used
+reserved port 5197, two workers, zero retries and blocked external hosts;
+`ALLOW_HOSTED_SMOKE` remained unset.
+
+- `npm run lint`, `npm run typecheck`, `npm run check:translations` and
+  `git diff --check`: pass. Translation check: 1131 keys in EN/FI/SV.
+  Type migration explicitly supplied the new required Forecast fields;
+  no optional-field workaround. A new capture-test Node/Element type
+  mismatch and an incorrect test key were corrected before execution.
+- `npm run test:unit -- tests/unit/weather.test.ts tests/unit/weather-chips.test.ts tests/unit/weather-zone.test.ts tests/unit/today-featured.test.ts tests/unit/recommendations.test.ts tests/unit/recommendations-properties.test.ts`:
+  6 files / 78 tests passed. Coverage includes current/low separation,
+  unknown/partial values, real calendar/DST/offset validity, local dates
+  ahead/behind UTC, strict freshness, 07/21 endpoints and single-flight
+  refresh/cooldown with retained conservative forecast.
+- `npm run test:browser -- 'weather\.spec\.ts' 'today\.spec\.ts' 'shell-layout\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep-invert 'visual evidence|bounded synthetic captures|WEATHER1 visual|WEATHER2 visual'`:
+  initial run, 363 passed / 2 existing skips / 7 failed. Filename-only
+  filters selected 372 tests; all inherited weather/Today/shell captures
+  were excluded without excluding the functional groups.
+- The seven failures had three identified assertion causes: the expected
+  request omitted the new current parameter; the idea snapshot compared
+  visible innerText with hidden menu textContent; Swedish time punctuation
+  came from Node Intl rather than browser Intl. The corrected test checks
+  browser formatting, all expected request parameters and the unchanged
+  visible idea after explicitly selecting an alternate idea.
+  `npm run test:browser -- 'weather\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'header shows current temperature|current expiry, held refresh|I16 sends nothing until Search'`:
+  15 passed, covering all seven failures. The full noncapture invocation
+  was not repeated after these test-only corrections. The two existing
+  desktop-WebKit safe-area skips are not native-device passes.
+- Other passing browser coverage retains three-hour/midnight expiry,
+  partial/flat/negative/zero temperatures, failed-refresh/offline retention,
+  explicit retry, hidden completion/visible return, stale-success request
+  bounds, city/owner/off races, manual/Indoors, portal lifetime and consumers.
+  No timeouts, retries, engine skips or functional assertions were weakened.
+
+### Bounded synthetic captures and pending gates
+
+`npm run test:browser -- 'weather\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'WEATHER2 visual'`:
+9 wide cases passed; 9 narrow cases failed before capture because the
+existing phone identity helper opens More and closes weather. The test now
+reopens the disclosure after identity verification and places WEATHER2 in
+its own top-level group. No product or capture bound changed.
+
+`npm run test:browser -- 'weather\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'WEATHER2 visual.*narrow' --output=test-results/weather2-narrow-repair`:
+9 passed. Only the failed narrow functional scenes ran; the separate output
+root retained the three successful wide captures without regenerating them.
+Exactly six new screenshots were written in ignored
+`test-results/weather2-visual/`: `current-hourly-{en,fi,sv}-{narrow,wide}.png`,
+320x568 (mobile writes) and 1280x900 (Chromium writes), 24,693-70,405 bytes
+each, all within 1 MiB. Every project ran geometry, hourly-value, zoom,
+accessibility and privacy assertions; WebKit wrote no image. The writer
+inspected filename/size metadata only, never image contents. These are local
+unpublished product-source evidence, not final published-head visual approval.
+
+The 17 inherited WEATHER1/I16 captures remain CI-owned and unexpanded;
+unrelated Today/shell captures did not run locally. Coordinator-owned
+Opus 5.5/high review, required exact-head CI, actual final-head artifact
+review, real provider/owner/device trials and owner-run Pages deployment
+remain pending. Historical unexplained stalls and the exact WEATHER1
+height-900 failure cause remain unresolved, not repaired by this packet.
+No local full browser, integration/security, hosted smoke, build,
+secret/dependency scan, commit, push, PR publication, merge or deployment is
+claimed. Rollback is the packet's source changes; no database rollback or
+data mutation is involved.
+
+### Independent-review scheduling amendment (8 October 2026)
+
+The coordinator's one full Opus 5.5/high review returned **AMEND**: a fixed
+fetch-plus-15-minute refresh left current systematically unavailable between
+its quarter-hour validity expiry and the next fetch (opening at 11:14 could
+show current for one minute, then unavailable for fourteen). No other
+significant findings were reported. The coordinator approved this bounded
+same-writer repair in
+[#84 c6060148228](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6060148228).
+Only `use-weather.ts`, the existing weather unit/browser tests and this
+result document changed for the amendment. Publication remains held.
+
+- A usable current success now schedules its normal request at the later
+  of strict current expiry plus 60 seconds and the previous attempt plus
+  60 seconds. The grace delays only the request, **never the current label**:
+  age must still be strictly under 15 minutes, nonfuture, on the correct
+  real city-local date with the validated timezone/offset.
+- Missing, malformed, stale or future current success instead waits
+  15 minutes after fetch/latest attempt. A pending newer attempt or failed
+  refresh supersedes the old observation deadline; failure waits 15 minutes
+  after attempt/failure completion before another normal request. Explicit
+  retry retains its 60-second failure cooldown and attempt history.
+  Single-flight, hidden/offline suppression, city/owner guards and earliest
+  midnight/three-hour forecast expiry remain unchanged.
+- Gradual clock coverage starts at 11:14, observes unavailable at 11:15,
+  current again after the 11:16 request, and repeats around 11:30/11:31
+  and 11:45/11:46. It retains low 4 C, coat requirements and an explicitly
+  selected alternate idea through current-only updates. Separate gradual
+  failure and missing/malformed/stale/future-success cases assert exactly
+  four requests through 33 minutes, not repeated minute-by-minute retries.
+  The earlier `fastForward('02:59:00')` test runs each timer at most once;
+  its request count proves retained three-hour expiry behavior, **not**
+  recurring failure cadence. The new gradual checks supply that evidence.
+
+Exact amendment checks (pinned tooling, port 5197, three projects, at most
+two workers, zero retries, no captures or hosted access):
+
+- `npm run lint`, `npm run typecheck`, `npm run check:translations`
+  (1131 EN/FI/SV keys), `git diff --check`: pass.
+- `npm run test:unit -- tests/unit/weather.test.ts tests/unit/weather-chips.test.ts tests/unit/weather-zone.test.ts tests/unit/today-featured.test.ts tests/unit/recommendations.test.ts tests/unit/recommendations-properties.test.ts`:
+  6 files / 79 tests passed.
+- `npm run test:browser -- 'weather\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'WEATHER2.*(late-quarter cadence|gradual failure cadence|partial-current cadence|current expiry|failed refresh|hidden completion|partial temperatures|header shows)|I16 a forecast stops counting|I16 a held forecast|going offline before|I16 a failed forecast' --output=test-results/weather2-scheduling`:
+  42 passed / 18 new gradual-test failures. The existing concrete current,
+  visibility, city/owner, offline, cooldown and forecast-expiry checks passed.
+  One-minute `runFor` steps let the unchanged five-second provider deadline
+  run before asynchronous mock responses settled; they were not valid
+  successful-response cadence evidence.
+- The gradual fixture now advances in one-second increments and waits for
+  each observed request's terminal event before more clock advancement.
+  No deadline, timeout, assertion, retry or product freshness was relaxed.
+  `npm run test:browser -- 'weather\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'WEATHER2.*(late-quarter cadence|gradual failure cadence|partial-current cadence)' --output=test-results/weather2-scheduling-gradual`:
+  16 passed / 2 failure-cadence fixture failures. Chromium reports the
+  intentional cancellation of a rejected 503 body as `requestfailed`,
+  whereas WebKit's observed path reported `requestfinished`; the terminal
+  counter now observes both mutually exclusive events.
+- `npm run test:browser -- 'weather\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'WEATHER2 gradual failure cadence' --output=test-results/weather2-scheduling-failure`:
+  3 passed, covering the remaining two failures. No whole 372-test rerun,
+  new images, inherited capture execution, commit, push or PR occurred.
+
+The six prior local captures predate this scheduling repair and are not its
+final-head visual evidence. Coordinator-owned quick Opus delta review,
+publication permission, all required exact-head CI and actual final-head
+capture review remain mandatory; the broader owner/device/provider and
+deployment gates above remain open.
+
+### Quick-delta pending-request closure (8 October 2026; blocked evidence)
+
+The coordinator's quick Opus delta found one medium race: `load()` returned
+the existing pending promise before clearing the explicit manual-retry flag.
+Clicking Try again while the next automatic refresh was held could leave that
+flag after either success or failure, overriding the normal refresh deadline.
+The coordinator explicitly approved and sent START for this scoped closure.
+The flag now clears before the same-key pending early return; single-flight
+deduplication and attempt history are otherwise unchanged.
+
+Two focused unit cases (200 and 503) assert the same pending promise, exactly
+one fetch, cleared explicit schedule, and correct observation-expiry/failure
+fallback deadlines. `npm run test:unit -- tests/unit/weather.test.ts`:
+25 tests passed. `npm run lint`, `npm run typecheck`,
+`npm run check:translations` (1131 keys) and `git diff --check`: pass.
+
+The bounded browser cases reproduce a failed refresh followed by a held
+automatic request, click the still-available retry, settle either 200 or 503,
+and require one pending request and the normal later cadence without a
+60-second dispatch or a stall.
+
+- `npm run test:browser -- 'weather\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'WEATHER2 held refresh retry' --output=test-results/weather2-held-retry`:
+  6 failed before reaching the held request. The fixed clock advance stopped
+  before failure completion plus 15 minutes plus the timer's 50 ms margin.
+- The same command with `--output=test-results/weather2-held-retry-boundary`
+  after advancing one additional second: 4 passed (Chromium/mobile, both
+  statuses), 2 failed (WebKit, held request still absent).
+- The gradual fixture additionally waits for the visible disabled retry
+  control after a rejected request's terminal event, so network completion
+  alone does not stand in for recorded failure state. The same command with
+  `--output=test-results/weather2-held-retry-settled`: 4 passed, the same
+  2 WebKit failures before the held request.
+
+The remaining WebKit dispatch-boundary cause is **unresolved**. The proposed
+render-settlement explanation did not resolve it; this is not an all-project
+passing closure. No assertion, timeout, deadline or retry was weakened.
+Browser execution stopped and the blocker was sent to the coordinator before
+any further budget. Only the approved four repair paths changed; no images,
+whole-suite rerun, commit, push, PR, hosted operation or deployment occurred.
+Publication remains held pending a bounded diagnostic decision and the
+previously required coordinator verification/exact-head gates.
+
+### Observed-boundary closure (8 October 2026)
+
+The coordinator authorized one numeric/text-only WebKit diagnostic of the
+200 case, preserving all assertions and deadlines:
+`npm run test:browser -- 'weather\.spec\.ts' --project=webkit-photo --workers=1 --retries=0 --grep 'WEATHER2 held refresh retry joins one request and restores normal cadence after 200' --output=test-results/weather2-held-webkit-diagnostic`.
+It failed before Try again/held dispatch. The paused fake clock was 11:14:10;
+the failed request's start and terminal event were observed during the
+11:16:04 one-second step (step-clock upper bound, not a falsely exact
+page-event timestamp). Before/after the 52-second jump, actual fake Date.now
+was 11:30:10 / 11:31:02, with visible/online true, retry enabled, error present
+and request/completed/held counts 2/2/0. The fixed test endpoint preceded the
+observed failure plus its 15-minute fallback, approximately 11:31:03-04.
+No third request started or failed during the jump. All temporary probes
+were removed and diff-check passed. The source of the few-second initial
+dispatch offset remains unknown; no environment or product attribution is
+made.
+
+The coordinator then approved a test-only derived-boundary correction.
+The gradual helper returns the fake clock after the rejected request's
+terminal event and visible disabled retry state have settled, giving a
+one-second completion upper bound. The held test derives the next due
+boundary from this observation plus 15 minutes and the existing 50 ms timer
+margin. It advances in bounded one-second steps only until that boundary,
+stopping as soon as the held route is observed so the five-second provider
+deadline is not crossed. No arbitrary longer jump, wait, timeout, clock
+skew allowance or product change was introduced.
+
+`npm run test:browser -- 'weather\.spec\.ts' --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep 'WEATHER2 held refresh retry' --output=test-results/weather2-held-derived-boundary`:
+**6 passed**, once after this correction. Both 200/503 outcomes in every
+project retain exactly one held request when Try again joins it, then restore
+the correct normal cadence without a 60-second dispatch or a stall.
+The earlier failure chronology remains evidence, not a passing run.
+`npm run lint`, `npm run typecheck`, `npm run check:translations` (1131 keys),
+`npm run test:unit -- tests/unit/weather.test.ts` (25 tests) and
+`git diff --check`: pass after the correction.
+
+The held-case local blocker is closed; coordinator closure verification and
+publication instruction remain pending, along with exact-head CI and visual
+acceptance. No new images, whole-suite rerun or publication occurred.

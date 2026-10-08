@@ -80,6 +80,7 @@ export async function fetchForecast(place: WeatherPlace, signal: AbortSignal, no
   const url = new URL('/v1/forecast', forecastOrigin);
   url.search = new URLSearchParams({
     latitude: place.latitude.toFixed(1), longitude: place.longitude.toFixed(1),
+    current: 'temperature_2m',
     hourly: 'temperature_2m,precipitation_probability,wind_speed_10m', wind_speed_unit: 'ms', timezone: 'auto', forecast_days: '2',
   }).toString();
   const forecast = summarizeForecast(await getJson(url, signal, forecastLimitBytes), nowMs());
