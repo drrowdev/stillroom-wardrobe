@@ -8332,3 +8332,28 @@ separate publication instruction, all required exact-head CI, actual six-image
 coordinator review, normal guarded merge and owner-run deployment. Synthetic
 geometry/text resizing do not establish real phone/browser zoom, native-language
 or owner acceptance. Held #27/R6F1 and existing release gates remain untouched.
+
+## DRESS1 - dress code names in the wardrobe filter (8 October 2026)
+
+Owner request on #84: "dress code should include names instead of numbers".
+The Filters sheet and its active-filter chips listed the dress code as 0-4;
+they now use the same localized names as the item form and facts (EN/FI/SV
+`occasion.*` keys plus the existing "Not specified" option), so a chip reads
+"Dress code: Smart casual". The group heading is "Dress code" (Pukeutumistyyli,
+Klädkod) everywhere: the item form and item facts moved from the separate
+"Occasion" label (Käyttötilanne, Tillfälle), which also names the Today occasion
+picker, and the then-unused `item.occasion` key was removed. Stored values
+(0-4), search matching, recommendations, the stylist, exports and the database
+are unchanged. `facet-labels` unit tests and the compound-facets browser test
+(EN/FI/SV) assert the names. Two synthetic chromium-only captures (EN 1280x800 sheet,
+FI 390x844 chip) go to ignored `test-results/dress1-visual/` (<=1 MiB each) for
+CI's app-visual artifact; the writer never opened them. Coordinator visual review
+is pending.
+
+Validation (Node 24.19.0, `PLAYWRIGHT_PORT=5198`): `npm run lint`,
+`npm run typecheck`, `npm run check:translations` (1130 keys), unit suites
+matching `item facet i18n translat wardrobe` (1253 tests) and
+`npm run test:browser -- wardrobe-grid.spec.ts garment-fields.spec.ts
+--project=chromium --project=mobile --project=webkit-photo --workers=2
+--retries=0` (116 passed; plus wardrobe-grid.spec.ts alone, 36 passed, with the captures) pass; `git diff --check` is clean. Full CI, the
+independent code review and visual acceptance are pending.

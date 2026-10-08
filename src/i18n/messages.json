@@ -252,7 +252,6 @@
   "item.moreDetails": {"en":"More details","fi":"Lisätietoja","sv":"Fler uppgifter"},
   "item.notSet": {"en":"Not set","fi":"Ei valittu","sv":"Inte vald"},
   "item.type": {"en":"Type","fi":"Tyyppi","sv":"Typ"},
-  "item.occasion": {"en":"Occasion","fi":"Käyttötilanne","sv":"Tillfälle"},
   "item.addTag": {"en":"Add tag","fi":"Lisää tunniste","sv":"Lägg till tagg"},
   "item.removeTag": {"en":"Remove tag {tag}","fi":"Poista tunniste {tag}","sv":"Ta bort taggen {tag}"},
   "item.styleWord": {"en":"Style word: {tag}","fi":"Tyylisana: {tag}","sv":"Stilord: {tag}"},

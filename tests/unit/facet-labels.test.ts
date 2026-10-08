@@ -20,6 +20,16 @@ describe('facet groups', () => {
     expect(colourCodes.slice(-3)).toEqual(['unknown', 'amber-ish', 'teal-ish']);
     expect(groups[3]!.options.map(([code]) => code)).toEqual(['0', '1', '2', '3', '4', 'unknown']);
   });
+
+  it('name the dress codes in every language instead of numbering them', () => {
+    for (const language of languages) {
+      const t = tr(language);
+      const labels = setup(language).groups[3]!.options.map(([, label]) => label);
+      expect(labels).toEqual([...['home', 'everyday', 'smart', 'business', 'formal'].map(code => translate(language, `occasion.${code}` as Parameters<Translate>[0])), t('item.unknown')]);
+      expect(labels.some(label => /\d/.test(label))).toBe(false);
+      expect(new Set(labels).size).toBe(labels.length);
+    }
+  });
 });
 
 describe('active-filter chips', () => {
@@ -44,7 +54,7 @@ describe('active-filter chips', () => {
     const en = (key: Parameters<Translate>[0]) => translate('en', key);
     const pair = (group: Parameters<Translate>[0], value: string) => `${en(group)}: ${value}`;
     expect(chips(facets).map(chip => chip.label)).toEqual([
-      en('category.top'), pair('item.colour', en('colour.unknown')), pair('item.formality', '3'), pair('item.formality', en('item.unknown')),
+      en('category.top'), pair('item.colour', en('colour.unknown')), pair('item.formality', en('occasion.business')), pair('item.formality', en('item.unknown')),
       pair('item.availability', en('availability.ready')), en('lifecycle.archived'), pair('item.favourite', en('item.yes')),
     ]);
     expect(chips({ ...emptyFacets(), favourite: 'no' }).map(chip => chip.label)).toEqual([`${translate('en', 'item.favourite')}: ${translate('en', 'item.no')}`]);
