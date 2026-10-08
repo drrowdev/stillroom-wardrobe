@@ -648,7 +648,10 @@ test('I15 an unknown Wear today stays with its own idea: no other idea can write
     if (change === 'another') await showAnother(page);
     if (change === 'page') { await showAnother(page); await showAnother(page); }
     if (change === 'occasion') await page.getByRole('combobox', { name: text('outfits.occasion'), exact: true }).selectOption('smart');
-    if (change === 'weather') await page.getByRole('button', { name: text('setting.indoors'), exact: true }).click();
+    if (change === 'weather') {
+      await page.locator('#weather-trigger').click();
+      await page.getByRole('button', { name: text('setting.indoors'), exact: true }).click();
+    }
     await expect(featured(page)).toBeVisible();
     await expect(wearButton(page)).toBeDisabled();
     await expect(wearButton(page)).toHaveAttribute('aria-describedby', 'today-wear-panel');
@@ -730,6 +733,11 @@ test('I15 a Wear today being written holds navigation, survives a refresh and is
   await wearButton(page).click();
   await expect.poll(() => wear.held.length).toBe(1);
   await expect(button(page, 'today.more')).toBeDisabled();
+  await page.locator('#weather-trigger').click();
+  await expect(page.getByRole('button', { name: text('setting.outdoors'), exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: text('setting.indoors'), exact: true })).toBeDisabled();
+  await expect(button(page, 'weather.enterTemperature')).toBeDisabled();
+  await page.locator('#weather-details').getByRole('button', { name: text('common.close'), exact: true }).click();
   await page.context().setOffline(true);
   await expect(page.locator('.notice-offline')).toBeVisible();
   await page.context().setOffline(false);

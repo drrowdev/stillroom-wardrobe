@@ -39,6 +39,74 @@ async function openSettings(page: Page, language: Language = 'en') {
 }
 const tabLabels = (page: Page) => tabBar(page).locator('li').evaluateAll(items => items.map(item => item.textContent?.trim() ?? ''));
 
+test.describe('WEATHER1 Today header geometry', () => {
+  for (const language of languages) test(`${language}: 320/390px, desktop and 200% text keep weather and navigation readable`, async ({ page }) => {
+    await start(page, { language, hash: '#/today', width: 390 });
+    const trigger = page.locator('#weather-trigger');
+    await expect(trigger).toHaveText(text('weather.noForecast', language));
+    const fits = async () => {
+      expect(await page.evaluate(() => {
+        const header = document.querySelector('.workspace-header')!;
+        const weather = document.querySelector('#weather-trigger')!;
+        const box = weather.getBoundingClientRect();
+        return document.documentElement.scrollWidth <= innerWidth && header.scrollWidth <= header.clientWidth
+          && weather.scrollWidth <= weather.clientWidth && box.left >= 0 && box.right <= innerWidth + .5 && box.height >= 44
+          && parseFloat(getComputedStyle(weather).fontSize) >= 14;
+      })).toBe(true);
+    };
+    for (const width of [320, 390, 650, 651, 1280]) {
+      await page.setViewportSize({ width, height: 900 });
+      await settleShell(page);
+      await fits();
+      await expect(width <= 650 ? tabBar(page) : topNav(page)).toBeVisible();
+      if (width === 390) expect(await page.locator('.workspace-header').evaluate(header => header.getBoundingClientRect().height)).toBeLessThanOrEqual(56);
+    }
+    await page.setViewportSize({ width: 320, height: 900 });
+    await page.addStyleTag({ content: zoom });
+    await settleShell(page);
+    await fits();
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    const panel = page.locator('#weather-details');
+    await expect(panel).toBeVisible();
+    for (const control of await panel.locator('button, a').all()) {
+      if (!await control.isVisible()) continue;
+      expect(await control.evaluate(element => {
+        const box = element.getBoundingClientRect();
+        return element.scrollWidth <= element.clientWidth && box.left >= 0 && box.right <= innerWidth + .5 && box.height >= 44;
+      })).toBe(true);
+    }
+    await noViolations(page);
+    await page.keyboard.press('Escape');
+    await expect(trigger).toBeFocused();
+    await shellNav(page).getByRole('link', { name: text('nav.wardrobe', language), exact: true }).click();
+    await expect(trigger).toHaveCount(0);
+    await expect(page.locator('#weather-header-slot')).toBeEmpty();
+  });
+});
+
+test('WEATHER1 desktop Tab order follows the one-row navigation, account and weather layout', async ({ page }) => {
+  await start(page, { hash: '#/today', width: 1280 });
+  const trigger = page.locator('#weather-trigger');
+  await expect(trigger).toBeVisible();
+  await settleShell(page);
+  await expect(page.locator('.workspace-header')).not.toHaveAttribute('data-stacked', '');
+  const boxes = await Promise.all([topNav(page).boundingBox(), accountTrigger(page).boundingBox(), trigger.boundingBox()]);
+  expect(boxes.every(box => box !== null)).toBe(true);
+  const [nav, account, weather] = boxes;
+  expect(nav!.x + nav!.width).toBeLessThanOrEqual(account!.x);
+  expect(account!.x + account!.width).toBeLessThanOrEqual(weather!.x);
+  expect(Math.abs(nav!.y + nav!.height / 2 - account!.y - account!.height / 2)).toBeLessThanOrEqual(1);
+  expect(Math.abs(account!.y + account!.height / 2 - weather!.y - weather!.height / 2)).toBeLessThanOrEqual(1);
+  const lastLink = topNav(page).getByRole('link').last();
+  await lastLink.focus();
+  await expect(lastLink).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(accountTrigger(page)).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(trigger).toBeFocused();
+});
+
 test.describe('UX1 phone shell', () => {
   for (const language of languages) {
     test(`390px ${language}: tab bar, compact header and no identity strip or footer`, async ({ page }) => {

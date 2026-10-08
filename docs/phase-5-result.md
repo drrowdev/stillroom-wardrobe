@@ -302,3 +302,128 @@ again on the restored account.
 - Coordinator visual review of the four captures.
 - The owner-run Pages deploy: the new CSP only takes effect after it.
 - An owner check with a real city and the real forecast service.
+
+## WEATHER1 header weather disclosure (8 October 2026)
+
+Status: **locally validated working diff; independent review pending.** This
+owner-requested Tier B presentation packet follows R10/R17/R27 and blueprint
+09/I16 weather semantics. Its source base is
+`28bd7846a424aa75fd87c1cbb743c82c38a92ea0`; the historical evidence above is
+preserved, not reused as WEATHER1 acceptance.
+
+### Presentation
+
+- Today mounts its existing stateful weather UI into an inert header slot;
+  other routes have no weather widget. Opening details does not fetch again.
+  The wide card beneath the page heading is removed.
+  Desktop weather follows the account control visually and in keyboard order;
+  the existing stacked-header navigation behavior is preserved.
+- The neutral thermometer and text show the forecast's daytime **low**, a
+  clearly labelled manual temperature, Indoors, or an explicit unavailable/
+  unknown/loading state. There is no inferred current temperature or sky state.
+- The keyboard-accessible details retain city/date/timezone, low/rain/wind,
+  update time, Open-Meteo attribution and the existing Outdoors/Indoors,
+  manual-entry, retry and Turn on controls. Close/Escape restore trigger focus;
+  outside clicks and leaving focus close without stealing focus. Closing
+  details preserves a partially entered manual temperature.
+- Hook/store ownership, requests, coordinates, permissions, cache, suggestion
+  rules and busy locks are unchanged. Copy is localized in English, Finnish
+  and Swedish; no dependency, provider, authentication or schema change.
+
+### Validation and remaining gates
+
+- Pinned local Node `24.19.0` / npm `11.17.0`. The initial typecheck failed
+  because locked dependencies were absent; `npm ci --ignore-scripts --no-fund`
+  restored them without install scripts. npm reported two high dependency
+  vulnerabilities; this packet does not change dependencies or claim a fix.
+- `npm run lint`, `npm run typecheck`, `npm run check:translations` and
+  `git diff --check`: pass. Translation check: 1105 keys, EN/FI/SV.
+- `npm run test:unit -- tests/unit/weather-chips.test.ts tests/unit/weather-zone.test.ts tests/unit/weather.test.ts tests/unit/today-featured.test.ts tests/unit/shell-breakpoint.test.ts`:
+  pass, 5 files / 32 tests.
+- New tests cover truthful summaries, disclosure/focus,
+  retained manual input, route lifetime, unchanged request counts, and
+  EN/FI/SV header geometry at 320/390/650/651/1280 px and 200% text.
+- `npm run test:browser -- tests/browser/weather.spec.ts tests/browser/today.spec.ts tests/browser/shell-layout.spec.ts --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep-invert "bounded .*visual evidence|WEATHER1 visual"`:
+  initial run, 367 passed / 2 skipped / 6 failed. The six new-test failures
+  were diagnosed: the narrow panel covered the chosen outside-click target;
+  WebKit pointer clicks do not focus buttons, so keyboard/focus-recovery
+  checks had not established focus inside the disclosure. Tests now use an
+  uncovered outside point and explicit keyboard focus. No product assertions,
+  timeouts, retries, allowlists or caching were weakened or changed.
+- `npm run test:browser -- tests/browser/weather.spec.ts tests/browser/shell-layout.spec.ts --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep "WEATHER1 (Today header geometry|disclosure|closing)"`:
+  15 passed, covering all six failures across all three projects. The two
+  initial skips are existing desktop-WebKit safe-area checks; they are not
+  passing native-device checks. The whole regression invocation was not rerun
+  after these test-only corrections; the implementation source was unchanged.
+- `npm run test:browser -- tests/browser/weather.spec.ts --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep "WEATHER1 visual"`:
+  24 passed. Run once, separately, with functional and axe assertions in every
+  project; exactly eight PNGs written (33,012-43,043 bytes each). Browser runs
+  used fixture port 5197 and synthetic inputs, with external network blocked.
+- The existing fixture pipeline defines eight synthetic captures in ignored
+  `test-results/weather1-visual/`: EN/FI/SV compact header at 390/1280 px,
+  plus EN 320 px ready details and unavailable/manual-validation details.
+  Identity checks precede scene setup so opening the phone account menu cannot
+  silently close captured weather details. The implementation writer did not
+  view images. Coordinator review of
+  actual exact-head CI artifacts must record run/head/verdict before merge.
+- Historical I16 capture tests were adapted but not run locally; their first
+  post-change execution is exact-head CI.
+- Independent review requested removal of the weather-specific account
+  ordering override, which put the desktop weather control before the account
+  control visually but after it in Tab order. The override is removed; a
+  one-row desktop navigation/account/weather geometry and Tab-order check
+  covers the repair.
+  `npm run test:browser -- tests/browser/weather.spec.ts tests/browser/shell-layout.spec.ts --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep "WEATHER1 (Today header geometry|disclosure|closing|desktop Tab order)"`:
+  post-repair, 18 passed. `npm run lint`, `npm run typecheck`,
+  `npm run check:translations` and `git diff --check` pass again; the unchanged
+  pure-unit evidence above is reused for this CSS/test/documentation-only repair.
+  The eight local captures above predate this CSS repair and are not evidence
+  of its final visual layout. No new local screenshots will be generated;
+  final exact-head CI captures and coordinator visual review remain pending.
+  The focused run cleared the previous Playwright output directory; it did
+  not produce replacement captures.
+- Independent code review, required exact-head CI, visual acceptance, real
+  provider/device checks and owner-run Pages deployment are not claimed.
+  No hosted, integration/security or full browser suite ran locally.
+
+### Exact-head CI repair
+
+CI `37737696377` failed on published head
+`5f58f70a30b84a9359669ab587ca6806ca00d172`. No Actions rerun or merge was
+attempted. The coordinator approved adding only the presentation interaction
+in `tests/browser/stylist.spec.ts` to the existing packet scope.
+
+- The stylist manual-temperature privacy test still tried to use a hidden
+  weather control. It now opens the disclosure first; the manual value,
+  null-weather request assertion and timeouts are unchanged. Targeted
+  weather-control consumer searches found no additional unadapted spec.
+- The historical I16 Finnish 320 px / 200% forecast ordering check failed in
+  CI. Its first local text-only diagnostic at height 900 passed: group
+  `(x=33,y=224.765625,h=65.390625)`, forecast
+  `(x=33,y=302.15625,h=355.953125)`, horizontal scroll/client widths both 286,
+  zero page/panel scroll and no transform. That exact CI failure was not
+  reproduced locally; no assertion or timeout was weakened to conceal it.
+- A bounded height-568 probe demonstrated a real coupled source defect:
+  the column disclosure inherited the old card's `flex-wrap: wrap`. With
+  panel height 336, the forecast wrapped beside the controls:
+  group `(x=33,y=389.984375,h=65.390625)`, forecast
+  `(x=276.390625,y=153.375,h=355.953125)`, scroll/client widths 529/286.
+  The disclosure now explicitly uses `flex-wrap: nowrap` and vertical
+  scrolling. No claim is made that local font/viewport measurements prove
+  the precise CI height-900 failure's cause.
+- The historical assertion retains strict group-before-forecast ordering,
+  measured together in one DOM snapshot, and adds horizontal containment,
+  no horizontal overflow, readable text and whole 44 px button targets.
+  Its Finnish zoomed forecast also checks height 568, restoring height 900
+  before the existing capture path. Temporary probe logging was removed.
+- `npm run test:browser -- tests/browser/weather.spec.ts --project=webkit-photo --workers=2 --retries=0 --grep "bounded I16 visual evidence.*today-forecast fi-320-200"`:
+  post-repair, 1 passed, with no image writes in this project.
+- `npm run test:browser -- tests/browser/stylist.spec.ts tests/browser/shell-layout.spec.ts --project=chromium --project=mobile --project=webkit-photo --workers=2 --retries=0 --grep "a manual temperature on Today is not sent while weather is turned off|WEATHER1 Today header geometry"`:
+  11 passed: 2 stylist checks and 9 EN/FI/SV header checks. The existing
+  WebKit project does not select `stylist.spec.ts`; no WebKit stylist pass or
+  config/CI change is claimed. Fixture port 5197, no retries or captures.
+- Post-repair `npm run lint`, `npm run typecheck`,
+  `npm run check:translations` (1105 keys) and `git diff --check`: pass.
+  Independent repair-delta review, publication and natural new-head CI
+  remain pending. No additional local images were
+  generated; final exact-head CI captures and coordinator review remain open.

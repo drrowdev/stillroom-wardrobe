@@ -347,6 +347,7 @@ test.describe('ST1b stylist', () => {
 
   test('a manual temperature on Today is not sent while weather is turned off', async ({ page }) => {
     const { api, clothes } = await start(page, { setup: {}, consent: true, hash: '/#/today' });
+    await page.locator('#weather-trigger').click();
     await page.getByRole('button', { name: text('weather.enterTemperature'), exact: true }).click();
     await page.locator('#weather-temperature').fill('22');
     await page.getByRole('button', { name: text('weather.useTemperature'), exact: true }).click();

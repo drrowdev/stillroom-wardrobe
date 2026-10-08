@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Icon } from '../../app/icon';
 import { validManualTemperature, type Forecast } from '../../domain/weather';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import type { useWeather } from './use-weather';
@@ -25,6 +27,11 @@ function forecastParts(forecast: Forecast, fetchedAt: number, city: string, prof
 // Outdoors uses the forecast, or a temperature the owner enters when there is none. Indoors turns weather off for today.
 export function WeatherBar({ weather, language, timeZone, online, locked, t, onTurnOnWeather }: Props) {
   const { view, override, setOverride } = weather;
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const region = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const focused = useRef<HTMLElement | null>(null);
   const [entering, setEntering] = useState(false);
   const [value, setValue] = useState('');
   const [invalid, setInvalid] = useState(false);
@@ -32,6 +39,22 @@ export function WeatherBar({ weather, language, timeZone, online, locked, t, onT
   const manual = override?.kind === 'manual' ? override.temperatureC : null;
   const status: MessageKey | null = view.status === 'off' ? 'weather.noForecast' : view.status === 'offline' ? 'weather.offline'
     : view.status === 'incomplete' ? 'weather.incompleteToday' : view.status === 'failed' ? 'weather.failed' : null;
+  useLayoutEffect(() => {
+    const slot = document.getElementById('weather-header-slot');
+    if (!slot) throw new Error('Weather header slot unavailable.');
+    setHost(slot);
+  }, []);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => { if (!region.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open]);
+  useLayoutEffect(() => {
+    const previous = focused.current;
+    if (open && previous && !previous.isConnected && (document.activeElement === document.body || document.activeElement?.matches('main'))) trigger.current?.focus();
+  });
+  function dismiss() { setOpen(false); trigger.current?.focus(); }
   function close() { setEntering(false); setValue(''); setInvalid(false); }
   function submit() {
     const text = value.trim().replace('−', '-');
@@ -41,6 +64,12 @@ export function WeatherBar({ weather, language, timeZone, online, locked, t, onT
     close();
   }
   const ready = view.status === 'ready' ? forecastParts(view.forecast, view.fetchedAt, view.city, timeZone, language, t) : null;
+  const summary = indoors ? t('setting.indoors')
+    : manual !== null ? t('weather.manualSummary', { temperature: temperature(manual, language) })
+      : view.status === 'ready' ? view.forecast.minTemperature !== null
+        ? t('weather.low', { temperature: temperature(view.forecast.minTemperature, language) }) : t('weather.unknownLow')
+        : view.status === 'loading' ? t('weather.loadingSummary')
+          : view.status === 'off' ? t('weather.noForecast') : t('weather.unavailableSummary');
   const info = indoors ? null
     : manual !== null ? <div className="weather-line weather-row">
       <p id="weather-manual" className="weather-chip weather-manual">{t('weather.manualLine', { temperature: temperature(manual, language) })}</p>
@@ -70,13 +99,26 @@ export function WeatherBar({ weather, language, timeZone, online, locked, t, onT
               </div>
             </form>}
           </div>;
-  return <section className="weather-bar" aria-labelledby="weather-bar-title">
-    <h2 id="weather-bar-title" className="sr-only">{t('weather.title')}</h2>
-    {/* First in reading order: it decides whether the weather matters at all. Wide screens show it on the right. */}
-    <div className="weather-place" role="group" aria-label={t('weather.place')}>
-      <button type="button" aria-pressed={!indoors} disabled={locked} onClick={() => { if (indoors) setOverride(null); }}>{t('setting.outdoors')}</button>
-      <button type="button" aria-pressed={indoors} disabled={locked} onClick={() => { close(); setOverride({ kind: 'indoors' }); }}>{t('setting.indoors')}</button>
-    </div>
-    {info}
-  </section>;
+  return host && createPortal(<div ref={region} className="weather-widget"
+    onFocusCapture={event => { if (event.target instanceof HTMLElement) focused.current = event.target; }}
+    onKeyDown={event => { if (open && event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); dismiss(); } }}
+    onBlur={event => {
+      if (!open) return;
+      if (event.relatedTarget instanceof Node) { if (!region.current?.contains(event.relatedTarget)) setOpen(false); return; }
+      setTimeout(() => { if (!document.hasFocus()) setOpen(false); }, 0);
+    }}>
+    <button ref={trigger} id="weather-trigger" type="button" className="weather-trigger" aria-expanded={open} aria-controls="weather-details"
+      aria-label={t('weather.summaryLabel', { summary })} onClick={() => setOpen(!open)}>
+      <Icon name="thermometer" /><span>{summary}</span><Icon name="chevron" />
+    </button>
+    <section id="weather-details" className="weather-bar" hidden={!open} aria-labelledby="weather-bar-title">
+      <div className="weather-details-heading"><h2 id="weather-bar-title">{t('weather.title')}</h2>
+        <button type="button" className="text-button" onClick={dismiss}>{t('common.close')}</button></div>
+      <div className="weather-place" role="group" aria-label={t('weather.place')}>
+        <button type="button" aria-pressed={!indoors} disabled={locked} onClick={() => { if (indoors) setOverride(null); }}>{t('setting.outdoors')}</button>
+        <button type="button" aria-pressed={indoors} disabled={locked} onClick={() => { close(); setOverride({ kind: 'indoors' }); }}>{t('setting.indoors')}</button>
+      </div>
+      {info}
+    </section>
+  </div>, host);
 }
