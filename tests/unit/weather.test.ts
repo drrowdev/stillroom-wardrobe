@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Plugin } from 'vite';
 import viteConfig from '../../vite.config';
 import {
-  confirmedWeather, forecastCurrent, forecastExpiresAt, forecastLifetimeMs, localDate, summarizeForecast, validManualTemperature, weatherConfig,
+  confirmedWeather, currentExpiresAt, currentLifetimeMs, currentTemperature, forecastCurrent, forecastExpiresAt, forecastLifetimeMs, localDate, summarizeForecast, validManualTemperature, weatherConfig,
   weatherContext, weatherPlace, type Forecast,
 } from '../../src/domain/weather';
 import { fetchForecast, forecastLimitBytes, geocodingLimitBytes, searchCities, WeatherError } from '../../src/providers/weather';
@@ -100,7 +100,10 @@ describe('forecast summary', () => {
     // 05:00 UTC is 08:00 in Helsinki (UTC+3).
     const now = Date.parse('2026-09-25T05:00:00Z');
     const forecast = summarizeForecast(reply('2026-09-25', 10800, hour => hour === 3 ? -20 : hour === 7 ? 4.04 : hour === 22 ? -9 : 10), now);
-    expect(forecast).toEqual({ date: '2026-09-25', timeZone: 'Europe/Helsinki', utcOffsetSeconds: 10800, minTemperature: 4, maxRain: 70, maxWind: 11.3 });
+    expect(forecast).toEqual({ date: '2026-09-25', timeZone: 'Europe/Helsinki', utcOffsetSeconds: 10800, minTemperature: 4, maxRain: 70, maxWind: 11.3,
+      currentTemperature: null, hourlyTemperatures: Array.from({ length: 15 }, (_, index) => ({
+        time: `2026-09-25T${String(index + 7).padStart(2, '0')}:00`, temperatureC: index === 0 ? 4.04 : 10,
+      })) });
   });
   it('switches date at the city\'s midnight, not UTC', () => {
     // 22:30 UTC on the 25th is 01:30 on the 26th in Helsinki.
@@ -125,7 +128,8 @@ describe('forecast summary', () => {
     expect(summarizeForecast(short, now)).toBeNull();
   });
   it('expires after its lifetime or when the city\'s date changes', () => {
-    const forecast: Forecast = { date: '2026-09-25', timeZone: 'Europe/Helsinki', utcOffsetSeconds: 10800, minTemperature: 5, maxRain: null, maxWind: null };
+    const forecast: Forecast = { date: '2026-09-25', timeZone: 'Europe/Helsinki', utcOffsetSeconds: 10800, minTemperature: 5, maxRain: null, maxWind: null,
+      currentTemperature: null, hourlyTemperatures: [] };
     const fetched = Date.parse('2026-09-25T05:00:00Z');
     expect(forecastCurrent(forecast, fetched, fetched + forecastLifetimeMs - 1)).toBe(true);
     expect(forecastCurrent(forecast, fetched, fetched + forecastLifetimeMs)).toBe(false);
@@ -141,7 +145,8 @@ describe('forecast summary', () => {
 });
 
 describe('weather in suggestions', () => {
-  const forecast: Forecast = { date: '2026-09-25', timeZone: 'UTC', utcOffsetSeconds: 0, minTemperature: -3, maxRain: 65, maxWind: null };
+  const forecast: Forecast = { date: '2026-09-25', timeZone: 'UTC', utcOffsetSeconds: 0, minTemperature: -3, maxRain: 65, maxWind: null,
+    currentTemperature: null, hourlyTemperatures: [] };
   it('maps a forecast, a manual temperature and staying in to engine input', () => {
     expect(weatherContext(null, null)).toEqual({});
     expect(weatherContext(forecast, null)).toEqual({ setting: 'outdoors', temperatureC: -3, rainProbability: 65 });
@@ -201,12 +206,153 @@ describe('Open-Meteo requests', () => {
     const requests = stub(reply('2026-09-25', 0, () => 8));
     await fetchForecast({ city: 'Oulu', latitude: 65.01, longitude: 25.47 }, new AbortController().signal, () => now);
     expect(Object.fromEntries(requests[0]!.url.searchParams)).toEqual({ latitude: '65.0', longitude: '25.5',
-      hourly: 'temperature_2m,precipitation_probability,wind_speed_10m', wind_speed_unit: 'ms', timezone: 'auto', forecast_days: '2' });
+      current: 'temperature_2m', hourly: 'temperature_2m,precipitation_probability,wind_speed_10m', wind_speed_unit: 'ms', timezone: 'auto', forecast_days: '2' });
     expect(requests[0]!.url.searchParams.has('city')).toBe(false);
     stub({ reason: 'limit' }, 429);
     await expect(fetchForecast({ city: 'Oulu', latitude: 65, longitude: 25.5 }, new AbortController().signal, () => now)).rejects.toEqual(new WeatherError('busy'));
     stub({ reason: 'x' }, 500);
     await expect(searchCities('Oulu', 'en', new AbortController().signal)).rejects.toEqual(new WeatherError('unavailable'));
+  });
+
+  describe('WEATHER2 current and hourly temperatures are distinct', () => {
+    const now = Date.parse('2026-10-08T11:05:00Z');
+    const current = (time = '2026-10-08T14:00', temperature_2m: unknown = 13) => ({ current: { time, temperature_2m },
+      current_units: { time: 'iso8601', temperature_2m: '°C' } });
+    const forecast = (extra: Record<string, unknown> = {}) =>
+      summarizeForecast(reply('2026-10-08', 10800, hour => hour === 7 ? 6 : hour === 21 ? -2 : 12, { ...current(), ...extra }), now)!;
+    it('uses the supplied current metric and every daytime hour, including morning and 21:00', () => {
+      const data = forecast();
+      expect(data.currentTemperature).toEqual({ temperatureC: 13, validAt: Date.parse('2026-10-08T11:00:00Z') });
+      expect(data.hourlyTemperatures).toHaveLength(15);
+      expect(data.hourlyTemperatures[0]).toEqual({ time: '2026-10-08T07:00', temperatureC: 6 });
+      expect(data.hourlyTemperatures[14]).toEqual({ time: '2026-10-08T21:00', temperatureC: -2 });
+      expect(weatherContext(data, null)).toEqual({ setting: 'outdoors', temperatureC: -2, rainProbability: 70, windMetresPerSecond: 11.3 });
+      expect(weatherContext({ ...data, currentTemperature: { temperatureC: 50, validAt: now }, hourlyTemperatures: [] }, null)).toEqual(weatherContext(data, null));
+    });
+    it('keeps current unavailable for missing, null, invalid, future, stale, wrong-date or wrong-zone readings', () => {
+      for (const extra of [{ current: undefined }, { current: null }, current(undefined, null), current(undefined, Number.NaN),
+        current(undefined, 61), current(undefined, '13'), current('2026-10-08T14:06'), current('2026-10-08T13:50'),
+        current('2026-10-07T14:00'), current('2026-02-30T14:00'), current('2026-10-08T24:00'),
+        { ...current(), timezone: 'Europe/Stockholm' }, { ...current(), current_units: { temperature_2m: '°F' } }]) {
+        const data = forecast(extra);
+        expect(data.currentTemperature).toBeNull();
+        expect(data.minTemperature).toBe(-2);
+        expect(data.hourlyTemperatures[0]!.temperatureC).toBe(6);
+      }
+    });
+    it('expires current at its valid-time or fetch boundary without expiring the conservative forecast', () => {
+      const data = forecast();
+      const expires = Date.parse('2026-10-08T11:15:00Z');
+      expect(currentTemperature(data, now, expires - 1)?.temperatureC).toBe(13);
+      expect(currentTemperature(data, now, expires)).toBeNull();
+      expect(currentTemperature(data, now, now - 1)).toBeNull();
+      expect(currentExpiresAt(data, now)).toBe(expires);
+      expect(forecastCurrent(data, now, expires)).toBe(true);
+      const later = { ...data, currentTemperature: { temperatureC: 13, validAt: now + currentLifetimeMs - 1 } };
+      expect(currentTemperature(later, now, now)).toBeNull();
+      expect(currentExpiresAt(later, now)).toBe(now + currentLifetimeMs);
+      expect(currentTemperature(data, now, now + forecastLifetimeMs)).toBeNull();
+    });
+    it('preserves missing hourly slots without interpolation, and supports a usable current-only metric', () => {
+      const input = reply('2026-10-08', 10800, hour => hour === 7 ? 0 : hour === 8 ? null : -3, current());
+      for (const values of Object.values(input.hourly)) values.splice(10, 1);
+      const data = summarizeForecast(input, now)!;
+      expect(data.hourlyTemperatures.slice(0, 4)).toEqual([
+        { time: '2026-10-08T07:00', temperatureC: 0 }, { time: '2026-10-08T08:00', temperatureC: null },
+        { time: '2026-10-08T09:00', temperatureC: -3 }, { time: '2026-10-08T10:00', temperatureC: null },
+      ]);
+      const only = forecast({ hourly: { time: [] } });
+      expect(only.currentTemperature?.temperatureC).toBe(13);
+      expect(only.hourlyTemperatures.every(hour => hour.temperatureC === null)).toBe(true);
+      expect(weatherContext(only, null)).toEqual({ setting: 'outdoors' });
+      for (const bad of ['2026-02-30T07:00', '2026-10-08T07:30', '2026-10-08T24:00']) {
+        expect(forecast({ hourly: { time: [bad], temperature_2m: [2] } })).toBeNull();
+      }
+      expect(forecast({ hourly: { time: ['2026-10-08T07:00', '2026-10-08T07:00'], temperature_2m: [2, 3] } })).toBeNull();
+    });
+    it('validates DST offsets and the city-local date before using current, including outside daytime', () => {
+      const parse = (stamp: string, zone: string, offset: number, at: string) =>
+        summarizeForecast(reply(stamp.slice(0, 10), offset, () => -5, { timezone: zone, ...current(stamp, -2) }), Date.parse(at))!;
+      expect(parse('2026-10-25T03:00', 'Europe/Helsinki', 10800, '2026-10-25T00:05Z').currentTemperature?.temperatureC).toBe(-2);
+      expect(parse('2026-10-25T03:00', 'Europe/Helsinki', 7200, '2026-10-25T01:05Z').currentTemperature?.temperatureC).toBe(-2);
+      expect(parse('2026-10-25T04:00', 'Europe/Helsinki', 10800, '2026-10-25T01:05Z').currentTemperature).toBeNull();
+      expect(parse('2026-03-29T03:00', 'Europe/Helsinki', 7200, '2026-03-29T01:05Z').currentTemperature).toBeNull();
+      expect(parse('2026-10-09T00:00', 'Europe/Helsinki', 10800, '2026-10-08T21:05Z').date).toBe('2026-10-09');
+      expect(parse('2026-10-08T23:00', 'America/New_York', -14400, '2026-10-09T03:05Z').currentTemperature?.temperatureC).toBe(-2);
+      expect(parse('2026-10-08T06:00', 'Europe/Helsinki', 10800, '2026-10-08T03:05Z').currentTemperature?.temperatureC).toBe(-2);
+    });
+    it('single-flights refresh requests and retains a valid forecast through failure cooldown', async () => {
+      const store = new WeatherStore(), data = forecast();
+      store.save('city', data, now);
+      let complete!: (response: Response) => void;
+      vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { complete = resolve; })));
+      const place = { city: 'Synthetic city', latitude: 65, longitude: 25.5 };
+      const at = now + currentLifetimeMs;
+      try {
+        const first = store.load('city', place, () => at), second = store.load('city', place, () => at);
+        expect(second).toBe(first);
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(store.refreshAt('city', data, now)).toBe(at + currentLifetimeMs);
+        expect(store.read('city', at)?.forecast).toBe(data);
+        complete(new Response('{}', { status: 503 }));
+        await expect(first).rejects.toEqual(new WeatherError('unavailable'));
+        store.fail('city', at);
+        expect(store.refreshAt('city', data, now)).toBe(at + currentLifetimeMs);
+        expect(store.read('city', at + 60_000)?.forecast).toBe(data);
+        expect(store.coolingUntil('city', at + 59_999)).toBe(at + 60_000);
+        expect(store.coolingUntil('city', at + 60_000)).toBeNull();
+        store.allowRetry('city');
+        expect(store.refreshAt('city', data, now)).toBe(at + 60_000);
+        expect(store.retryAt('city')).toBeNull();
+        store.keep(null);
+        expect(store.read('city', at)).toBeNull();
+        expect(store.pendingFor('city')).toBe(false);
+      } finally { vi.unstubAllGlobals(); }
+    });
+    it('schedules usable current from strict expiry plus request grace, not from fetch plus fifteen minutes', () => {
+      const store = new WeatherStore();
+      const fetchedAt = Date.parse('2026-10-08T11:14:00Z');
+      const data = summarizeForecast(reply('2026-10-08', 10800, () => 4, {
+        current_units: { temperature_2m: '°C' }, current: { time: '2026-10-08T14:00', temperature_2m: 13 },
+      }), fetchedAt)!;
+      store.save('city', data, fetchedAt);
+      expect(currentTemperature(data, fetchedAt, Date.parse('2026-10-08T11:15:00Z'))).toBeNull();
+      expect(store.refreshAt('city', data, fetchedAt)).toBe(Date.parse('2026-10-08T11:16:00Z'));
+      expect(store.refreshAt('city', { ...data, currentTemperature: null }, fetchedAt)).toBe(fetchedAt + currentLifetimeMs);
+      expect(store.refreshAt('city', { ...data, currentTemperature: { temperatureC: 13, validAt: fetchedAt + 1 } }, fetchedAt))
+        .toBe(fetchedAt + currentLifetimeMs);
+      store.fail('city', Date.parse('2026-10-08T11:16:05Z'));
+      expect(store.refreshAt('city', data, fetchedAt)).toBe(Date.parse('2026-10-08T11:31:05Z'));
+      store.allowRetry('city');
+      expect(store.refreshAt('city', data, fetchedAt)).toBe(fetchedAt + 60_000);
+    });
+    it.each([200, 503])('clears explicit retry when joining a pending automatic request, including status %i', async status => {
+      const store = new WeatherStore(), data = forecast();
+      store.save('city', data, now);
+      store.fail('city', now + currentLifetimeMs);
+      const attemptedAt = now + 2 * currentLifetimeMs;
+      let complete!: (response: Response) => void;
+      vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { complete = resolve; })));
+      try {
+        const place = { city: 'Synthetic city', latitude: 65, longitude: 25.5 };
+        const pending = store.load('city', place, () => attemptedAt);
+        store.allowRetry('city');
+        expect(store.load('city', place, () => attemptedAt)).toBe(pending);
+        expect(fetch).toHaveBeenCalledTimes(1);
+        expect(store.refreshAt('city', data, now)).toBe(attemptedAt + currentLifetimeMs);
+        const body = reply('2026-10-08', 10800, () => 4, current('2026-10-08T14:30', 18));
+        complete(new Response(JSON.stringify(body), { status }));
+        if (status === 200) {
+          const updated = await pending;
+          expect(store.refreshAt('city', updated, attemptedAt)).toBe(Date.parse('2026-10-08T11:46:00Z'));
+          expect(store.retryAt('city')).toBeNull();
+        } else {
+          await expect(pending).rejects.toEqual(new WeatherError('unavailable'));
+          expect(store.refreshAt('city', data, now)).toBe(attemptedAt + currentLifetimeMs);
+          expect(store.coolingUntil('city', attemptedAt)).toBe(attemptedAt + 60_000);
+        }
+      } finally { vi.unstubAllGlobals(); }
+    });
   });
   it('rejects an oversized reply without reading or parsing all of it', async () => {
     let pulled = 0, cancelled = false;

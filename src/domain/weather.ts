@@ -5,9 +5,12 @@ import { isRecord } from './wardrobe';
 // Weather for suggestions (blueprint 09 rule 6). Pure: callers pass the clock, and nothing here makes a request.
 export type WeatherPlace = { city: string; latitude: number; longitude: number };
 export type WeatherConfig = { status: 'off' } | { status: 'on'; place: WeatherPlace } | { status: 'incomplete' };
+export type CurrentTemperature = { temperatureC: number; validAt: number };
+export type HourlyTemperature = { time: string; temperatureC: number | null };
 export type Forecast = {
   date: string; timeZone: string; utcOffsetSeconds: number;
   minTemperature: number | null; maxRain: number | null; maxWind: number | null;
+  currentTemperature: CurrentTemperature | null; hourlyTemperatures: HourlyTemperature[];
 };
 export type WeatherOverride = { kind: 'manual'; temperatureC: number } | { kind: 'indoors' };
 export type ItemWeather = {
@@ -17,6 +20,7 @@ export type ItemWeather = {
 
 export const daytimeHours = { first: 7, last: 21 } as const;
 export const forecastLifetimeMs = 3 * 60 * 60 * 1000;
+export const currentLifetimeMs = 15 * 60 * 1000;
 export const failureCooldownMs = 60 * 1000;
 export const manualTemperatureRange = { min: -40, max: 50 } as const;
 const ranges = { temperature: [-60, 60], rain: [0, 100], wind: [0, 75] } as const;
@@ -60,6 +64,30 @@ export function localDate(nowMs: number, utcOffsetSeconds: number): string {
   return new Date(nowMs + utcOffsetSeconds * 1000).toISOString().slice(0, 10);
 }
 
+function wallTime(stamp: unknown): number | null {
+  if (typeof stamp !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(stamp)) return null;
+  const time = Date.parse(`${stamp}:00Z`);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 16) === stamp ? time : null;
+}
+
+function currentReading(value: Record<string, unknown>, date: string, offset: number, nowMs: number): CurrentTemperature | null {
+  if (!isRecord(value.current) || !isRecord(value.current_units) || value.current_units.temperature_2m !== '°C') return null;
+  const { time, temperature_2m: temperature } = value.current;
+  const wall = wallTime(time);
+  if (wall === null || typeof time !== 'string' || time.slice(0, 10) !== date
+    || !finite(temperature) || temperature < ranges.temperature[0] || temperature > ranges.temperature[1]) return null;
+  const validAt = wall - offset * 1000;
+  if (nowMs < validAt || nowMs - validAt >= currentLifetimeMs) return null;
+  // ISO times are city-local. Round-trip through the actual zone to reject a wrong offset, including DST transitions.
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: String(value.timezone), year: 'numeric', month: '2-digit',
+      day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(validAt);
+    const part = (name: Intl.DateTimeFormatPartTypes) => parts.find(entry => entry.type === name)?.value;
+    if (`${part('year')}-${part('month')}-${part('day')}T${part('hour')}:${part('minute')}` !== time) return null;
+  } catch { return null; }
+  return { temperatureC: tenth(temperature), validAt };
+}
+
 // Summarizes an hourly Open-Meteo reply for the city's current date, 07:00–21:00 local time: the lowest temperature and
 // the highest rain chance and wind. A metric with no usable hour stays unknown. Returns null for an unusable reply.
 export function summarizeForecast(value: unknown, nowMs: number): Forecast | null {
@@ -84,12 +112,13 @@ export function summarizeForecast(value: unknown, nowMs: number): Forecast | nul
   const temperatures = series(temperature, ranges.temperature), rains = series(rain, ranges.rain), winds = series(wind, ranges.wind);
   if (!temperatures || !rains || !winds) return null;
   const hours: number[] = [];
+  const seen = new Set<string>();
   for (const [index, stamp] of time.entries()) {
-    if (typeof stamp !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(stamp)) return null;
+    if (wallTime(stamp) === null || typeof stamp !== 'string' || !stamp.endsWith(':00') || seen.has(stamp)) return null;
+    seen.add(stamp);
     const hour = Number(stamp.slice(11, 13));
     if (stamp.slice(0, 10) === date && hour >= daytimeHours.first && hour <= daytimeHours.last) hours.push(index);
   }
-  if (!hours.length) return null;
   const pick = (list: (number | null)[], choose: (values: number[]) => number) => {
     const known = hours.map(index => list[index]).filter(finite);
     return known.length ? tenth(choose(known)) : null;
@@ -99,8 +128,27 @@ export function summarizeForecast(value: unknown, nowMs: number): Forecast | nul
     minTemperature: pick(temperatures, values => Math.min(...values)),
     maxRain: pick(rains, values => Math.max(...values)),
     maxWind: pick(winds, values => Math.max(...values)),
+    currentTemperature: currentReading(value, date, offset, nowMs),
+    hourlyTemperatures: Array.from({ length: daytimeHours.last - daytimeHours.first + 1 }, (_, index) => {
+      const stamp = `${date}T${String(daytimeHours.first + index).padStart(2, '0')}:00`;
+      const supplied = time.indexOf(stamp);
+      return { time: stamp, temperatureC: supplied < 0 ? null : temperatures[supplied] ?? null };
+    }),
   };
-  return summary.minTemperature === null && summary.maxRain === null && summary.maxWind === null ? null : summary;
+  return summary.minTemperature === null && summary.maxRain === null && summary.maxWind === null && summary.currentTemperature === null ? null : summary;
+}
+
+export function currentTemperature(forecast: Forecast, fetchedAtMs: number, nowMs: number): CurrentTemperature | null {
+  const reading = forecast.currentTemperature;
+  return reading && forecastCurrent(forecast, fetchedAtMs, nowMs) && nowMs >= reading.validAt
+    && nowMs - reading.validAt < currentLifetimeMs && nowMs - fetchedAtMs < currentLifetimeMs
+    ? reading : null;
+}
+
+export function currentExpiresAt(forecast: Forecast, fetchedAtMs: number): number | null {
+  return forecast.currentTemperature
+    ? Math.min(forecast.currentTemperature.validAt + currentLifetimeMs, fetchedAtMs + currentLifetimeMs, forecastExpiresAt(forecast, fetchedAtMs))
+    : null;
 }
 
 // A cached forecast is used only for the same city on the city's same date and within its lifetime.

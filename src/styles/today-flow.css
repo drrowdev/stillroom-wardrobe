@@ -12,6 +12,13 @@
 .weather-details-heading h2 { margin: 0; font-size: 1rem; }
 .weather-widget .weather-place { order: 0; align-self: flex-start; }
 .weather-widget .weather-line { flex: 0 0 auto; gap: 6px; }
+.weather-current-time { margin: 0; }
+.weather-hours { margin: 8px 0; min-width: 0; }
+.weather-hours h3 { margin: 0 0 8px; font-size: inherit; font-weight: 600; }
+.weather-hours ul { display: grid; grid-template-columns: repeat(auto-fit, minmax(5rem, 1fr)); gap: 8px; list-style: none; padding: 0; margin: 0; }
+.weather-hours li { display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: 6px; background: var(--well); overflow-wrap: anywhere; }
+.weather-hours li > span { font-weight: 600; }
+.weather-hours p { margin: 0; }
 .weather-widget .weather-footer { flex-direction: column; }
 .weather-widget .fine { font-size: inherit; }
 .weather-widget .weather-credit::before { content: none; }
