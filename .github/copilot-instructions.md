@@ -6,8 +6,9 @@ Current execution policy, 11 September 2026: follow the
 and [reviewed local cutover](https://github.com/drrowdev/stillroom-wardrobe/pull/19#issuecomment-5634938691).
 Use fresh isolated LOCAL implementation writers per approved packet (at most two
 builders), with one branch/PR each, under the
-[owner decision of 7 October 2026](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6036228105)
-and [current model/session policy](../docs/cloud-development.md#model-and-session-policy---7-october-2026).
+[owner model decision of 8 October 2026](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6067719398),
+the [7 October lifecycle decision](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6036228105)
+and [current model/session policy](../docs/cloud-development.md#model-and-session-policy---8-october-2026).
 Older model pins and long-lived builder policy are superseded.
 This policy also supersedes the 1 October reviewer-model note in
 `docs/release-gates.md`; the ledger remains unedited as a historical record.
@@ -74,7 +75,7 @@ evidence, relevant blueprint/work packets, actual schema/source/tests and PR
 discussion/diff/reviews/CI logs; record exact base/head, files read and gates.
 Plan before edits, by risk tier (24 September 2026). Tier A (schema/hosted
 database, AI/provider/cost/consent, auth/security/privacy, deletion/data
-integrity, CI infrastructure) gets ONE read-only Anthropic Claude Opus 5.5 plan
+integrity, CI infrastructure) gets ONE read-only OpenAI GPT-6.1 Sol plan
 critique using a `rubber-duck` task agent with high reasoning; the
 coordinator applies its findings as binding amendments and approves, with no
 re-review unless scope, authority or behaviour changes materially. Tier B (UI,
@@ -84,7 +85,7 @@ about 150 or fewer changed lines of product code, no auth/sign-in/session, accou
 or owner data, RLS/DB/Edge, AI cost/allowance/provider, privacy or storage rules,
 not a new feature) skip the separate plan critique; a short written approach and
 the code review are both recorded in the PR. Every change gets ONE read-only
-Anthropic Claude Opus 5.5 code review using a `code-review` task agent with high
+OpenAI GPT-6.1 Sol code review using a `code-review` task agent with high
 reasoning before merge; a non-trivial repair gets a quick delta check.
 PR #2 comment `5559949209` approved the completed source packet after actual
 Anthropic Claude Opus 5 critique; `5559976584` records hosted structural results.
@@ -99,15 +100,19 @@ Each new packet uses its own reviewed plan; routine corrections within that
 approved scope do not require a new planning round. PR #1 comments
 `5558504250` and `5558542193` remain historical evidence, not the active target.
 
-Follow the [owner decision of 7 October 2026](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6036228105).
-The coordinator uses OpenAI GPT-6.1 Sol (`gpt-6.1-sol`) with compact context below
-272K tokens. Before context grows too large, publish a compact handover on #84
-and ask the owner for a fresh coordinator session.
-Explicitly select OpenAI GPT-6.1 Sol (`gpt-6.1-sol`) with
-`reasoning_effort: medium` for each fresh isolated LOCAL builder session per
+Follow the [owner decision of 8 October 2026](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6067719398),
+which supersedes the 7 October builder and reviewer model pins; sessions already
+started keep their recorded models.
+Per the owner's separate 8 October instruction to the coordinator (not that
+comment), the coordinator uses Anthropic Claude Opus 5.5 (`claude-opus-5.5`). Keep its
+context economical as a cost guard: before it grows large (about 272K tokens),
+publish a compact handover on #84 and ask the owner for a fresh coordinator
+session.
+Explicitly select Anthropic Claude Sonnet 5.5 (`claude-sonnet-5.5`) with
+`reasoning_effort: high` for each fresh isolated LOCAL builder session per
 approved packet. Start read-only (plan mode) for planning; after coordinator
-approval it runs in autopilot. Reviewers use a different provider: Anthropic
-Claude Opus 5.5 (`claude-opus-5.5`), high reasoning, read-only task agents
+approval it runs in autopilot. Reviewers use a different provider: OpenAI
+GPT-6.1 Sol (`gpt-6.1-sol`), high reasoning, read-only task agents
 (`rubber-duck` for required plan critiques; `code-review` for code reviews).
 Never use GPT-6 Astra for new work. The
 [23 September model decision](https://github.com/drrowdev/stillroom-wardrobe/pull/32#issuecomment-5795033115)

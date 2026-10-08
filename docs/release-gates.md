@@ -25,8 +25,11 @@ workflow at the merged head; `cN` is a comment on the named PR.
 Historical reviewer policy: from 1 October 2026, 09:34, the owner required
 OpenAI GPT-6.1 Sol for plan critiques and code reviews. The
 [7 October owner decision](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6036228105)
-and MODEL1 (#173) supersede that policy: fresh local GPT-6.1 Sol/medium writers
-and read-only Claude Opus 5.5/high reviewers. Earlier rows retain the actual
+and MODEL1 (#173) supersede that policy for new work. MODEL1 set GPT-6.1 Sol/medium
+writers and Claude Opus 5.5/high reviewers; the
+[8 October owner decision](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6067719398)
+now sets fresh local Claude Sonnet 5.5/high writers and read-only GPT-6.1 Sol/high
+reviewers. Earlier rows retain the actual
 review models of their time.
 
 **7 October correction to R3/R4 Edge evidence:** the historical D18/D19 and
