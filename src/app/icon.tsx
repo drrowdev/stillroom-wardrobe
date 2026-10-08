@@ -1,4 +1,4 @@
-type Name = 'wardrobe' | 'plus' | 'lock' | 'arrow' | 'camera' | 'photo' | 'crop' | 'refresh' | 'chevron' | 'close' | 'check' | 'user' | 'outfits' | 'today' | 'calendar' | 'statistics' | 'more';
+type Name = 'wardrobe' | 'plus' | 'lock' | 'arrow' | 'camera' | 'photo' | 'crop' | 'refresh' | 'chevron' | 'close' | 'check' | 'user' | 'outfits' | 'today' | 'calendar' | 'statistics' | 'more' | 'thermometer';
 const paths: Record<Name, string> = {
   wardrobe: 'M5 21V4h14v17M12 4v17M3 21h18M9 11v3m6-3v3',
   plus: 'M12 5v14M5 12h14',
@@ -16,6 +16,7 @@ const paths: Record<Name, string> = {
   calendar: 'M4 6h16v14H4zM4 10h16M8 3v4M16 3v4',
   statistics: 'M4 20h16M7 16v-5M12 16V6M17 16v-8',
   more: 'M5 12h.01M12 12h.01M19 12h.01',
+  thermometer: 'M9 14.5V5a3 3 0 0 1 6 0v9.5a5 5 0 1 1-6 0ZM12 7v10M17 6h3M17 10h2',
   today: 'M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
 };
 export function Icon({ name, className = '' }: { name: Name; className?: string }) {

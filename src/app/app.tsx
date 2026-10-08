@@ -478,6 +478,7 @@ function Connected({ config, callback }: { config: PublicConfig; callback: Recov
         <ShellBoundary fallback={shellFallback(true)}>
           {nav ? <><nav.TopNav family={navFamily} t={t} />{!narrow && accountMenu}</> : shellFallback(shell.status === 'failed')}
         </ShellBoundary>
+        <div id="weather-header-slot" />
       </header>
       {state.languageUnsaved && <div className="language-warning notice" role="status"><span>{t('account.languageRetry')}</span><button className="text-button" disabled={!online || state.profileSaving} onClick={() => { void controller.retryLanguage(); }}>{t('common.retry')}</button></div>}
       {display.failed && <div className="language-warning notice" role="status"><span>{t('language.loadFailed')}</span><button className="text-button" onClick={display.retry}>{t('common.retry')}</button></div>}

@@ -101,9 +101,9 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
   const suggestion = shownKey ? ideas.ideas.find(entry => entry.key === shownKey) ?? null : null;
   const moreButton = <button type="button" className="button button-secondary" disabled={browseLocked} onClick={another}><Icon name="refresh" />{t('today.more')}</button>;
   return <section className="today-page" aria-labelledby="today-title">
+    <WeatherBar weather={forecast} language={language} timeZone={timeZone} online={online} locked={busy} t={t} onTurnOnWeather={onTurnOnWeather} />
     <div className="page-heading"><div><h1 id="today-title" tabIndex={-1}>{t('today.title')}</h1></div></div>
     <div className="today-context">
-      <WeatherBar weather={forecast} language={language} timeZone={timeZone} online={online} locked={busy} t={t} onTurnOnWeather={onTurnOnWeather} />
       <div className="today-selects">
         <label className="field"><span>{t('outfits.occasion')}</span>
           <select value={occasion} disabled={busy} onChange={event => { if (!busy && isOccasion(event.target.value)) setOccasion(event.target.value); }}>

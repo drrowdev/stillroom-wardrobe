@@ -12,17 +12,24 @@ const text = (key: MessageKey, language: Language = 'en', parameters?: Record<st
 const button = (page: Page, key: MessageKey, language: Language = 'en') => page.getByRole('button', { name: text(key, language), exact: true });
 const cards = (page: Page) => page.locator('.today-card');
 const bar = (page: Page) => page.locator('.weather-bar');
+const weatherTrigger = (page: Page) => page.locator('#weather-trigger');
+async function openDetails(page: Page) {
+  await expect(weatherTrigger(page)).toBeVisible();
+  if (await weatherTrigger(page).getAttribute('aria-expanded') !== 'true') await weatherTrigger(page).click();
+  await expect(bar(page)).toBeVisible();
+}
 // The Outdoors | Indoors choice on Today.
 const place = (page: Page, key: 'setting.outdoors' | 'setting.indoors', language: Language = 'en') =>
   bar(page).getByRole('group', { name: text('weather.place', language) }).getByRole('button', { name: text(key, language), exact: true });
 const turnOn = (page: Page, language: Language = 'en') => bar(page).getByRole('link', { name: text('weather.turnOn', language), exact: true });
-// On phones the credit has its own line and no separator; wider, both share one line with the "·" between them.
+// The compact details keep the update time and credit on their own readable lines.
 async function footerFits(page: Page) {
   const layout = await bar(page).locator('.weather-footer').evaluate(footer => {
     const [updated, credit] = [...footer.children].map(child => child.getBoundingClientRect());
-    return { separator: getComputedStyle(footer.children[1]!, '::before').content, ownLine: credit!.top >= updated!.bottom - 0.5, width: innerWidth };
+    return { separator: getComputedStyle(footer.children[1]!, '::before').content, ownLine: credit!.top >= updated!.bottom - 0.5,
+      fits: [...footer.children].every(child => child.scrollWidth <= child.clientWidth), width: innerWidth };
   });
-  expect(layout.width <= 650 ? layout.separator === 'none' && layout.ownLine : layout.separator !== 'none' && !layout.ownLine, JSON.stringify(layout)).toBe(true);
+  expect(layout.separator === 'none' && layout.ownLine && layout.fits, JSON.stringify(layout)).toBe(true);
 }
 const user = { kind: 'user', revision: 1 };
 const oulu = { weather_enabled: true, weather_city: 'Oulu, Finland', latitude: 65, longitude: 25.5 };
@@ -120,13 +127,14 @@ function basics(api: Api, account: 'a' | 'b' = 'a', bottom: Row = { lower_covera
 // The mock signs Auth tokens against the real time, while these tests pin the page clock to a fixed hour and move it
 // forward by hours. A long token keeps that session valid on the page clock, so only the forecast's age is tested.
 const twoDays = 2 * 24 * 3600;
-async function start(page: Page, options: { language?: Language; weather?: Row; route?: string; seed?: (api: Api, weather: Service) => void; weatherB?: Row; tokenSeconds?: number } = {}) {
+async function start(page: Page, options: { language?: Language; weather?: Row; route?: string; seed?: (api: Api, weather: Service) => void; weatherB?: Row; tokenSeconds?: number; details?: boolean } = {}) {
   const api = await mockBackend(page, { initialLanguage: options.language ?? 'en', ...options.tokenSeconds && { auth: { lifetime: options.tokenSeconds } }, weather: { ...options.weather && { a: options.weather }, ...options.weatherB && { b: options.weatherB } } });
   const weather = await service(page);
   options.seed?.(api, weather);
   await page.goto(`/#/${options.route ?? 'today'}`); await signIn(page);
   await expectSignedIn(page);
   if (options.route === 'settings') await settingsFocused(page);
+  else if (options.details !== false) await openDetails(page);
   return { api, weather };
 }
 // Settings becomes visible before the lazy boundary's ready effect runs. That effect no longer takes focus from a control
@@ -138,6 +146,7 @@ async function goTo(page: Page, route: 'today' | 'settings') {
   const changed = await page.evaluate(target => { const before = location.hash; location.hash = `#/${target}`; return before !== location.hash; }, route);
   await expect(page.locator(route === 'today' ? '#today-title' : '#settings-title')).toBeVisible();
   if (route === 'settings' && changed) await settingsFocused(page);
+  if (route === 'today') await openDetails(page);
 }
 async function signOut(page: Page, language: Language) {
   await openAccountMenu(page, language);
@@ -153,6 +162,117 @@ async function search(page: Page, query: string, language: Language = 'en') {
   await page.locator('#weather-city').fill(query);
   await button(page, 'common.search', language).click();
 }
+
+for (const language of ['en', 'fi', 'sv'] as const) test(`WEATHER1 ${language}: the header shows the forecast low, not a current temperature`, async ({ page }) => {
+  const { weather } = await start(page, { language, weather: oulu, details: false, seed: (api, service) => {
+    basics(api); service.weather.set('65.0', { temperature: 6, rain: 2, wind: 7 });
+  } });
+  const low = await lowLine(page, 6, language);
+  await expect(weatherTrigger(page)).toHaveText(low);
+  await expect(weatherTrigger(page)).toHaveAccessibleName(text('weather.summaryLabel', language, { summary: low }));
+  await expect(weatherTrigger(page)).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.locator('.workspace-header #weather-trigger')).toHaveCount(1);
+  await expect(page.locator('.today-page .weather-bar')).toHaveCount(0);
+  await expect(bar(page)).toBeHidden();
+  await openDetails(page);
+  await expect(bar(page).locator('.weather-heading')).toContainText('Oulu');
+  await expect(bar(page).locator('.weather-chips li')).toHaveText([
+    low, text('weather.rain', language, { chance: new Intl.NumberFormat(locales[language], { style: 'percent' }).format(.02) }),
+    text('weather.wind', language, { speed: new Intl.NumberFormat(locales[language], { style: 'unit', unit: 'meter-per-second' }).format(7) }),
+  ]);
+  await expect(bar(page).getByRole('link', { name: 'Open-Meteo.com' })).toBeVisible();
+  await expect(bar(page).locator('.weather-footer')).toContainText(text('weather.updated', language, { time: '' }).trim());
+  await bar(page).getByRole('button', { name: text('common.close', language), exact: true }).click();
+  await expect(weatherTrigger(page)).toBeFocused();
+  await openDetails(page);
+  expect(weather.forecasts()).toHaveLength(1);
+});
+
+test('WEATHER1 disclosure: Escape and Close return focus; outside taps and leaving focus do not steal it', async ({ page }) => {
+  await start(page, { weather: oulu, details: false, seed: api => basics(api) });
+  const trigger = weatherTrigger(page);
+  await trigger.focus();
+  await page.keyboard.press('Enter');
+  await expect(trigger).toBeFocused();
+  await expect(bar(page)).toBeVisible();
+  await page.keyboard.press('Tab');
+  await expect(bar(page).getByRole('button', { name: text('common.close'), exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(place(page, 'setting.outdoors')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(bar(page)).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await page.keyboard.press('Space');
+  await expect(bar(page)).toBeVisible();
+  await page.mouse.click(2, 2);
+  await expect(bar(page)).toBeHidden();
+  await openDetails(page);
+  await place(page, 'setting.outdoors').focus();
+  const occasion = page.getByRole('combobox', { name: text('outfits.occasion'), exact: true });
+  await occasion.focus();
+  await expect(bar(page)).toBeHidden();
+  await expect(occasion).toBeFocused();
+  await expect(page.locator('[role="menu"], [role="menuitem"]')).toHaveCount(0);
+});
+
+test('WEATHER1 closing the details preserves entered temperature, while Cancel and Indoors keep their original meaning', async ({ page }) => {
+  await start(page, { seed: api => basics(api) });
+  await button(page, 'weather.enterTemperature').click();
+  await page.locator('#weather-temperature').fill('-3');
+  await page.keyboard.press('Escape');
+  await expect(weatherTrigger(page)).toBeFocused();
+  await openDetails(page);
+  await expect(page.locator('#weather-temperature')).toHaveValue('-3');
+  await button(page, 'weather.useTemperature').focus();
+  await page.keyboard.press('Enter');
+  await expect(weatherTrigger(page)).toHaveText(text('weather.manualSummary', 'en', { temperature: await celsius(page, -3) }));
+  await expect(weatherTrigger(page)).toBeFocused();
+  await expect(bar(page)).toContainText(text('weather.manualLine', 'en', { temperature: await celsius(page, -3) }));
+  await button(page, 'weather.clearManual').focus();
+  await page.keyboard.press('Enter');
+  await expect(weatherTrigger(page)).toBeFocused();
+  await button(page, 'weather.enterTemperature').click();
+  await page.locator('#weather-temperature').fill('9');
+  await button(page, 'common.cancel').click();
+  await button(page, 'weather.enterTemperature').click();
+  await expect(page.locator('#weather-temperature')).toHaveValue('');
+  await place(page, 'setting.indoors').click();
+  await expect(weatherTrigger(page)).toHaveText(text('setting.indoors'));
+  await expect(bar(page).locator('.weather-line')).toHaveCount(0);
+  await place(page, 'setting.outdoors').click();
+  await expect(weatherTrigger(page)).toHaveText(text('weather.noForecast'));
+});
+
+test('WEATHER1 a forecast with unknown temperature never invents a header value', async ({ page }) => {
+  const { weather } = await start(page, { weather: oulu, details: false, seed: (api, service) => {
+    basics(api); service.hold.forecast.add('65.0');
+  } });
+  await expect(weatherTrigger(page)).toHaveText(text('weather.loadingSummary'));
+  await expect.poll(() => weather.held.length).toBe(1);
+  const reply = forecastReply({ temperature: 6, rain: 2, wind: 7 });
+  await weather.release('forecast', { ...reply, hourly: { ...reply.hourly, temperature_2m: reply.hourly.time.map(() => null) } });
+  await expect(weatherTrigger(page)).toHaveText(text('weather.unknownLow'));
+  await openDetails(page);
+  await expect(bar(page).locator('.weather-chips li')).toHaveCount(2);
+  await expect(bar(page)).not.toContainText('°C');
+  await expect(bar(page).getByRole('link', { name: 'Open-Meteo.com' })).toBeVisible();
+  expect(weather.forecasts()).toHaveLength(1);
+});
+
+test('WEATHER1 leaving Today removes the portal; returning and changing language reuse the same forecast', async ({ page }) => {
+  const { weather } = await start(page, { weather: oulu, seed: api => basics(api) });
+  await expect(weatherTrigger(page)).toHaveText(await lowLine(page, 0));
+  await goTo(page, 'settings');
+  await expect(weatherTrigger(page)).toHaveCount(0);
+  await expect(page.locator('#weather-header-slot')).toBeEmpty();
+  await goTo(page, 'today');
+  await expect(weatherTrigger(page)).toHaveText(await lowLine(page, 0));
+  await openAccountMenu(page, 'en');
+  await expect(bar(page)).toBeHidden();
+  await accountMenu(page).getByRole('button', { name: 'Suomi', exact: true }).click();
+  await expect(weatherTrigger(page)).toHaveText(await lowLine(page, 0, 'fi'));
+  expect(weather.forecasts()).toHaveLength(1);
+});
 
 // Delays the lazy route's ready effect: once the city field is inserted, React's scheduler messages (which run the
 // commit's passive effects) are held until released. The clock skip makes the scheduler yield instead of running them
@@ -584,6 +704,7 @@ for (const [from, to] of [['a', 'b'], ['b', 'a']] as const) {
     await signOut(page, language[from]);
     await signIn(page, to);
     await expect(page.locator('#today-title')).toBeVisible();
+    await openDetails(page);
     await expect(bar(page)).toContainText(city[to]);
     await weather.release('forecast', forecastReply({ temperature: -30 }));
     await expect(bar(page)).toContainText(city[to]);
@@ -722,6 +843,71 @@ test('I16 accessibility: axe, keyboard, 320px and 200% text for the weather card
   }
 });
 
+test.describe('WEATHER1 visual', () => {
+  test.describe.configure({ retries: 0 });
+  const scenes = [
+    ...(['en', 'fi', 'sv'] as const).flatMap(language => [
+      { scene: 'compact' as const, language, width: 390, project: 'mobile', suffix: `${language}-narrow` },
+      { scene: 'compact' as const, language, width: 1280, project: 'chromium', suffix: `${language}-wide` },
+    ]),
+    { scene: 'details' as const, language: 'en' as const, width: 320, project: 'mobile', suffix: 'en-narrow' },
+    { scene: 'manual-error' as const, language: 'en' as const, width: 320, project: 'mobile', suffix: 'en-narrow' },
+  ];
+  for (const selected of scenes) test(`${selected.scene} ${selected.suffix}`, async ({ page }, testInfo) => {
+    const at = Date.parse('2026-10-08T07:00:00Z');
+    await page.clock.install({ time: at });
+    await page.setViewportSize({ width: selected.width, height: 900 });
+    const { weather } = await start(page, { language: selected.language, weather: oulu, details: false, tokenSeconds: twoDays,
+      seed: (api, service) => {
+        basics(api); service.clock.at = at;
+        service.weather.set('65.0', { temperature: 6, rain: 2, wind: 7 });
+        if (selected.scene === 'manual-error') service.status.forecast = 503;
+      } });
+    await expectIdentity(page, 'Alex');
+    if (selected.scene === 'manual-error') {
+      await expect(weatherTrigger(page)).toHaveText(text('weather.unavailableSummary', selected.language));
+      await openDetails(page);
+      await expect(bar(page)).toContainText(text('weather.failed'));
+      await expect(bar(page).getByRole('button', { name: text('common.retry'), exact: true })).toBeDisabled();
+      await button(page, 'weather.enterTemperature').click();
+      await page.locator('#weather-temperature').fill('cold');
+      await button(page, 'weather.useTemperature').click();
+      await expect(page.locator('#weather-temperature-error')).toHaveText(text('weather.invalidTemperature'));
+    } else {
+      await expect(weatherTrigger(page)).toHaveText(await lowLine(page, 6, selected.language));
+      await expect(bar(page)).toBeHidden();
+      if (selected.scene === 'details') {
+        await openDetails(page);
+        await expect(bar(page).locator('.weather-heading')).toContainText('Oulu');
+        await expect(bar(page).locator('.weather-chips li')).toHaveCount(3);
+        await footerFits(page);
+      }
+    }
+    await expect(cards(page).first()).toBeVisible();
+    if (selected.scene === 'compact') await expect(bar(page)).toBeHidden();
+    else await expect(bar(page)).toBeVisible();
+    expect(weather.forecasts()).toHaveLength(1);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+    expect(await page.evaluate(({ language, width }) => {
+      const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
+      const fields = [...document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input,textarea')]
+        .filter(field => field.getClientRects().length).map(field => field.value).join('\n');
+      return location.hostname === '127.0.0.1' && document.documentElement.lang === language && innerWidth === width && innerHeight === 900
+        && document.documentElement.scrollWidth <= innerWidth && !document.querySelector('input[type=password],#email,#password')
+        && !privatePattern.test(document.body.innerText) && !privatePattern.test(fields);
+    }, { language: selected.language, width: selected.width })).toBe(true);
+    if (testInfo.project.name !== selected.project) return;
+    const directory = path.resolve('test-results/weather1-visual');
+    await mkdir(directory, { recursive: true });
+    const info = await lstat(directory); expect(info.isDirectory() && !info.isSymbolicLink()).toBe(true);
+    const png = await page.screenshot({ fullPage: true, animations: 'disabled', type: 'png', scale: 'css' });
+    expect(png.byteLength > 0 && png.byteLength <= 1048576).toBe(true);
+    expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && png.readUInt32BE(16) === selected.width).toBe(true);
+    const file = await open(path.join(directory, `${selected.scene}-${selected.suffix}.png`), 'wx');
+    try { await file.writeFile(png); } finally { await file.close(); }
+  });
+});
+
 test.describe('bounded I16 visual evidence', () => {
   test.describe.configure({ retries: 0 });
   const scenes = [
@@ -780,12 +966,13 @@ test.describe('bounded I16 visual evidence', () => {
       expect(await place(page, 'setting.outdoors', language).evaluate(element => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(27);
     }
     await expectIdentity(page, 'Alex');
+    if (selected.scene.startsWith('today')) await openDetails(page);
     if (selected.scene === 'today-indoors') await expect(bar(page).locator('.weather-line')).toHaveCount(0);
     // Indoors shows no weather line since UI1, so only the other Today scenes have one to place the choice against.
     else if (selected.scene.startsWith('today')) {
-      // The place choice leads on narrow screens and sits to the right on wide ones.
+      // The place choice leads the forecast inside the header disclosure at every width.
       const [group, line] = await Promise.all([bar(page).locator('.weather-place').boundingBox(), bar(page).locator('.weather-line').first().boundingBox()]);
-      expect(group && line && (selected.width < 651 ? group.y + group.height <= line.y : group.x >= line.x + line.width)).toBe(true);
+      expect(group && line && group.y + group.height <= line.y).toBe(true);
     }
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     expect(await page.evaluate(({ expectedLanguage, width }) => {

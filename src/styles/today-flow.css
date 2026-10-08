@@ -1,6 +1,21 @@
-/* Today: one featured idea, compact weather chips and a "…" menu. Loaded with the Today route only. */
+/* Today: one featured idea, header weather and a "…" menu. Loaded with the Today route only. */
 .today-page .today-context { flex-direction: column; gap: 12px; }
-.today-page .today-context .weather-bar { margin: 0; }
+.weather-widget { position: relative; }
+.weather-trigger { display: flex; align-items: center; gap: 8px; min-height: 44px; max-width: 100%; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--primary); font: inherit; font-size: .875rem; cursor: pointer; }
+.weather-trigger > span { min-width: 0; overflow-wrap: anywhere; text-align: start; }
+.weather-trigger > .icon { flex: 0 0 auto; }
+.weather-trigger > .icon:last-child { width: 14px; height: 14px; }
+.weather-trigger:hover, .weather-trigger[aria-expanded="true"] { background: var(--well); }
+.weather-widget .weather-bar { position: absolute; z-index: 10; top: calc(100% + 8px); right: 0; display: flex; flex-direction: column; align-items: stretch; gap: 12px; width: min(24rem, calc(100vw - 32px)); max-height: calc(100dvh - 140px); overflow-y: auto; overscroll-behavior: contain; margin: 0; padding: 16px; box-shadow: 0 8px 28px #24332E24; font-size: .875rem; }
+.weather-widget .weather-bar[hidden] { display: none; }
+.weather-details-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.weather-details-heading h2 { margin: 0; font-size: 1rem; }
+.weather-widget .weather-place { order: 0; align-self: flex-start; }
+.weather-widget .weather-line { flex: 0 0 auto; gap: 6px; }
+.weather-widget .weather-footer { flex-direction: column; }
+.weather-widget .fine { font-size: inherit; }
+.weather-widget .weather-credit::before { content: none; }
+.weather-widget .text-button { min-height: 44px; }
 .today-page .today-selects { display: flex; flex-wrap: wrap; gap: 12px 16px; }
 .today-page .today-ideas { grid-template-columns: minmax(0, 1fr); max-width: 640px; }
 .today-page .today-featured { gap: 14px; padding: 20px; }
@@ -24,6 +39,8 @@
 .weather-chip { display: inline-flex; align-items: center; min-height: 28px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--well); font-size: .875rem; }
 .weather-line p.weather-chip { margin: 0; }
 @media (max-width: 650px) {
+  .weather-widget { position: static; }
+  .weather-widget .weather-bar { top: 100%; right: 16px; left: 16px; width: auto; max-height: calc(100dvh - var(--tab-bar-height, 0px) - 100px - env(safe-area-inset-top, 0px)); }
   .today-page .today-featured { padding: 16px; }
   .today-page .today-featured .today-pieces { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
 }
