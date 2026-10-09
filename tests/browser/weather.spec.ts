@@ -986,13 +986,13 @@ test.describe('I16 weather gaps on each idea, without suitability claims', () =>
     { name: 'cold with unknown length, including an unconfirmed value', forecast: { temperature: 0 }, bottom: { lower_coverage: 2 },
       extra: { category: 'outerwear', colours: ['grey'] }, expected: ['today.checkLength'], absent: ['today.addCoat', 'today.reasonWarmth'] },
     { name: 'unknown rain protection, including an unconfirmed value', forecast: { temperature: 15, rain: 80 },
-      extra: { category: 'layer', colours: ['grey'], rain_rating: 2 }, expected: ['today.checkRain'], absent: ['today.reasonRain', 'today.noRain'] },
+      extra: { category: 'layer', colours: ['grey'], rain_rating: 2 }, expected: [], absent: ['today.reasonRain', 'today.noRain', 'today.noCover'] },
     { name: 'unknown wind protection', forecast: { temperature: 15, wind: 12 },
       extra: { category: 'layer', colours: ['grey'], windproof: null, field_provenance: { windproof: user } }, expected: ['today.checkWind'], absent: ['today.reasonWind'] },
     { name: 'protection marked as inadequate', forecast: { temperature: 15, rain: 80 },
-      extra: { category: 'layer', colours: ['grey'], rain_rating: 0, field_provenance: { rain_rating: user } }, expected: ['today.noRain'], absent: ['today.reasonRain', 'today.checkRain'] },
+      extra: { category: 'layer', colours: ['grey'], rain_rating: 0, field_provenance: { rain_rating: user } }, expected: ['today.noRain'], absent: ['today.reasonRain'] },
     { name: 'rain protection confirmed by the owner', forecast: { temperature: 15, rain: 80 },
-      extra: { category: 'layer', colours: ['grey'], rain_rating: 2, field_provenance: { rain_rating: user } }, expected: ['today.reasonRain'], absent: ['today.checkRain', 'today.noRain'] },
+      extra: { category: 'layer', colours: ['grey'], rain_rating: 2, field_provenance: { rain_rating: user } }, expected: ['today.reasonRain'], absent: ['today.noRain'] },
   ];
   for (const entry of cases) test(entry.name, async ({ page }) => {
     await start(page, { weather: oulu, seed: (api, service) => {
@@ -1003,8 +1003,64 @@ test.describe('I16 weather gaps on each idea, without suitability claims', () =>
     const card = cards(page).first();
     for (const key of entry.expected) await expect(card).toContainText(text(key));
     for (const key of entry.absent) await expect(card).not.toContainText(text(key));
+    await expect(card).not.toContainText(unsaidRain);
     await expect(card).not.toContainText(text('today.missing', 'en', { categories: text('categoryOne.outerwear') }));
   });
+});
+
+// The old English, Finnish and Swedish sentences, matched as text so the checks outlive their catalog keys.
+const unsaidRain = /Rain protection|sateenkest|Regnskydd/i;
+test.describe('I16 unknown rain protection is not mentioned on Today', () => {
+  const forecast = { temperature: 15, rain: 80, wind: 12 };
+  for (const language of ['en', 'fi', 'sv'] as const) {
+    test(`a complete idea says nothing about it in ${language}`, async ({ page }) => {
+      await start(page, { language, weather: oulu, seed: (api, service) => {
+        basics(api); add(api, 'Grey layer', { category: 'layer', colours: ['grey'], rain_rating: null });
+        service.weather.set('65.0', { temperature: 15, rain: 80 });
+      } });
+      const card = cards(page).first();
+      await expect(card).toBeVisible();
+      await expect(card.locator('.today-missing')).toHaveCount(0);
+      await expect(card).not.toContainText(unsaidRain);
+      for (const key of ['today.reasonRain', 'today.noRain', 'today.noCover'] as const) await expect(card).not.toContainText(text(key, language));
+    });
+
+    test(`an unfinished idea keeps only its missing-categories line in ${language}`, async ({ page }) => {
+      await start(page, { language, weather: oulu, seed: (api, service) => {
+        add(api, 'White shirt', { colours: ['white'] });
+        add(api, 'Navy trousers', { category: 'bottom', colours: ['navy'], lower_coverage: 2, field_provenance: { lower_coverage: user } });
+        add(api, 'Grey layer', { category: 'layer', colours: ['grey'], rain_rating: null });
+        service.weather.set('65.0', { temperature: 15, rain: 80 });
+      } });
+      const card = cards(page).first();
+      await expect(card).toContainText(text('today.missing', language, { categories: text('categoryOne.footwear', language) }));
+      await expect(card.locator('.today-missing')).toHaveCount(1);
+      await expect(card).not.toContainText(unsaidRain);
+    });
+
+    test(`unknown rain beside a layer that only resists wind does not claim that nothing suits the weather in ${language}`, async ({ page }) => {
+      await start(page, { language, weather: oulu, seed: (api, service) => {
+        basics(api); add(api, 'Grey layer', { category: 'layer', colours: ['grey'], rain_rating: null, windproof: true, field_provenance: { windproof: user } });
+        service.weather.set('65.0', forecast);
+      } });
+      const card = cards(page).first();
+      await expect(card).toBeVisible();
+      await expect(card.locator('.today-missing')).toHaveCount(0);
+      await expect(card).not.toContainText(text('today.noCover', language));
+      await expect(card).not.toContainText(unsaidRain);
+    });
+
+    test(`unknown rain and unknown wind leave only the wind sentence in ${language}`, async ({ page }) => {
+      await start(page, { language, weather: oulu, seed: (api, service) => {
+        basics(api); add(api, 'Grey layer', { category: 'layer', colours: ['grey'], rain_rating: null, windproof: null, field_provenance: { windproof: user } });
+        service.weather.set('65.0', forecast);
+      } });
+      const card = cards(page).first();
+      await expect(card).toContainText(text('today.checkWind', language));
+      await expect(card.locator('.today-missing')).toHaveCount(1);
+      await expect(card).not.toContainText(unsaidRain);
+    });
+  }
 });
 
 for (const [from, to] of [['a', 'b'], ['b', 'a']] as const) {
@@ -1237,6 +1293,9 @@ test.describe('bounded I16 visual evidence', () => {
     { scene: 'today-off', project: 'mobile', language: 'sv', width: 320, zoom: true, suffix: 'sv-320-200' },
     { scene: 'today-indoors', project: 'mobile', language: 'sv', width: 320, zoom: false, suffix: 'sv-mobile' },
     { scene: 'today-unavailable', project: 'mobile', language: 'fi', width: 320, zoom: false, suffix: 'fi-mobile' },
+    { scene: 'today-unknown-rain', project: 'chromium', language: 'en', width: 1280, zoom: false, suffix: 'en-desktop' },
+    { scene: 'today-unknown-rain', project: 'mobile', language: 'fi', width: 320, zoom: false, suffix: 'fi-mobile' },
+    { scene: 'today-unknown-rain', project: 'mobile', language: 'sv', width: 320, zoom: true, suffix: 'sv-320-200' },
   ] as const;
   for (const selected of scenes) test(`${selected.scene} ${selected.suffix} retains functional assertions in every project`, async ({ page }, testInfo: TestInfo) => {
     const language: Language = selected.language;
@@ -1272,6 +1331,15 @@ test.describe('bounded I16 visual evidence', () => {
       await place(page, 'setting.indoors', language).click();
       await expect(place(page, 'setting.indoors', language)).toHaveAttribute('aria-pressed', 'true');
       await expect(cards(page).first()).toBeVisible();
+    } else if (selected.scene === 'today-unknown-rain') {
+      await start(page, { language, weather: oulu, seed: (api, service) => {
+        basics(api); add(api, 'Grey layer', { category: 'layer', colours: ['grey'], rain_rating: null });
+        service.weather.set('65.0', { temperature: 12, rain: 70, wind: 4 });
+      } });
+      await expect(bar(page)).toContainText(await lowLine(page, 12, language));
+      await expect(cards(page).first()).toBeVisible();
+      await expect(cards(page).first().locator('.today-missing')).toHaveCount(0);
+      await expect(cards(page).first()).not.toContainText(unsaidRain);
     } else {
       await start(page, { language, weather: oulu, seed: (api, service) => { basics(api); service.status.forecast = 503; } });
       await expect(bar(page)).toContainText(text('weather.failed', language));
