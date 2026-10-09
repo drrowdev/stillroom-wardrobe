@@ -62,7 +62,6 @@
   "recovery.revocationUncertain": { "en": "Password changed, but other devices may still be signed in. Sign in with your new password and tell the app owner.", "fi": "Salasana vaihdettu, mutta muut laitteet voivat yhä olla kirjautuneina. Kirjaudu uudella salasanalla ja kerro asiasta sovelluksen omistajalle.", "sv": "Lösenordet har ändrats, men andra enheter kan fortfarande vara inloggade. Logga in med det nya lösenordet och meddela appens ägare." },
   "recovery.uncertain": { "en": "The password may already have changed. Try signing in with the new password, or request a new link.", "fi": "Salasana on voinut jo vaihtua. Kokeile kirjautua uudella salasanalla tai pyydä uusi linkki.", "sv": "Lösenordet kan redan ha ändrats. Försök logga in med det nya lösenordet eller begär en ny länk." },
   "recovery.memoryOnly": { "en": "If you leave or reload this page, you'll need a new link.", "fi": "Jos poistut sivulta tai lataat sen uudelleen, tarvitset uuden linkin.", "sv": "Om du lämnar eller laddar om sidan behöver du en ny länk." },
-  "auth.invited": { "en": "Invited accounts only.", "fi": "Vain kutsutuille tileille.", "sv": "Endast inbjudna konton." },
   "auth.signingIn": { "en": "Signing in…", "fi": "Kirjaudutaan…", "sv": "Loggar in…" },
   "auth.localSignOut": { "en": "Signed out on this device, but the server didn't confirm it.", "fi": "Olet kirjautunut ulos tältä laitteelta, mutta palvelin ei vahvistanut sitä.", "sv": "Du är utloggad på den här enheten, men servern bekräftade det inte." },
   "auth.passwordHelp": { "en": "Need an account? Ask the app owner.", "fi": "Tarvitsetko tunnuksen? Kysy sovelluksen omistajalta.", "sv": "Behöver du ett konto? Fråga appens ägare." },
@@ -74,7 +73,6 @@
   "setup.step3": { "en": "Restart the app and sign in.", "fi": "Käynnistä sovellus uudelleen ja kirjaudu sisään.", "sv": "Starta om appen och logga in." },
   "setup.invalid": { "en": "The connection settings need attention. Check the project address and publishable key in your local configuration.", "fi": "Yhteysasetukset on tarkistettava. Tarkista projektin osoite ja julkinen avain paikallisesta asetustiedostosta.", "sv": "Anslutningsinställningarna behöver ses över. Kontrollera projektadressen och den publika nyckeln i din lokala konfiguration." },
   "wardrobe.title": { "en": "My wardrobe", "fi": "Oma vaatekaappi", "sv": "Min garderob" },
-  "wardrobe.privateNote": { "en": "Visible only to your account in the app.", "fi": "Näkyy sovelluksessa vain omalle tilillesi.", "sv": "Syns bara för ditt konto i appen." },
   "wardrobe.refresh": { "en": "Refresh wardrobe", "fi": "Päivitä vaatekaappi", "sv": "Uppdatera garderoben" },
   "wardrobe.filtersActive": { "en": "Filters ({count})", "fi": "Suodattimet ({count})", "sv": "Filter ({count})" },
   "wardrobe.activeFilters": { "en": "Active filters", "fi": "Käytössä olevat suodattimet", "sv": "Aktiva filter" },
@@ -286,10 +284,9 @@
   "today.reasonWind": {"en":"Wind-ready","fi":"Sopii tuuleen","sv":"Klarar blåst"},
   "today.addCoat": {"en":"You have no outerwear for the cold yet.","fi":"Sinulla ei vielä ole ulkovaatteita kylmään.","sv":"Du har inga ytterkläder för kylan än."},
   "today.addCover": {"en":"You have no outerwear or layers for this weather yet.","fi":"Sinulla ei vielä ole ulkovaatteita tai välikerroksia tähän säähän.","sv":"Du har inga ytterkläder eller mellanlager för det här vädret än."},
-  "today.checkWind": {"en":"Wind protection isn't recorded for your outerwear and layers.","fi":"Ulkovaatteidesi ja välikerrostesi tuulenpitävyyttä ei ole merkitty.","sv":"Vindskydd är inte angivet för dina ytterkläder och mellanlager."},
   "today.noRain": {"en":"None of your outerwear or layers is marked as rainproof.","fi":"Yhtäkään ulkovaatettasi tai välikerrostasi ei ole merkitty sateenkestäväksi.","sv":"Inga av dina ytterkläder eller mellanlager är markerade som regntäta."},
   "today.noWind": {"en":"None of your outerwear or layers is marked as windproof.","fi":"Yhtäkään ulkovaatettasi tai välikerrostasi ei ole merkitty tuulenpitäväksi.","sv":"Inga av dina ytterkläder eller mellanlager är markerade som vindtäta."},
   "today.noCover": {"en":"None of your outerwear or layers suits all of today's weather.","fi":"Mikään ulkovaatteistasi tai välikerroksistasi ei sovi kaikkeen tämän päivän säähän.","sv":"Inga av dina ytterkläder eller mellanlager passar allt väder idag."},
-  "today.checkLength": {"en":"The length of these bottoms isn't recorded. Ankle length is best in the cold.","fi":"Näiden alaosien pituutta ei ole merkitty. Nilkkaan asti ulottuva on paras kylmällä.","sv":"Längden på de här plaggen är inte angiven. Ankellångt är bäst i kylan."},
+  "today.checkLength": {"en":"Check that these bottoms cover your ankles in cold weather.","fi":"Tarkista, että nämä alaosat peittävät nilkat kylmällä säällä.","sv":"Kontrollera att de här plaggen täcker anklarna i kallt väder."},
   "today.ideaGone": {"en":"This idea is no longer available.","fi":"Tämä ehdotus ei ole enää saatavilla.","sv":"Det här förslaget finns inte längre."}
 }

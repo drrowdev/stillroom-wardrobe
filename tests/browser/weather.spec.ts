@@ -988,7 +988,7 @@ test.describe('I16 weather gaps on each idea, without suitability claims', () =>
     { name: 'unknown rain protection, including an unconfirmed value', forecast: { temperature: 15, rain: 80 },
       extra: { category: 'layer', colours: ['grey'], rain_rating: 2 }, expected: [], absent: ['today.reasonRain', 'today.noRain', 'today.noCover'] },
     { name: 'unknown wind protection', forecast: { temperature: 15, wind: 12 },
-      extra: { category: 'layer', colours: ['grey'], windproof: null, field_provenance: { windproof: user } }, expected: ['today.checkWind'], absent: ['today.reasonWind'] },
+      extra: { category: 'layer', colours: ['grey'], windproof: null, field_provenance: { windproof: user } }, expected: [], absent: ['today.reasonWind', 'today.noCover'] },
     { name: 'protection marked as inadequate', forecast: { temperature: 15, rain: 80 },
       extra: { category: 'layer', colours: ['grey'], rain_rating: 0, field_provenance: { rain_rating: user } }, expected: ['today.noRain'], absent: ['today.reasonRain'] },
     { name: 'rain protection confirmed by the owner', forecast: { temperature: 15, rain: 80 },
@@ -1004,12 +1004,31 @@ test.describe('I16 weather gaps on each idea, without suitability claims', () =>
     for (const key of entry.expected) await expect(card).toContainText(text(key));
     for (const key of entry.absent) await expect(card).not.toContainText(text(key));
     await expect(card).not.toContainText(unsaidRain);
+    await expect(card).not.toContainText(unsaidWind);
     await expect(card).not.toContainText(text('today.missing', 'en', { categories: text('categoryOne.outerwear') }));
+  });
+  const lengthAdvice = {
+    en: 'Check that these bottoms cover your ankles in cold weather.',
+    fi: 'Tarkista, että nämä alaosat peittävät nilkat kylmällä säällä.',
+    sv: 'Kontrollera att de här plaggen täcker anklarna i kallt väder.',
+  } as const;
+  const unsaidLength = /length of these bottoms isn't recorded|pituutta ei ole merkitty|Längden på de här plaggen är inte angiven/i;
+  for (const language of ['en', 'fi', 'sv'] as const) test(`unknown length of the bottoms gives the ankle advice in ${language}`, async ({ page }) => {
+    await start(page, { language, weather: oulu, seed: (api, service) => {
+      basics(api, 'a', { lower_coverage: 2 });
+      add(api, 'Grey coat', { category: 'outerwear', colours: ['grey'] });
+      service.weather.set('65.0', { temperature: 0 });
+    } });
+    const missing = cards(page).first().locator('.today-missing');
+    await expect(missing).toHaveText(lengthAdvice[language]);
+    await expect(missing).toHaveText(text('today.checkLength', language));
+    await expect(cards(page).first()).not.toContainText(unsaidLength);
   });
 });
 
 // The old English, Finnish and Swedish sentences, matched as text so the checks outlive their catalog keys.
 const unsaidRain = /Rain protection|sateenkest|Regnskydd/i;
+const unsaidWind = /Wind protection isn't recorded|tuulenpitävyyttä ei ole merkitty|Vindskydd är inte angivet/i;
 test.describe('I16 unknown rain protection is not mentioned on Today', () => {
   const forecast = { temperature: 15, rain: 80, wind: 12 };
   for (const language of ['en', 'fi', 'sv'] as const) {
@@ -1050,14 +1069,16 @@ test.describe('I16 unknown rain protection is not mentioned on Today', () => {
       await expect(card).not.toContainText(unsaidRain);
     });
 
-    test(`unknown rain and unknown wind leave only the wind sentence in ${language}`, async ({ page }) => {
+    test(`unknown rain and unknown wind show no weather note in ${language}`, async ({ page }) => {
       await start(page, { language, weather: oulu, seed: (api, service) => {
         basics(api); add(api, 'Grey layer', { category: 'layer', colours: ['grey'], rain_rating: null, windproof: null, field_provenance: { windproof: user } });
         service.weather.set('65.0', forecast);
       } });
       const card = cards(page).first();
-      await expect(card).toContainText(text('today.checkWind', language));
-      await expect(card.locator('.today-missing')).toHaveCount(1);
+      await expect(card).toBeVisible();
+      await expect(card.locator('.today-missing')).toHaveCount(0);
+      await expect(card).not.toContainText(unsaidWind);
+      await expect(card).not.toContainText(text('today.noCover', language));
       await expect(card).not.toContainText(unsaidRain);
     });
   }
@@ -1296,6 +1317,8 @@ test.describe('bounded I16 visual evidence', () => {
     { scene: 'today-unknown-rain', project: 'chromium', language: 'en', width: 1280, zoom: false, suffix: 'en-desktop' },
     { scene: 'today-unknown-rain', project: 'mobile', language: 'fi', width: 320, zoom: false, suffix: 'fi-mobile' },
     { scene: 'today-unknown-rain', project: 'mobile', language: 'sv', width: 320, zoom: true, suffix: 'sv-320-200' },
+    { scene: 'today-check-length', project: 'chromium', language: 'en', width: 1280, zoom: false, suffix: 'en-desktop' },
+    { scene: 'today-check-length', project: 'mobile', language: 'fi', width: 320, zoom: false, suffix: 'fi-mobile' },
   ] as const;
   for (const selected of scenes) test(`${selected.scene} ${selected.suffix} retains functional assertions in every project`, async ({ page }, testInfo: TestInfo) => {
     const language: Language = selected.language;
@@ -1340,6 +1363,14 @@ test.describe('bounded I16 visual evidence', () => {
       await expect(cards(page).first()).toBeVisible();
       await expect(cards(page).first().locator('.today-missing')).toHaveCount(0);
       await expect(cards(page).first()).not.toContainText(unsaidRain);
+    } else if (selected.scene === 'today-check-length') {
+      await start(page, { language, weather: oulu, seed: (api, service) => {
+        basics(api, 'a', { lower_coverage: 2 }); add(api, 'Grey coat', { category: 'outerwear', colours: ['grey'] });
+        service.weather.set('65.0', { temperature: 0 });
+      } });
+      await expect(bar(page)).toContainText(await lowLine(page, 0, language));
+      await expect(cards(page).first().locator('.today-missing')).toHaveText(text('today.checkLength', language));
+      await expect(button(page, 'weather.enterTemperature', language)).toHaveCount(0);
     } else {
       await start(page, { language, weather: oulu, seed: (api, service) => { basics(api); service.status.forecast = 503; } });
       await expect(bar(page)).toContainText(text('weather.failed', language));
@@ -1374,8 +1405,21 @@ test.describe('bounded I16 visual evidence', () => {
         && document.documentElement.scrollWidth <= innerWidth && !document.querySelector('input[type=password],#email,#password')
         && !privatePattern.test(document.body.innerText) && !privatePattern.test(fields);
     }, { expectedLanguage: language, width: selected.width })).toBe(true);
+    if (selected.scene === 'today-check-length') {
+      // The advice must show in the image itself: close the weather details, bring the sentence to the middle of the view and check nothing is drawn over it.
+      await weatherTrigger(page).click();
+      await expect(weatherTrigger(page)).toHaveAttribute('aria-expanded', 'false');
+      const advice = cards(page).first().locator('.today-missing');
+      await advice.evaluate(element => element.scrollIntoView({ block: 'center' }));
+      await expect(advice).toBeInViewport({ ratio: 1 });
+      expect(await advice.evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        const points = [[rect.left + 2, rect.top + 2], [rect.right - 2, rect.top + 2], [rect.left + 2, rect.bottom - 2], [rect.right - 2, rect.bottom - 2], [rect.left + rect.width / 2, rect.top + rect.height / 2]] as const;
+        return points.every(([x, y]) => element.contains(document.elementFromPoint(x, y))) && element.scrollWidth <= element.clientWidth;
+      }), 'The advice sentence is not covered or clipped').toBe(true);
+    }
     if (!write) return;
-    const png = await page.screenshot({ fullPage: true, animations: 'disabled', type: 'png', scale: 'css' });
+    const png = await page.screenshot({ fullPage: selected.scene !== 'today-check-length', animations: 'disabled', type: 'png', scale: 'css' });
     expect(png.byteLength > 0 && png.byteLength <= 1048576).toBe(true);
     expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && png.readUInt32BE(16) === selected.width).toBe(true);
     const file = await open(path.join(directory, `${selected.scene}-${selected.suffix}.png`), 'wx');

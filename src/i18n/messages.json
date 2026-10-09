@@ -133,7 +133,6 @@
   "profile.colours": {"en":"Preferred colours","fi":"Mieluisat värit","sv":"Föredragna färger"},
   "profile.repeatGap": {"en":"Days between wearing the same item","fi":"Päiviä saman vaatteen käyttökertojen välillä","sv":"Dagar mellan användningar av samma plagg"},
   "settings.profileHint": {"en":"Existing items keep their prices, currencies and dates.","fi":"Nykyisten vaatteiden hinnat, valuutat ja päivämäärät säilyvät.","sv":"Befintliga plagg behåller sina priser, valutor och datum."},
-  "settings.languageHint": {"en":"Language saves automatically. Your text, currency and time zone stay unchanged.","fi":"Kieli tallentuu automaattisesti. Oma tekstisi, valuutta ja aikavyöhyke eivät muutu.","sv":"Språket sparas automatiskt. Din text, valuta och tidszon ändras inte."},
   "settings.version": {"en":"Version {version}","fi":"Versio {version}","sv":"Version {version}"},
   "settings.saveProfile": {"en":"Save profile","fi":"Tallenna profiili","sv":"Spara profil"},
   "settings.savePreferences": {"en":"Save preferences","fi":"Tallenna mieltymykset","sv":"Spara preferenser"},
