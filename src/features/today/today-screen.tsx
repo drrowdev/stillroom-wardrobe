@@ -38,7 +38,12 @@ type Props = {
   stylist: StylistStore; onStylist: () => void; onWorn: () => void; onWriting: (busy: boolean) => void;
 };
 const titleId = 'today-featured-title';
-const focusById = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
+const lostFocus = (element: Element | null) => element === null || element === document.body || !element.isConnected || element.matches('main');
+// A move queued for the next frame only goes ahead if focus is still where it was when the move was decided, or still lost.
+const focusById = (id: string, from: Element | null = document.activeElement) => requestAnimationFrame(() => {
+  const active = document.activeElement;
+  if (active === from || lostFocus(active)) document.getElementById(id)?.focus();
+});
 
 export function TodayScreen({ client, scope, images, online, language, t, timeZone, invalidation, weather, weatherStore, onSave, onAddItem, onTurnOnWeather, stylist, onStylist, onWorn, onWriting }: Props) {
   useStylistStatus(stylist);
@@ -74,6 +79,8 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
   const focusAfter = useRef(false);
   // Set when a confirmed pair moves to the next page: focus goes once that page has rendered.
   const focusPage = useRef<number | null>(null);
+  // Where focus was when a move to the title was decided; if it has gone elsewhere since, the move is dropped.
+  const focusFrom = useRef<Element | null>(null);
   const busy = ideas.settling || wear.state.kind === 'inFlight';
   const browseLocked = ideas.settling || wear.state.kind === 'inFlight';
   function nextPage() {
@@ -84,6 +91,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
   function another() {
     if (browseLocked) return;
     focusAfter.current = true;
+    focusFrom.current = document.activeElement;
     const following = next(keys, featured);
     if (following !== 'page') { setFeatured(following); return; }
     nextPage();
@@ -91,6 +99,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
   function startOver() {
     if (browseLocked) return;
     focusAfter.current = true;
+    focusFrom.current = document.activeElement;
     ideas.startOver();
     setPage(page + 1);
     setFeatured(featuredStart(transitionToken(page + 1, occasion, season, appliedWeather)));
@@ -111,7 +120,8 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
     const restored = restoreChanged && ideas.restored?.ctx === ideas.contextKey;
     if (!avoided && !restored) return;
     const active = document.activeElement;
-    const lost = active === null || active === document.body || !active.isConnected || active.matches('main');
+    const lost = lostFocus(active);
+    if (lost) focusFrom.current = active;
     if (restored && ideas.restored && keys.includes(ideas.restored.key)) {
       const back = ideas.restored.key;
       setFeatured(value => ({ ...value, current: back, seen: value.current !== null && !value.seen.includes(value.current) ? [...value.seen, value.current] : value.seen }));
@@ -127,7 +137,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
   useEffect(() => {
     if (!status || !focusAfter.current && focusPage.current !== page) return;
     focusAfter.current = false; focusPage.current = null;
-    focusById(document.getElementById(titleId) ? titleId : status === 'none' ? 'today-no-more' : 'today-gone');
+    focusById(document.getElementById(titleId) ? titleId : status === 'none' ? 'today-no-more' : 'today-gone', focusFrom.current);
   }, [shownKey, shown.kind, status, page]);
   // An idea that disappears in a refresh takes focus with it only when focus was on it.
   useEffect(() => {
