@@ -361,7 +361,7 @@ function notes(suggestion: Suggestion): MessageKey[] {
   const cold = needs.some(entry => entry.need === 'cold');
   for (const { need, status } of needs) {
     if (status === 'none') add(cold ? 'today.addCoat' : 'today.addCover');
-    else if (status === 'unknown') { if (need !== 'rain') add('today.checkWind'); }
+    else if (status === 'unknown') continue;
     else if (status === 'lacking' && need !== 'cold') add(need === 'rain' ? 'today.noRain' : 'today.noWind');
   }
   // An unknown need stays unsaid for rain, so it must not turn into a claim that nothing suits the weather.

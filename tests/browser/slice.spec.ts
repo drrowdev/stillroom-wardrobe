@@ -1391,7 +1391,8 @@ test('concise empty wardrobe and bounded synthetic evidence', async ({ page }, t
     await expect(page.locator('.empty-copy > p:not(.privacy-note):not(.empty-hint), .page-heading .eyebrow, .page-heading .muted')).toHaveCount(0);
     await expect(page.locator('.empty-copy > p.empty-hint')).toHaveText(messages['wardrobe.emptyHint'][language]);
     await expect(page.getByRole('button', { name: messages['wardrobe.add'][language], exact: true })).toHaveCount(1);
-    await expect(page.getByText(messages['wardrobe.privateNote'][language], { exact: true })).toBeVisible();
+    await expect(page.locator('.empty-copy .privacy-note')).toHaveCount(0);
+    await expect(page.locator('body')).not.toContainText(/Visible only to your account in the app|Näkyy sovelluksessa vain omalle tilillesi|Syns bara för ditt konto i appen/);
     expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
     expect(api.profiles[owners.b]).toEqual(foreign);
     expect(api.profiles[owners.a]?.ui_language).toBe(language);

@@ -393,6 +393,12 @@ test('concise entry copy, accessible recovery and bounded synthetic entry eviden
       if (surface === 'recovery') await confirm(page, language);
       await expect(page.getByRole('heading', { name: translate(language, surface === 'sign-in' ? 'auth.signIn' : 'recovery.passwordTitle'), exact: true })).toBeVisible();
       await expect(page.locator('.intro h2, .intro-body, .intro-caption')).toHaveCount(0);
+      if (surface === 'sign-in') {
+        await expect(page.locator('.entry-footer')).toHaveCount(0);
+        await expect(page.locator('body')).not.toContainText(/Invited accounts only|Vain kutsutuille tileille|Endast inbjudna konton/);
+        await expect(page.getByText(translate(language, 'auth.passwordHelp'), { exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: translate(language, 'recovery.forgot'), exact: true })).toBeVisible();
+      }
       if (width === 320) await expect(page.locator('.intro')).toBeHidden();
       expect(api.items).toHaveLength(0); expect(api.images).toHaveLength(0); expect(api.files.size).toBe(0);
       expect(api.profiles).toEqual(profiles);

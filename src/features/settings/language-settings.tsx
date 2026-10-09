@@ -26,7 +26,6 @@ export function LanguageSettings({ controller, scope, profile, language, busy, o
   }
   return <div className="settings-language">
     <LanguageChooser language={language} context={scope} onChange={(next) => { void save(next); }} disabled={busy || !online} t={t} />
-    <p className="muted fine">{t('settings.languageHint')}</p>
     {!online && <p role="status">{t('common.offline')}</p>}
     {error && <p ref={summary} tabIndex={-1} className="notice notice-error" role="alert">{t(error)}</p>}
     {error === 'error.conflict' && <button className="text-button" disabled={busy || !online} onClick={() => {

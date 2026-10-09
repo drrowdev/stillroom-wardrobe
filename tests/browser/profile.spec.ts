@@ -38,6 +38,8 @@ async function turnOnAi(page: Page, language: Language = 'en') {
 // The removed aiC.reviewNotice copy, kept here only to prove it no longer appears.
 const removedReviewNotice: Record<Language, string> = { en: 'Review every suggested detail before saving.',
   fi: 'Tarkista kaikki ehdotetut tiedot ennen tallennusta.', sv: 'Granska alla föreslagna uppgifter innan du sparar.' };
+// The removed settings.languageHint copy in every language, kept as text only to prove it no longer appears.
+const languageHint = /Language saves automatically|Kieli tallentuu automaattisesti|Språket sparas automatiskt/;
 const profileUrl = 'http://127.0.0.1:54321/rest/v1/profiles*';
 // Reloading while routed fixture requests are still open has coincided with "WebKit encountered an internal error"
 // on reload in CI (provisional; playwright#37766 is a similar earlier report). A profile Save sends exactly one PATCH
@@ -545,6 +547,7 @@ test('a saved time zone and currency missing from the browser list stay selected
 });
 test('changing language keeps the selected time zone and currency and relabels them', async ({ page }) => {
   const api = await setup(page);
+  await expect(page.locator('body')).not.toContainText(languageHint);
   await page.getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
   await expect(page.locator('#profile-timezone')).toHaveValue('Europe/Helsinki');
@@ -553,6 +556,12 @@ test('changing language keeps the selected time zone and currency and relabels t
   expect(await selectedText(page, '#profile-currency')).toBe(await currencyLabel(page, 'fi-FI', 'EUR'));
   expect(api.profiles[owners.a]).toMatchObject({ ui_language: 'fi', timezone: 'Europe/Helsinki', currency: 'EUR' });
   await expect(page.getByRole('button', { name: messages['settings.saveProfile'].fi, exact: true })).toBeDisabled();
+  await expect(page.locator('body')).not.toContainText(languageHint);
+  await page.getByRole('button', { name: messages['language.sv'].sv, exact: true }).click();
+  await expect(page.locator('html')).toHaveAttribute('lang', 'sv');
+  await expect(page.locator('body')).not.toContainText(languageHint);
+  await expect(page.locator('#profile-timezone')).toHaveValue('Europe/Helsinki');
+  expect(api.profiles[owners.a]).toMatchObject({ ui_language: 'sv', timezone: 'Europe/Helsinki', currency: 'EUR' });
 });
 test('without Intl value lists both fields fall back to validated text input', async ({ page }) => {
   await page.addInitScript(() => { delete (Intl as { supportedValuesOf?: unknown }).supportedValuesOf; });
@@ -758,6 +767,8 @@ test('synthetic settings visual evidence retains functional assertions in every 
         && !credentialLike.test(document.body.innerText) && !credentialLike.test(values);
     }, { origin, language: capture.language }), 'Synthetic settings capture guard').toBe(true);
     await expect(page.getByRole('button', { name: messages['settings.saveProfile'][capture.language], exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: messages[`language.${capture.language}`][capture.language], exact: true })).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(languageHint);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
     if (testInfo.project.name === 'chromium') {

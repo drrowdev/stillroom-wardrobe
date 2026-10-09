@@ -124,7 +124,7 @@ export function WardrobeScreen({ browse, images, bulk, onAdd, onRefresh, online,
       ) : !error ? (
         <div className="empty-wardrobe">
           <div className="empty-art"><WardrobeIllustration /></div>
-          <div className="empty-copy"><h2>{t('wardrobe.empty')}</h2><p className="empty-hint">{t('wardrobe.emptyHint')}</p><button type="button" className="button button-primary" onClick={onAdd}><Icon name="plus" />{t('wardrobe.add')}</button><p className="privacy-note"><Icon name="lock" />{t('wardrobe.privateNote')}</p></div>
+          <div className="empty-copy"><h2>{t('wardrobe.empty')}</h2><p className="empty-hint">{t('wardrobe.emptyHint')}</p><button type="button" className="button button-primary" onClick={onAdd}><Icon name="plus" />{t('wardrobe.add')}</button></div>
         </div>
       ) : null}
     </section>
