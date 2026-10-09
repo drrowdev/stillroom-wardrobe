@@ -286,7 +286,6 @@
   "today.reasonWind": {"en":"Wind-ready","fi":"Sopii tuuleen","sv":"Klarar blåst"},
   "today.addCoat": {"en":"You have no outerwear for the cold yet.","fi":"Sinulla ei vielä ole ulkovaatteita kylmään.","sv":"Du har inga ytterkläder för kylan än."},
   "today.addCover": {"en":"You have no outerwear or layers for this weather yet.","fi":"Sinulla ei vielä ole ulkovaatteita tai välikerroksia tähän säähän.","sv":"Du har inga ytterkläder eller mellanlager för det här vädret än."},
-  "today.checkRain": {"en":"Rain protection isn't recorded for your outerwear and layers.","fi":"Ulkovaatteidesi ja välikerrostesi sateenkestävyyttä ei ole merkitty.","sv":"Regnskydd är inte angivet för dina ytterkläder och mellanlager."},
   "today.checkWind": {"en":"Wind protection isn't recorded for your outerwear and layers.","fi":"Ulkovaatteidesi ja välikerrostesi tuulenpitävyyttä ei ole merkitty.","sv":"Vindskydd är inte angivet för dina ytterkläder och mellanlager."},
   "today.noRain": {"en":"None of your outerwear or layers is marked as rainproof.","fi":"Yhtäkään ulkovaatettasi tai välikerrostasi ei ole merkitty sateenkestäväksi.","sv":"Inga av dina ytterkläder eller mellanlager är markerade som regntäta."},
   "today.noWind": {"en":"None of your outerwear or layers is marked as windproof.","fi":"Yhtäkään ulkovaatettasi tai välikerrostasi ei ole merkitty tuulenpitäväksi.","sv":"Inga av dina ytterkläder eller mellanlager är markerade som vindtäta."},

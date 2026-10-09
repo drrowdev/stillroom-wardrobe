@@ -361,10 +361,11 @@ function notes(suggestion: Suggestion): MessageKey[] {
   const cold = needs.some(entry => entry.need === 'cold');
   for (const { need, status } of needs) {
     if (status === 'none') add(cold ? 'today.addCoat' : 'today.addCover');
-    else if (status === 'unknown') add(need === 'rain' ? 'today.checkRain' : 'today.checkWind');
+    else if (status === 'unknown') { if (need !== 'rain') add('today.checkWind'); }
     else if (status === 'lacking' && need !== 'cold') add(need === 'rain' ? 'today.noRain' : 'today.noWind');
   }
-  if (needs.some(entry => entry.status === 'apart' || entry.status === 'lacking') && !found.length) add('today.noCover');
+  // An unknown need stays unsaid for rain, so it must not turn into a claim that nothing suits the weather.
+  if (needs.some(entry => entry.status === 'apart' || entry.status === 'lacking') && !needs.some(entry => entry.status === 'unknown') && !found.length) add('today.noCover');
   if (suggestion.missingDetails.includes('coverage')) add('today.checkLength');
   return found;
 }
