@@ -202,7 +202,7 @@ describe('templates, partial and empty results', () => {
     const { top, bottom, shoes } = basic();
     const result = recommend({ items: [top, bottom, shoes], context });
     expect(result.suggestions).toHaveLength(1);
-    expect(result.suggestions[0]).toMatchObject({ completeness: 'complete', missingSlots: [], rulesVersion: 'rules-v2' });
+    expect(result.suggestions[0]).toMatchObject({ completeness: 'complete', missingSlots: [], rulesVersion: 'rules-v3' });
   });
 
   it('fills a one-piece template without a separate top or bottom', () => {
@@ -439,5 +439,233 @@ describe('ranking, diversity and paging', () => {
     const high = item('top', { id: 'ffffffff-0000-4000-8000-000000000001' }), low = item('top', { id: '00000000-ffff-4000-8000-000000000001' });
     const result = recommend({ items: [high, low, bottom, shoes], context });
     expect(result.suggestions[0]!.itemIds[0]).toBe(low.id);
+  });
+});
+
+describe('variety across ideas', () => {
+  type Walk = { cores: string[][]; pages: string[][]; status: string; expansions: number[] };
+  const byId = (items: readonly EngineItem[]) => new Map(items.map(entry => [entry.id, entry]));
+  // Pages through Show another exactly as the Today hook does: the cores of every earlier page are skipped.
+  function walk(items: EngineItem[], pages: number, extra: Partial<Parameters<typeof recommend>[0]> = {}): Walk {
+    const shown = new Set<string>(), result: Walk = { cores: [], pages: [], status: 'ideas', expansions: [] };
+    for (let page = 0; page < pages; page++) {
+      const next = recommend({ items, context, ...extra, skip: shown });
+      result.status = next.status; result.expansions.push(next.expansions);
+      if (next.status === 'none') break;
+      result.pages.push(next.suggestions.map(s => s.coreKey));
+      for (const s of next.suggestions) { shown.add(s.coreKey); result.cores.push(s.coreKey.split('|')); }
+    }
+    return result;
+  }
+  const count = (cores: readonly string[][], ids: readonly string[]) => ids.map(id => cores.filter(core => core.includes(id)).length);
+  const spread = (counts: readonly number[]) => Math.max(...counts) - Math.min(...counts);
+  // Highest and lowest score over every eligible three-piece core, to state the fit precondition of a fixture.
+  function scoreRange(items: EngineItem[]) {
+    const pick = (category: Category) => items.filter(entry => entry.category === category && eligible(entry, context));
+    const scores = pick('top').flatMap(t => pick('bottom').flatMap(b => pick('footwear').map(f => combineScore(componentsFor([t, b, f], context, new Set())))));
+    return { best: Math.max(...scores), worst: Math.min(...scores) };
+  }
+  const summer = { seasons: ['summer'] };
+  function owner6x2x4(favourite = true) {
+    const tops = Array.from({ length: 6 }, () => item('top', { colours: ['white'], ...summer }));
+    const bottoms = [item('bottom', { colours: ['navy'], favourite, ...summer }), item('bottom', { colours: ['navy'], ...summer })];
+    const shoes = Array.from({ length: 4 }, () => item('footwear', summer));
+    return { tops, bottoms, shoes, items: [...tops, ...bottoms, ...shoes] };
+  }
+
+  it('does not let a slightly favoured bottom take all of the first six ideas', () => {
+    const { tops, bottoms, shoes, items } = owner6x2x4();
+    const range = scoreRange(items);
+    expect(range.best - range.worst).toBeLessThanOrEqual(limits.fitBand);
+    const first = walk(items, 2);
+    expect(new Set(first.cores.map(core => core.join('|'))).size).toBe(first.cores.length);
+    expect(first.cores).toHaveLength(2 * limits.suggestions);
+    const [favourite, plain] = count(first.cores, bottoms.map(b => b.id));
+    expect(favourite).toBeGreaterThan(0); expect(plain).toBeGreaterThan(0);
+    expect(Math.abs(favourite! - plain!)).toBeLessThanOrEqual(2);
+    // Tops and shoes rotate as well, and no garment is shown much more than its alternatives.
+    expect(spread(count(first.cores, tops.map(t => t.id)))).toBeLessThanOrEqual(1);
+    expect(spread(count(first.cores, shoes.map(s => s.id)))).toBeLessThanOrEqual(1);
+  });
+
+  it('keeps the strongest outfit first and every score equal to its recorded components', () => {
+    const { bottoms, items } = owner6x2x4();
+    const lookup = byId(items);
+    const first = recommend({ items, context });
+    expect(first.suggestions[0]!.itemIds).toContain(bottoms[0]!.id);
+    expect(first.suggestions[0]!.score).toBe(scoreRange(items).best);
+    let shown = new Set<string>();
+    for (let page = 0; page < 4; page++) {
+      const result = recommend({ items, context, skip: shown });
+      for (const s of result.suggestions) {
+        expect(s.score).toBe(combineScore(componentsFor(s.itemIds.map(id => lookup.get(id)!), context, new Set())));
+        shown = new Set([...shown, s.coreKey]);
+      }
+    }
+  });
+
+  it('prefers a less shown bottom among outfits of similar fit when colours and scores differ', () => {
+    const colours = ['white', 'pink', 'green', 'brown', 'red', 'grey'];
+    const tops = colours.map(colour => item('top', { colours: [colour], ...summer }));
+    const bottoms = [item('bottom', { colours: ['navy'], favourite: true, ...summer }), item('bottom', { colours: ['red'], ...summer })];
+    const shoes = ['black', 'brown', 'white', 'navy'].map(colour => item('footwear', { colours: [colour], ...summer }));
+    const items = [...tops, ...bottoms, ...shoes];
+    const range = scoreRange(items);
+    const scoreOf = (t: EngineItem, b: EngineItem, f: EngineItem) => combineScore(componentsFor([t, b, f], context, new Set()));
+    // Colours move scores around, but the plain bottom still has outfits within the fit band of the best one.
+    const plainBest = Math.max(...tops.flatMap(t => shoes.map(f => scoreOf(t, bottoms[1]!, f))));
+    expect(range.best - plainBest).toBeGreaterThan(0);
+    expect(range.best - plainBest).toBeLessThanOrEqual(limits.fitBand);
+    const first = walk(items, 2);
+    expect(first.cores).toHaveLength(2 * limits.suggestions);
+    const [favourite, plain] = count(first.cores, bottoms.map(b => b.id));
+    expect(favourite).toBeGreaterThan(0); expect(plain).toBeGreaterThan(0);
+    expect(recommend({ items, context }).suggestions[0]!.score).toBe(range.best);
+  });
+
+  it('does not promote a bottom whose fit is clearly worse than the alternatives', () => {
+    const { bottoms, items } = owner6x2x4();
+    // In this fixture one out-of-season core piece costs more than the fit band (all five components are active).
+    const winter = item('bottom', { colours: ['navy'], seasons: ['winter'] });
+    const all = [...items.filter(entry => entry !== bottoms[1]), winter];
+    const first = walk(all, 2);
+    expect(count(first.cores, [winter.id])).toEqual([0]);
+    // It is still reachable: paging ends only after every combination was shown once.
+    const full = walk(all, 40);
+    expect(full.status).toBe('none');
+    expect(full.cores).toHaveLength(6 * 2 * 4);
+    expect(new Set(full.cores.map(core => core.join('|'))).size).toBe(6 * 2 * 4);
+  });
+
+  it('keeps other bottoms when a crowded catalogue would fill the beam with the favourite bottom', () => {
+    const tops = Array.from({ length: 8 }, () => item('top', { colours: ['white'], ...summer }));
+    const bottoms = Array.from({ length: 8 }, (_, index) => item('bottom', { colours: ['navy'], favourite: index === 0, ...summer }));
+    const shoes = Array.from({ length: 8 }, () => item('footwear', summer));
+    const items = [...tops, ...bottoms, ...shoes];
+    const first = walk(items, 3);
+    expect(first.pages[0]!.map(core => core).length).toBe(limits.suggestions);
+    const perPage = first.pages.map(page => new Set(page.flatMap(key => key.split('|').filter(id => bottoms.some(b => b.id === id)))).size);
+    expect(perPage[0]).toBeGreaterThan(1);
+    expect(spread(count(first.cores, bottoms.map(b => b.id)))).toBeLessThanOrEqual(1);
+    expect(spread(count(first.cores, tops.map(t => t.id)))).toBeLessThanOrEqual(1);
+    expect(spread(count(first.cores, shoes.map(s => s.id)))).toBeLessThanOrEqual(1);
+    const full = walk(items, 400);
+    expect(full.status).toBe('none');
+    expect(new Set(full.cores.map(core => core.join('|'))).size).toBe(8 * 8 * 8);
+    expect(full.cores).toHaveLength(8 * 8 * 8);
+  });
+
+  it('rotates one-piece outfits in with tops and bottoms when they fit about as well', () => {
+    const tops = Array.from({ length: 3 }, () => item('top', { colours: ['white'], ...summer }));
+    const bottoms = Array.from({ length: 2 }, () => item('bottom', { colours: ['navy'], ...summer }));
+    const dresses = Array.from({ length: 2 }, () => item('one_piece', { colours: ['navy'], ...summer }));
+    const shoes = Array.from({ length: 3 }, () => item('footwear', summer));
+    const items = [...tops, ...bottoms, ...dresses, ...shoes];
+    const first = walk(items, 2);
+    expect(count(first.cores, dresses.map(d => d.id)).some(n => n > 0)).toBe(true);
+    expect(count(first.cores, tops.map(t => t.id)).some(n => n > 0)).toBe(true);
+    const full = walk(items, 40);
+    expect(full.status).toBe('none');
+    expect(new Set(full.cores.map(core => core.join('|'))).size).toBe(3 * 2 * 3 + 2 * 3);
+  });
+
+  it('reuses what remains with one eligible bottom, one outfit or excluded pairs, and never repeats a core', () => {
+    const { tops, bottoms, shoes, items } = owner6x2x4();
+    const onlyOne = items.filter(entry => entry !== bottoms[1]);
+    const single = walk(onlyOne, 40);
+    expect(single.status).toBe('none');
+    expect(single.cores).toHaveLength(6 * 4);
+    expect(new Set(single.cores.map(core => core.join('|'))).size).toBe(6 * 4);
+    const outfit = basic();
+    const one = walk([outfit.top, outfit.bottom, outfit.shoes], 5);
+    expect(one.cores).toHaveLength(1); expect(one.status).toBe('none');
+    const apart = tops.map(t => [t.id, bottoms[0]!.id] as const);
+    const limited = walk(items, 40, { excludedPairs: apart });
+    expect(limited.cores.every(core => !core.includes(bottoms[0]!.id))).toBe(true);
+    expect(limited.cores).toHaveLength(6 * 4);
+    expect(shoes.length).toBe(4);
+  });
+
+  it('never uses unavailable, foreign, trashed or disliked pieces to add variety', () => {
+    const { bottoms, items } = owner6x2x4();
+    const blocked = [
+      item('bottom', { ownerId: other, ...summer }), item('bottom', { availability: 'laundry', ...summer }),
+      item('bottom', { excludeSuggestions: true, ...summer }), item('bottom', { deleted: true, ...summer }),
+      item('bottom', { lifecycle: 'trash', ...summer }),
+    ];
+    const all = [...items, ...blocked];
+    const result = walk(all, 40);
+    for (const core of result.cores) expect(core.some(id => blocked.some(b => b.id === id))).toBe(false);
+    expect(result.cores).toHaveLength(6 * 2 * 4);
+    const dislikes = items.filter(entry => entry.category === 'top').flatMap(top => items.filter(entry => entry.category === 'footwear')
+      .map(shoe => ({ itemIds: [top.id, bottoms[1]!.id, shoe.id], vote: -1 as const })));
+    const disliked = walk(items, 40, { feedback: dislikes });
+    expect(disliked.cores.every(core => !core.includes(bottoms[1]!.id))).toBe(true);
+  });
+
+  it('is deterministic under reversed input and starts again from the same first page', () => {
+    const { items } = owner6x2x4();
+    const forward = walk(items, 6), reversed = walk([...items].reverse(), 6);
+    expect(reversed.cores).toEqual(forward.cores);
+    expect(recommend({ items, context }).suggestions.map(s => s.key)).toEqual(recommend({ items: [...items].reverse(), context }).suggestions.map(s => s.key));
+    expect(forward.pages[0]).toEqual(walk(items, 1).pages[0]);
+  });
+
+  it('keeps hard weather coverage rules while varying bottoms', () => {
+    const cold: EngineContext = { ...context, setting: 'outdoors', temperatureC: 3 };
+    const long = [0, 1].map(() => item('bottom', { colours: ['navy'], lowerCoverage: 2, ...summer }));
+    const short = item('bottom', { colours: ['navy'], lowerCoverage: 0, ...summer });
+    const items = [...Array.from({ length: 3 }, () => item('top', { colours: ['white'], ...summer })), ...long, short,
+      ...Array.from({ length: 3 }, () => item('footwear', summer)), item('outerwear', summer)];
+    const shown = new Set<string>(), seen: string[] = [];
+    for (let page = 0; page < 3; page++) {
+      const result = recommend({ items, context: cold, skip: shown });
+      for (const s of result.suggestions) { shown.add(s.coreKey); seen.push(...s.itemIds); }
+    }
+    expect(seen).not.toContain(short.id);
+    expect(long.every(b => seen.includes(b.id))).toBe(true);
+  });
+
+  it('varies bottoms for an unfinished wardrobe too, one idea at a time', () => {
+    const tops = Array.from({ length: 4 }, () => item('top', { colours: ['white'], ...summer }));
+    const bottoms = [item('bottom', { colours: ['navy'], favourite: true, ...summer }), item('bottom', { colours: ['navy'], ...summer })];
+    const first = walk([...tops, ...bottoms], 4);
+    expect(first.cores.length).toBeGreaterThan(1);
+    expect(count(first.cores, bottoms.map(b => b.id)).every(n => n > 0)).toBe(true);
+  });
+
+  describe('exhaustion counts only shown cores this search can still reach', () => {
+    it('offers a replacement pair of shoes after the shown ones are no longer ready', () => {
+      const { top, bottom, shoes } = basic();
+      const shown = new Set([combinationKey([top.id, bottom.id, shoes.id])]);
+      const replacement = item('footwear');
+      const result = recommend({ items: [top, bottom, { ...shoes, availability: 'laundry' }, replacement], context, skip: shown });
+      expect(result.status).toBe('ideas');
+      expect(result.suggestions[0]!.itemIds.slice().sort()).toEqual([top.id, bottom.id, replacement.id].sort());
+    });
+
+    it('still offers the top and bottom as a start when the shown shoes are gone', () => {
+      const { top, bottom, shoes } = basic();
+      const shown = new Set([combinationKey([top.id, bottom.id, shoes.id])]);
+      const result = recommend({ items: [top, bottom], context, skip: shown });
+      expect(result.status).toBe('partial');
+      expect(result.suggestions[0]!.itemIds.slice().sort()).toEqual([top.id, bottom.id].sort());
+    });
+
+    it('is not held back by shown cores of another template or with garments outside the catalog', () => {
+      const { top, bottom, shoes } = basic();
+      const dress = item('one_piece'), gone = '33333333-3333-4333-8333-333333333333';
+      const shown = new Set([combinationKey([dress.id, shoes.id]), combinationKey([gone, bottom.id, shoes.id]), combinationKey([top.id, gone, shoes.id])]);
+      const result = recommend({ items: [top, bottom, shoes], context, skip: shown });
+      expect(result.status).toBe('ideas');
+      expect(result.suggestions[0]!.itemIds.slice().sort()).toEqual([top.id, bottom.id, shoes.id].sort());
+    });
+
+    it('still ends with none once every core that is available has been shown', () => {
+      const { top, bottom, shoes } = basic();
+      const replacement = item('footwear');
+      const shown = new Set([combinationKey([top.id, bottom.id, shoes.id]), combinationKey([top.id, bottom.id, replacement.id])]);
+      expect(recommend({ items: [top, bottom, shoes, replacement], context, skip: shown }).status).toBe('none');
+    });
   });
 });

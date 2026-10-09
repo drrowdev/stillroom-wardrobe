@@ -77,7 +77,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
   const busy = ideas.settling || wear.state.kind === 'inFlight';
   const browseLocked = ideas.settling || wear.state.kind === 'inFlight';
   function nextPage() {
-    ideas.more();
+    ideas.more([...settled.seen, settled.current]);
     setPage(page + 1);
     setFeatured(featuredStart(transitionToken(page + 1, occasion, season, appliedWeather), featured.number + 1));
   }

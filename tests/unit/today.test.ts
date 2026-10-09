@@ -4,7 +4,7 @@ import { avoidedRows, classifyVoteError, parseFeedbackRows, parseRuleRows, parse
 import { navFamilyFor } from '../../src/domain/outfits';
 import type { WardrobeItem } from '../../src/domain/wardrobe';
 import type { Suggestion } from '../../src/domain/recommendations';
-import { defaultSeason, localDate, mergePairs, mergeVotes, rankingPairs, rankingVotes, suggestionPool, visibleIdeas } from '../../src/features/today/use-suggestions';
+import { defaultSeason, localDate, mergePairs, mergeVotes, rankingPairs, rankingVotes, skipAfterPaging, suggestionPool, visibleIdeas } from '../../src/features/today/use-suggestions';
 
 const owner = '00000000-0000-4000-8000-00000000000a';
 const other = '00000000-0000-4000-8000-00000000000b';
@@ -206,5 +206,28 @@ describe('pair ranking on a page', () => {
     expect(keys(['a|b'], [], [])).toEqual(['three', 'four']);
     expect(keys(['a|b'], ['a|b'], [])).toEqual(['one', 'two', 'three', 'four']);
     expect(keys([], [], [])).toEqual(['one', 'two', 'three', 'four']);
+  });
+});
+
+describe('skipAfterPaging', () => {
+  const idea = (key: string, coreKey: string) => ({ key, coreKey }) as unknown as Suggestion;
+  const known = new Map([['a1', 'core-a'], ['b1', 'core-b'], ['c1', 'core-c'], ['d1', 'core-d']]);
+
+  it('skips the page, the earlier skips and an idea shown earlier that a refresh moved off the page', () => {
+    const page = [idea('c1', 'core-c'), idea('d1', 'core-d')];
+    expect([...skipAfterPaging(new Set(['old']), page, ['a1', 'c1'], known)].sort()).toEqual(['core-a', 'core-c', 'core-d', 'old']);
+  });
+
+  it('keeps an idea that was only displaced from the page, never shown, reachable', () => {
+    const skipped = skipAfterPaging(new Set(), [idea('c1', 'core-c')], ['a1'], known);
+    expect(skipped.has('core-b')).toBe(false);
+    expect(skipped.has('core-a')).toBe(true);
+  });
+
+  it('ignores a shown key it never received, an empty current idea and returns a fresh set', () => {
+    const before = new Set(['old']);
+    const skipped = skipAfterPaging(before, [], ['gone', null], known);
+    expect([...skipped]).toEqual(['old']);
+    expect(skipped).not.toBe(before);
   });
 });

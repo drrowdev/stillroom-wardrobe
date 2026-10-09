@@ -79,6 +79,32 @@ describe('recommendation properties over seeded catalogs', () => {
     }
   }, 30_000);
 
+  it('pages through ideas without repeating a core, within the budget, and the same on every run', () => {
+    for (let seed = 1; seed <= 8; seed++) {
+      const items = catalog(seed * 11, 60 + seed * 20);
+      const byId = new Map(items.map(item => [item.id, item]));
+      for (const context of contexts.filter((_, index) => index % 5 === 0)) {
+        let skip = new Set<string>();
+        const seen = new Set<string>();
+        for (let page = 0; page < 12; page++) {
+          const result = recommend({ items, context, skip });
+          expect(recommend({ items: [...items].reverse(), context, skip })).toEqual(result);
+          expect(result.expansions).toBeLessThanOrEqual(limits.passBudget * Math.max(result.passes, 1));
+          if (result.status !== 'ideas') break;
+          for (const suggestion of result.suggestions) {
+            expect(seen.has(suggestion.coreKey)).toBe(false);
+            seen.add(suggestion.coreKey);
+            for (const id of suggestion.itemIds) {
+              const piece = byId.get(id)!;
+              expect(piece.ownerId === owner && piece.availability === 'ready' && piece.lifecycle === 'active' && !piece.deleted && !piece.excludeSuggestions).toBe(true);
+            }
+          }
+          skip = new Set([...skip, ...result.suggestions.map(suggestion => suggestion.coreKey)]);
+        }
+      }
+    }
+  }, 60_000);
+
   it('adding 500 foreign records leaves owned results identical', () => {
     for (let seed = 1; seed <= 5; seed++) {
       const items = catalog(seed, 60);
