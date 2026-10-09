@@ -1186,6 +1186,102 @@ test('Undo for a pair is unavailable offline and does not move focus while Today
   await expect(undoPair(page)).toHaveCount(0);
 });
 
+// The focus move after a confirmed pair is queued for the next frame. If Occasion takes focus before that frame runs, the move must not take it back.
+test('A pending move to the next idea does not take focus from Occasion after a pair is confirmed', async ({ page }) => {
+  const { api } = await start(page, 'en', api => { seedDresses(api); }, { clothes: false });
+  // A held callback counts as a focus request when the call that queued it came from the Today screen's source (its only frame callbacks are focus moves).
+  const focusRequests = () => page.evaluate(() => (window as unknown as { frameHold?: FrameHold }).frameHold?.focusRequests() ?? -1);
+  const release = () => page.evaluate(() => (window as unknown as { frameHold?: FrameHold }).frameHold?.release());
+  const occasion = page.getByRole('combobox', { name: text('outfits.occasion'), exact: true });
+  try {
+    await holdFrames(page, 'today-screen');
+    const before = await focusRequests();
+    expect(before).toBeGreaterThanOrEqual(0);
+    await fromMenu(page, 'today.dontPair');
+    await expect(undoPair(page)).toBeEnabled();
+    // The pair has been confirmed and the move to the next idea has queued its focus, which is waiting for a frame while focus is lost.
+    await expect.poll(focusRequests).toBeGreaterThan(before);
+    expect(await page.evaluate(() => document.activeElement?.matches('body, main') ?? false)).toBe(true);
+    expect(api.combinationRules).toHaveLength(1);
+    await occasion.focus();
+    await expect(occasion).toBeFocused();
+    await release();
+    // Two frames: the one queued before, and any it queues in turn.
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    await expect(occasion).toBeFocused();
+  } finally {
+    await release();
+    await page.waitForFunction(() => !(window as unknown as { frameHold?: FrameHold }).frameHold);
+  }
+});
+
+// The page's animation-frame functions are replaced until every held callback has run or been cancelled, then restored. Held callbacks get ids of their own
+// (from 1,000,000) that stay valid for cancelAnimationFrame after release: the page's caller keeps its id, which maps to the native one until the callback has run.
+type FrameHold = { focusRequests: () => number; release: () => void };
+async function holdFrames(page: Page, source: string) {
+  await page.evaluate(source => {
+    const nativeRequest = window.requestAnimationFrame;
+    const nativeCancel = window.cancelAnimationFrame;
+    const held = new Map<number, { callback: FrameRequestCallback; focus: boolean }>();
+    const queued = new Map<number, number>();
+    const limit = 500;
+    const first = 1_000_000;
+    let next = first;
+    let releasing = false;
+    const restore = () => {
+      if (!releasing || held.size > 0 || queued.size > 0) return;
+      window.requestAnimationFrame = nativeRequest;
+      window.cancelAnimationFrame = nativeCancel;
+      delete (window as unknown as { frameHold?: FrameHold }).frameHold;
+    };
+    window.requestAnimationFrame = callback => {
+      if (releasing || held.size >= limit) return nativeRequest.call(window, callback);
+      const id = next++;
+      held.set(id, { callback, focus: new Error().stack?.includes(source) === true });
+      return id;
+    };
+    window.cancelAnimationFrame = id => {
+      if (held.delete(id)) return;
+      const native = queued.get(id);
+      if (native !== undefined) { queued.delete(id); nativeCancel.call(window, native); restore(); return; }
+      // An id from this hold that has already run or been cancelled is not a native id.
+      if (id < first) nativeCancel.call(window, id);
+    };
+    (window as unknown as { frameHold?: FrameHold }).frameHold = {
+      focusRequests: () => [...held.values()].filter(entry => entry.focus).length,
+      release: () => {
+        if (releasing) return;
+        releasing = true;
+        for (const [id, { callback }] of [...held]) {
+          held.delete(id);
+          queued.set(id, nativeRequest.call(window, time => { queued.delete(id); try { callback(time); } finally { restore(); } }));
+        }
+        restore();
+      },
+    };
+  }, source);
+}
+
+test('Held animation frames honour cancellation before and after release, run once, and restore the page functions', async ({ page }) => {
+  await page.evaluate(() => Object.assign(window, { frameOriginals: [window.requestAnimationFrame, window.cancelAnimationFrame] }));
+  await holdFrames(page, 'none');
+  const outcome = await page.evaluate(async () => {
+    const ran: string[] = [];
+    const before = requestAnimationFrame(() => ran.push('cancelled before release'));
+    const after = requestAnimationFrame(() => ran.push('cancelled after release'));
+    requestAnimationFrame(() => ran.push('kept'));
+    cancelAnimationFrame(before);
+    (window as unknown as { frameHold: FrameHold }).frameHold.release();
+    // Released and queued natively, not yet run: the caller's original id must still cancel it.
+    cancelAnimationFrame(after);
+    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const originals = (window as unknown as { frameOriginals: unknown[] }).frameOriginals;
+    return { ran, restored: window.requestAnimationFrame === originals[0] && window.cancelAnimationFrame === originals[1],
+      control: 'frameHold' in window };
+  });
+  expect(outcome).toEqual({ ran: ['kept'], restored: true, control: false });
+});
+
 // Holds a write to the pairs table (the pair choice, or its Undo) until released.
 async function holdPairWrite(page: Page, method: 'POST' | 'DELETE') {
   let release!: () => void;
