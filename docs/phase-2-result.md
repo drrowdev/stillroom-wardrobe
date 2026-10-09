@@ -8385,3 +8385,67 @@ Local checks and CI-only checks are listed in the pull request. Database, integr
 generated-type checks need the local Supabase stack and run in CI; none ran on this machine. Two synthetic captures
 (Settings notice, EN desktop and FI 320x568) are written once under ignored `test-results/save1-visual/`; the
 existing `*-visual` upload carries them, and the coordinator's exact-head visual review is pending.
+
+## BG-SETUP1 replacement-photo fixture lifecycle - local candidate (9 October 2026)
+
+Test fixture only (Tier B), cites ADR24, BG1 and I29 (the replacement-photo tests exercise the saved-photo background
+flow; explicit Save to library is untouched). Approved by the coordinator under
+[#84 c6080959161](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6080959161). Base/HEAD
+`77c963fb48b1e6daed6cc298f7b5347824141ced`, branch `drrowdev-bg-setup1-replacement-fixture`, local
+Claude Sonnet 5.5/high writer. Published as one draft PR; exact-head CI, Apple results, coordinator visual review and acceptance are pending. The independent Sol/high review (retained id
+5c01b197-0638-4bba-8156-98460a422094) returned FIX with one MEDIUM: the first-read observer had filtered
+`response.ok()`, so an initial 503 followed by an automatic retry could pass. The repair below was approved for the same
+scope. Only the repair delta was reviewed separately, by a new read-only Sol/high review (id
+da9d63d7-15f6-4c2f-910c-2449dd691ce9), which returned PASS; review 5c01b197 gave no verdict on it. Neither review ran
+the tests, CI or any live check.
+
+Original failure, preserved: frozen-main CI 37926755601 attempt 1 on `77c963fb` failed strict new-flake gating at
+WebKit photo shard 1 job 113807469482, `background-removal.spec.ts:626` (`replace: pressing "Use original
+background" twice ...`), at `openFlow` after the setup `page.reload()`. The existing bounded diagnostic showed
+the first auth, profile, items and images reads succeeded, the seeded fixture held 1 item and 1 image, the reload
+started at 845 ms and failed at 20373 ms with `page.reload: WebKit encountered an internal error; retried once`
+(from `webkit-reload.ts`), and the sign-in form was visible at 29743 ms with no post-reload auth, profile or items
+reads. The retried whole test passed; that retry is not a waiver. The cause of the eventual sign-in state is
+**unestablished**: the collector's `locked` flag uses the generic `.entry-card > .stack` selector and is not a
+controller phase. This change does not claim to fix the underlying browser or session behaviour.
+
+Change. `aiFixture` takes an optional trailing `prepare` hook that runs after the mock backend and AI routes exist
+and before the first navigation, ordinary UI sign-in and wardrobe read; without it nothing changes. The replacement
+setup in `background-removal.spec.ts` (the `replace` branch of `openFlow` and the standalone `Replace photo:` case)
+now prepares the synthetic saved garment through it, so the app's own first wardrobe read lists it and setup no
+longer reloads the document. The `add` flow and every other `aiFixture` caller are unchanged. All crop,
+background, analysis-count, no-write, unchanged stored image and discard assertions, the collector's 40-event,
+10-snapshot and 2 s teardown limits and its privacy-safe fields are kept. Diagnostic stages are now `wardrobe-ready`
+(sampled after the fixture's wardrobe heading is visible), `card-opened`, `editor-ready` and `finished`; the
+nonexistent reload stage is gone. A new test observes the FIRST `GET /rest/v1/items` collection request (no success filtering), awaits that request's
+own response and requires status 200, the seeded id in it and exactly one main-frame document navigation; a failed
+request or missing response fails it and is never replaced by a later success. A deterministic regression on
+`about:blank` fulfils call 1 with 503 and call 2 with 200: the earlier `response.ok()`-filtered observer is run beside
+it and accepts the retry, while the first-request observer reports status 503 with no ids, and an aborted request
+reports no response. That comparison is the only mutation-style evidence; no production, SDK or fixture retry
+behaviour changed. The separate AUTH1a reload/session tests in
+`auth-session.spec.ts` are unchanged and still prove tokens, expiry and private state across reload.
+
+Validation (process-local pinned Node 24.19.0/npm 11.17.0; `node_modules` was absent, so only after
+`npm run typecheck` reported `tsc` missing did `npm ci --ignore-scripts --no-audit --no-fund` restore 216 locked
+packages; fixture port 5198 had no listener; workers 2, retries 0; outputs kept in unique files outside the repo):
+
+- `npm run typecheck`, `npm run lint`, `npm run check:translations` pass (one earlier typecheck/lint failure was a
+  stray duplicated template literal in my own edit, fixed before any browser run).
+- `background-removal.spec.ts` once on chromium, mobile and webkit-photo: 78 passed, 36 skipped by design, 0 failed.
+  The three capture tests ran once only. After the review repair the whole spec was rerun the same way: 81 passed
+  (three new tests, one per project), 36 skipped, 0 failed; the first-read observer and first-read selectors alone,
+  three projects: 6 passed.
+- WebKit only, `--repeat-each=20` of the three non-capture replacement cases (`replace:` cancel, `replace:`
+  double-press and standalone `Replace photo:` unchanged-until-Save): 60 passed, 0 failed, repeated again after the
+  repair with the same result. No `retried once` or internal-error message appeared in either run.
+- `auth-session.spec.ts` unchanged, three projects: 30 passed.
+- Default shared-helper callers, three projects: one `ai-photo-first.spec.ts` case and one `ux-l1a.spec.ts` case,
+  6 passed.
+
+Not run: other `aiFixture` callers beyond those two selectors, the full browser, integration, security and
+performance suites (CI), helper unit tests (none exist), WebKit repeats of the capture tests (fixed-path exclusive
+writes), Apple/native or real-owner checks. Captures were written once to ignored `test-results/bg1-visual/` and
+never opened by the writer; the coordinator's exact-head visual review is pending. Held: merge, exact-head CI and Apple results, the final-main candidate receipt, SAVE1 hosted migration and OAuth,
+RAIN1 install/control cutover/Edge/client/paid trial, real-owner and native-device acceptance. No production,
+auth, privacy, CI, retry, timeout, provider or hosted change and no deployment.
