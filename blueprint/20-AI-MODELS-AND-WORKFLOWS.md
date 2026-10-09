@@ -245,6 +245,10 @@ ADR25 in `18`. An optional stylist chat, separate from the deterministic suggest
 - **Direct calls (D1).** Before any ST0 or probe call made outside the app, `stylist_direct_allocation` lowers the owner's monthly allowance by the allocated USD operational amount, under the admission locks, and refuses when accounted and held usage would no longer fit. ST0 and the probe are not run in ST1a.
 - **Open gates.** Hosted apply of both migrations, the job's activation, the stylist allowance and consent notice, the direct-call allocation, and the exact-route synthetic probe all need owner approval. The client UI is ST1b.
 
+### RAIN1 weather applies only to outerwear (9 October 2026, source only)
+
+Owner direction recorded in #84: weather may influence only garments in the `outerwear` category. Other garments are chosen by occasion, season, the request and style; rain, wind and cold never exclude or score them. Manifest `azure-eu-terra-stylist-v2` (prompt version 2) carries the new prompt; `stylist.ts` applies the stored temperature bounds to outerwear only and sends the weather-only fields (`min_temp`, `max_temp`, `rain_rating`, `windproof`) as `null` for other categories. The forward migration `20261009090000_stylist_weather_outerwear.sql` adds the v2 row and lets `stylist_claim` accept v1 or v2, so the installed service keeps working until a separately approved cutover. Nothing is applied, switched, deployed or activated by this change; ordered cutover: hosted migration, controls selecting v2, then function and client together. The paid quality trial remains an owner-approved external gate.
+
 ## BG2b-1 photo enhancement backend (inactive) - 29 September 2026
 
 ADR26 in `18`. Every new garment photo will be redrawn automatically after BG1/BG2a; BG2b-1 adds the backend only and activates nothing. The client, consent screen and label are BG2b-2.

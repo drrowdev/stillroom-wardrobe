@@ -228,9 +228,14 @@ describe('ST1b stylist replies', () => {
     expect(checkIdea(ids, map(item(1), item(2, { excludeSuggestions: true })), owner, null)).toBe('unavailable');
     expect(checkIdea(ids, map(item(1, { category: 'accessory' }), item(2)), owner, null)).toBe('ok');
     const cold = { setting: 'outdoors' as const, temperatureC: -5, rainProbability: null, windMetresPerSecond: null };
-    const warmOnly = item(2, { weather: { warmth: null, lowerCoverage: null, minTemp: 10, maxTemp: null, rainRating: null, windproof: null } });
+    const warmOnly = item(2, { category: 'outerwear', weather: { warmth: null, lowerCoverage: null, minTemp: 10, maxTemp: null, rainRating: null, windproof: null } });
     expect(checkIdea(ids, map(item(1), warmOnly), owner, cold)).toBe('unavailable');
     expect(checkIdea(ids, map(item(1), warmOnly), owner, null)).toBe('ok');
+    // The same bounds on any other category never stop an idea; weather influences only outerwear.
+    for (const category of ['top', 'bottom', 'one_piece', 'layer', 'footwear', 'accessory'] as const) {
+      const bounded = item(2, { category, weather: { warmth: null, lowerCoverage: null, minTemp: 10, maxTemp: 15, rainRating: null, windproof: null } });
+      expect(checkIdea(ids, map(item(1), bounded), owner, cold)).toBe('ok');
+    }
     expect(checkIdea(ids, map(item(1), item(2, { ownerId: id(99) })), owner, null)).toBe('unavailable');
   });
 });

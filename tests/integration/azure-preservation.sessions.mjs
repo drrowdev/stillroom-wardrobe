@@ -506,6 +506,13 @@ export const STYLIST_MANIFEST_ROW = Object.freeze({
   reservation_micro: 129360, maximum_image_bytes: 0, maximum_side: 0, maximum_response_bytes: 262144,
   maximum_result_bytes: 8192, request_seconds: 25, review_expires_at: '2026-12-01T00:00:00+00:00',
 });
+// RAIN1 adds a second immutable stylist manifest: v1 numbers, new prompt version and hashes (weather influences only outerwear).
+export const STYLIST_V2_MANIFEST_ROW = Object.freeze({
+  ...STYLIST_MANIFEST_ROW, id: 'azure-eu-terra-stylist-v2', prompt_version: 2,
+  prompt_sha256: '081daa2f49eb917dcc9b18c09e7db03e01398941c6e57b330e974435f9e75fd3',
+  settings_sha256: '8417be329b1711b831cfc38635f460e4562266e4a4a503eeff530cea0bab4c2a',
+  tariff_description: STYLIST_TARIFF_DESCRIPTION.replace('stylist text chat on', 'stylist text chat v2 (weather influences only outerwear) on'),
+});
 const ENHANCEMENT_TARIFF_DESCRIPTION = 'INACTIVE photo enhancement on existing DEV/TEST eval-image25-sunburst-20260908 (GlobalStandard, 2 requests/min). Retail API USD per1M: text input 5.00, image input 8.00, image output 30.00. Reservation 300000 micro values the 7500 input/8000 output envelope with all input at image-in 8.00; the images API has no token cap, so this is an estimated envelope with possible in-flight overrun, handled by the anomaly kill switch. Frozen parameters n1 1024x1280 medium jpeg compression85 opaque, no input_fidelity. Only the prepared garment photo is sent. Global processing may happen outside the EU. Probe and paid activation remain owner gates.';
 // The one immutable manifest BG2b-1 adds, validated field by field.
 export const ENHANCEMENT_MANIFEST_ROW = Object.freeze({
@@ -668,12 +675,14 @@ export async function verifyColourStage(snapshot, sql, stage) {
   }
   const added = Object.keys(after.manifests).filter((id) => !Object.hasOwn(before.manifests, id)).sort();
   equal(added, stage === 'colours' ? []
-    : [ENHANCEMENT_MANIFEST_ROW.id, CLEANUP_MANIFEST_ROW.id, COLOUR_MANIFEST.v2, STYLIST_MANIFEST_ROW.id, TRYON_MANIFEST_ROW.id].sort());
+    : [ENHANCEMENT_MANIFEST_ROW.id, CLEANUP_MANIFEST_ROW.id, COLOUR_MANIFEST.v2, STYLIST_MANIFEST_ROW.id, STYLIST_V2_MANIFEST_ROW.id, TRYON_MANIFEST_ROW.id].sort());
   for (const [id, md5] of Object.entries(before.manifests)) equal(after.manifests[id], md5);
   if (stage === 'target') {
     equal(JSON.parse(await sql(stylistDefaultsSql)), { controls: 0, usage: 0, evidence: 0 });
     equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(STYLIST_MANIFEST_ROW.id)};`)),
       STYLIST_MANIFEST_ROW);
+    equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(STYLIST_V2_MANIFEST_ROW.id)};`)),
+      STYLIST_V2_MANIFEST_ROW);
     equal(JSON.parse(await sql(enhancementDefaultsSql)), { controls: 0, usage: 0, evidence: 0 });
     equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(ENHANCEMENT_MANIFEST_ROW.id)};`)),
       ENHANCEMENT_MANIFEST_ROW);

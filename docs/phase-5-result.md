@@ -686,3 +686,9 @@ The earlier failure chronology remains evidence, not a passing run.
 The held-case local blocker is closed; coordinator closure verification and
 publication instruction remain pending, along with exact-head CI and visual
 acceptance. No new images, whole-suite rerun or publication occurred.
+
+## RAIN1: Stylist weather applies only to outerwear (9 October 2026)
+
+Source-only change following the owner decision in #84. Weather (temperature bounds, rain, wind) influences only `outerwear` garments in the Stylist; other categories are never excluded or ranked by it, and their weather-only fields are not sent. New manifest `azure-eu-terra-stylist-v2` and migration `20261009090000_stylist_weather_outerwear.sql` (the v1 migration and its pinned hashes are unchanged); the claim accepts v1 and v2, the new source requires v2.
+
+Not done and not claimed: hosted migration, switching owner controls to v2, Edge function or client deploy, activation, and any paid model-quality trial (owner-approved external gate). Integration, Edge, rehearsal and full CI suites were not run locally.

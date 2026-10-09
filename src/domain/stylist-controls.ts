@@ -246,7 +246,8 @@ export function checkIdea(itemIds: readonly string[], items: ReadonlyMap<string,
   if (itemIds.some((id) => !items.has(id))) return 'gone';
   return itemIds.every((id) => {
     const item = items.get(id)!;
-    return stylistEligible({ ownerId: item.ownerId, deleted: false, lifecycle: item.lifecycle, availability: item.availability,
+    return stylistEligible({ ownerId: item.ownerId, category: item.category, deleted: false, lifecycle: item.lifecycle,
+      availability: item.availability,
       excludeSuggestions: item.excludeSuggestions, readyImage: item.imageId !== '', minTemp: item.weather.minTemp,
       maxTemp: item.weather.maxTemp }, { ownerId, weather });
   }) ? 'ok' : 'unavailable';

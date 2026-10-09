@@ -66,6 +66,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261005090000_provider_refusal.sql', version: '20261005090000', time: '2026-10-05 09:00:00', bytes: 38858, sha256: SOURCE_HASHES.providerRefusal },
   { name: '20261007090000_outfit_lifecycle.sql', version: '20261007090000', time: '2026-10-07 09:00:00', bytes: 3754, sha256: '243c41376a2c3d708e2cd78739a3352e5461c441a41eb5b50b3e535a14e432ef' },
   { name: '20261008080000_analysis_model_identity.sql', version: '20261008080000', time: '2026-10-08 08:00:00', bytes: 11083, sha256: '1a3b8c3d1723378f0734dd1828bddf235a68af5e6fe1c7711ff7fa2a4a952e19' },
+  { name: '20261009090000_stylist_weather_outerwear.sql', version: '20261009090000', time: '2026-10-09 09:00:00', bytes: 7237, sha256: 'b6c61b6ba6b3b81995033c2ecc8adac6bd7e4162ab76c2998c44db4f468cd9a7' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.

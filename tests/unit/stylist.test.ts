@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  STYLIST_BODY_CONTROLS, STYLIST_ITEM_FIELDS, STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_PROMPT,
+  STYLIST_BODY_CONTROLS, STYLIST_CATEGORIES, STYLIST_ITEM_FIELDS, STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_PROMPT,
   STYLIST_RESERVATION_MICRO, STYLIST_SCHEMA, STYLIST_SETTINGS, buildStylistRequest, conversationBytes, orderStylistItems,
   parseStylistBody, parseStylistItem, stylistEligible, utf8Bytes, validateStylistReply, type StylistCandidate, type StylistInput,
   type StylistItem,
@@ -24,15 +24,27 @@ const body = (overrides: Record<string, unknown> = {}) => ({ requestId: REQUEST,
   occasion: null, season: null, weather: null, ...overrides });
 
 describe('stylist request contract', () => {
-  it('pins the prompt, schema and settings hashes recorded in the manifest migration', async () => {
-    const sql = await readFile(new URL('../../supabase/migrations/20260928090000_stylist_chat.sql', import.meta.url), 'utf8');
+  it('pins the prompt, schema and settings hashes recorded in the current manifest migration', async () => {
+    const sql = await readFile(new URL('../../supabase/migrations/20261009090000_stylist_weather_outerwear.sql', import.meta.url), 'utf8');
     for (const hash of [sha(STYLIST_PROMPT), sha(JSON.stringify(STYLIST_SCHEMA)), sha(JSON.stringify(STYLIST_SETTINGS))]) {
       expect(sql).toContain(`'${hash}'`);
     }
-    expect(sql).toContain(`'${STYLIST_MANIFEST}','${STYLIST_MODEL}',1,`);
+    expect(STYLIST_MANIFEST).toBe('azure-eu-terra-stylist-v2');
+    expect(sql).toContain(`'${STYLIST_MANIFEST}','${STYLIST_MODEL}',2,`);
     expect(sql).toContain(`24000,1200,${STYLIST_RESERVATION_MICRO},0,0,262144,8192,25,`);
     expect(utf8Bytes(STYLIST_PROMPT)).toBeLessThanOrEqual(STYLIST_LIMITS.systemBytes);
     expect(utf8Bytes(JSON.stringify(STYLIST_SCHEMA))).toBeLessThanOrEqual(STYLIST_LIMITS.schemaBytes);
+  });
+
+  it('keeps the historical v1 manifest migration, its pinned hashes and its envelope untouched', async () => {
+    const v1 = await readFile(new URL('../../supabase/migrations/20260928090000_stylist_chat.sql', import.meta.url), 'utf8');
+    for (const hash of ['36867782e8c701e1a0b42e772d4f4be31870758935a0fd8a65ba1b387a61cbca',
+      '8c627868d8702f76ed68e0bbeec2f0587d355a4b92e42a28f61ba30e1abd3e02', sha(JSON.stringify(STYLIST_SCHEMA))]) {
+      expect(v1).toContain(`'${hash}'`);
+    }
+    expect(v1).toContain(`'azure-eu-terra-stylist-v1','${STYLIST_MODEL}',1,`);
+    expect(v1).toContain(`24000,1200,${STYLIST_RESERVATION_MICRO},0,0,262144,8192,25,`);
+    expect(v1).toContain("m.id<>'azure-eu-terra-stylist-v1'");
   });
 
   it('values the reservation at the conservative tier and keeps the applicable tariff separate', () => {
@@ -125,7 +137,7 @@ describe('stylist request contract', () => {
   it('trims the oldest history outfits when every referenced item does not fit, leaving no dangling ref', () => {
     // Six assistant turns naming 36 distinct items: valid input that fits the conversation budget, but the pinned
     // items alone exceed the messages budget.
-    const history = Array.from({ length: STYLIST_LIMITS.historyTurns }, (_, n) => ({ role: 'assistant' as const, text: 'ä'.repeat(340),
+    const history = Array.from({ length: STYLIST_LIMITS.historyTurns }, (_, n) => ({ role: 'assistant' as const, text: 'ï¿½'.repeat(340),
       outfits: Array.from({ length: 2 }, (_, m) => Array.from({ length: 3 }, (_, k) => id(n * 6 + m * 3 + k + 1))) }));
     const value = parseStylistBody(body({ history }))!;
     expect(value).not.toBeNull();
@@ -204,7 +216,8 @@ describe('stylist body parsing', () => {
 
 describe('stylist eligibility (M4)', () => {
   const candidate = (overrides: Partial<StylistCandidate> = {}): StylistCandidate => ({ ownerId: OWNER, deleted: false,
-    lifecycle: 'active', availability: 'ready', excludeSuggestions: false, readyImage: true, minTemp: 5, maxTemp: 20, ...overrides });
+    lifecycle: 'active', availability: 'ready', excludeSuggestions: false, readyImage: true, category: 'outerwear', minTemp: 5, maxTemp: 20,
+    ...overrides });
   const ctx = { ownerId: OWNER, weather: null };
   it('requires a ready image, the owner and an active unexcluded item', () => {
     expect(stylistEligible(candidate(), ctx)).toBe(true);
@@ -213,7 +226,7 @@ describe('stylist eligibility (M4)', () => {
       expect(stylistEligible(candidate(bad), ctx)).toBe(false);
     }
   });
-  it('applies outdoor temperature only when given, and never indoors', () => {
+  it('applies outdoor temperature to outerwear only when given, and never indoors', () => {
     const weather = (temperatureC: number, setting: 'indoors' | 'outdoors' = 'outdoors') => ({ ownerId: OWNER,
       weather: { setting, temperatureC, rainProbability: null, windMetresPerSecond: null } });
     expect(stylistEligible(candidate(), weather(10))).toBe(true);
@@ -221,6 +234,17 @@ describe('stylist eligibility (M4)', () => {
     expect(stylistEligible(candidate(), weather(30))).toBe(false);
     expect(stylistEligible(candidate(), weather(30, 'indoors'))).toBe(true);
     expect(stylistEligible(candidate({ minTemp: null, maxTemp: null }), weather(-30))).toBe(true);
+  });
+  it('never lets the weather exclude a garment that is not outerwear', () => {
+    const outdoors = (temperatureC: number) => ({ ownerId: OWNER,
+      weather: { setting: 'outdoors' as const, temperatureC, rainProbability: 90, windMetresPerSecond: 20 } });
+    for (const category of STYLIST_CATEGORIES.filter((entry) => entry !== 'outerwear')) {
+      for (const temperatureC of [-30, 10, 40]) {
+        expect(stylistEligible(candidate({ category, minTemp: 5, maxTemp: 20 }), outdoors(temperatureC))).toBe(true);
+      }
+    }
+    expect(stylistEligible(candidate({ category: 'outerwear' }), outdoors(-30))).toBe(false);
+    expect(stylistEligible(candidate({ category: 'top', availability: 'laundry' }), outdoors(10))).toBe(false);
   });
   it('leaves the Today eligibility contract unchanged', () => {
     expect(typeof eligible).toBe('function');

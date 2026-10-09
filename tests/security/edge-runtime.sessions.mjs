@@ -312,7 +312,7 @@ async function main() {
         const status = await client.rpc(owner, 'stylist_status', {});
         const consented = await client.rpc(owner, 'stylist_set_consent', { p_enabled: true, p_notice_revision: status?.policy?.noticeRevision ?? null });
         check(PROVIDER, `stylist-consent-${owner.label}`, consented?.code === 'OK' && consented.consent?.enabled === true
-          && consented.policy?.manifestId === 'azure-eu-terra-stylist-v1', { code: consented?.code });
+          && consented.policy?.manifestId === 'azure-eu-terra-stylist-v2', { code: consented?.code });
       }
       const h = imageChangeHarness(client, A, env);
       const seeded = await h.create();
