@@ -148,6 +148,29 @@ test('I15 Show another walks three ideas a page, then the next page, never one t
   expect(api.suggestionFeedback).toHaveLength(0);
 });
 
+test('Show another offers other bottoms, tops and shoes within six ideas when one bottom is slightly favoured', async ({ page }) => {
+  const seed = (api: Api) => {
+    ['Linen shirt', 'Cotton tee', 'Oxford shirt', 'Poplin shirt', 'Jersey tee', 'Camp shirt'].forEach(title => add(api, title, { colours: ['white'], seasons: ['summer'] }));
+    add(api, 'Favourite chinos', { category: 'bottom', colours: ['navy'], favourite: true, seasons: ['summer'] });
+    add(api, 'Plain chinos', { category: 'bottom', colours: ['navy'], seasons: ['summer'] });
+    ['Boots', 'Loafers', 'Trainers', 'Sandals'].forEach(title => add(api, title, { category: 'footwear', colours: ['black'], seasons: ['summer'] }));
+  };
+  const { api } = await start(page, 'en', seed, { clothes: false });
+  const shown: string[][] = [];
+  for (let index = 0; index < 6; index++) {
+    await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: index + 1 }));
+    shown.push(await names(featured(page)));
+    await showAnother(page);
+  }
+  const bottoms = shown.map(pieces => pieces.find(name => /chinos/.test(name)));
+  expect(new Set(bottoms)).toEqual(new Set(['Favourite chinos', 'Plain chinos']));
+  expect(new Set(shown.map(pieces => pieces.join('+'))).size).toBe(6);
+  expect(new Set(shown.flatMap(pieces => pieces.filter(name => /shirt|tee/.test(name)))).size).toBe(6);
+  expect(new Set(shown.flatMap(pieces => pieces.filter(name => ['Boots', 'Loafers', 'Trainers', 'Sandals'].includes(name)))).size).toBe(4);
+  await startAgain(page);
+  expect(await names(featured(page))).toEqual(shown[0]);
+  expect(api.suggestionFeedback).toHaveLength(0);
+});
 test('I15 Like persists, Don\'t suggest this outfit hides it for good and Undo brings it back', async ({ page }) => {
   const { api } = await start(page);
   const liked = await names(featured(page));
@@ -398,6 +421,36 @@ test('I15 a refresh keeps the idea showing when earlier ideas drop out, and move
   for (const idea of later) expect(idea.includes(renamed) || idea.includes(leaving) || shown.includes(idea)).toBe(false);
 });
 
+test('I15 an idea shown before a refresh pushed it off the page does not come back on the next page', async ({ page }) => {
+  const seed = (api: Api) => {
+    ['Linen shirt', 'Cotton tee', 'Oxford shirt', 'Poplin shirt', 'Jersey tee'].forEach(title => add(api, title, { colours: ['white'] }));
+    ['Favourite polo 1', 'Favourite polo 2', 'Favourite polo 3'].forEach(title => add(api, title, { colours: ['white'], favourite: true, availability: 'laundry' }));
+    add(api, 'Chinos', { category: 'bottom', colours: ['navy'] });
+    add(api, 'Boots', { category: 'footwear', colours: ['black'] });
+  };
+  const { api } = await start(page, 'en', seed, { clothes: false });
+  const shown = [(await allNames(page))[0]!];
+  for (let index = 0; index < 2; index++) { await showAnother(page); shown.push((await allNames(page))[0]!); }
+  expect(new Set(shown).size).toBe(3);
+  const before = api.requests.filter(entry => entry.path === '/rest/v1/items' && entry.method === 'GET').length;
+  // Three favourites come back from the laundry and rank first: every idea already shown leaves the page.
+  for (const row of api.items.filter(item => String(item.title).startsWith('Favourite polo'))) Object.assign(row, { availability: 'ready', version: 2 });
+  await page.context().setOffline(true);
+  await expect(page.locator('.notice-offline')).toBeVisible();
+  await page.context().setOffline(false);
+  await expect.poll(() => api.requests.filter(entry => entry.path === '/rest/v1/items' && entry.method === 'GET').length).toBeGreaterThan(before);
+  await page.waitForTimeout(300);
+  if (await page.locator('#today-gone').isVisible()) await button(page, 'today.more').click();
+  const later = await pageThrough(page);
+  // Nothing already shown returns, and every idea not shown yet is still reached.
+  expect(later.filter(idea => shown.includes(idea))).toEqual([]);
+  expect(new Set(later).size).toBe(later.length);
+  expect(new Set([...shown, ...later]).size).toBe(8);
+  // Start over forgets what was shown: the earlier ideas can come back.
+  await button(page, 'today.startOver').click();
+  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+  expect((await pageThrough(page)).some(idea => shown.includes(idea))).toBe(true);
+});
 test('I15 a held read for one account never shows after signing in as another', async ({ page }) => {
   let gate!: { held: () => number; release: () => void };
   const { api } = await start(page, 'en', api => { gate = api.holdFeedbackReads(); });

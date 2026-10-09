@@ -3,11 +3,12 @@ import type { Occasion } from './outfits';
 import { pairScore } from './colour-pairs';
 
 // Deterministic outfit rules (blueprint 09, ADR21). Pure: no clock, randomness, network, language or AI input.
-export const rulesVersion = 'rules-v2';
+export const rulesVersion = 'rules-v3';
 export const seasonCodes = ['spring', 'summer', 'autumn', 'winter'] as const;
 export type Season = (typeof seasonCodes)[number];
 export const formalityTargets: Readonly<Record<Occasion, number>> = { home: 0, everyday: 1, smart: 2, business: 3, formal: 4 };
-export const limits = { perCategory: 8, beam: 40, passBudget: 2000, suggestions: 3 } as const;
+// fitBand: how many points below the best remaining outfit an alternative may score and still be preferred for being less shown.
+export const limits = { perCategory: 8, beam: 40, passBudget: 2000, suggestions: 3, fitBand: 10 } as const;
 
 export type EngineItem = {
   id: string; ownerId: string; category: Category; colours: readonly string[]; seasons: readonly string[];
@@ -187,11 +188,79 @@ type Step = { categories: Category[]; optional: boolean; accepts?: (item: Engine
 // `core` rejects a finished core outright (already shown, dress code); `allowed` rejects an exact disliked combination.
 type Filters = { core: (state: State) => boolean; allowed: (state: State) => boolean };
 
+function difference(a: readonly string[], b: readonly string[]): number {
+  return Math.max(a.filter(id => !b.includes(id)).length, b.filter(id => !a.includes(id)).length);
+}
+
+// How often each garment appeared in the cores already shown (the skipped keys of Show another).
+function exposureOf(skip: ReadonlySet<string>): Map<string, number> {
+  const items = new Map<string, number>();
+  for (const key of skip) for (const id of key.split('|')) items.set(id, (items.get(id) ?? 0) + 1);
+  return items;
+}
+
+// How many shown cores this search could still reach below each unfinished prefix of the template. Only a shown core that fits
+// the template and its capped candidate window counts, so garments that are gone or outside the window never hide unseen ones.
+function shownBelow(template: readonly Category[], buckets: ReadonlyMap<Category, EngineItem[]>, cap: number, skip: ReadonlySet<string>) {
+  const slot = new Map<string, number>();
+  template.forEach((category, index) => (buckets.get(category) ?? []).slice(0, cap).forEach(item => slot.set(item.id, index)));
+  const counts = new Map<string, number>();
+  for (const key of skip) {
+    const ids = key.split('|');
+    const slots = ids.map(id => slot.get(id));
+    if (ids.length !== template.length || slots.some(index => index === undefined) || new Set(slots).size !== template.length) continue;
+    const ordered = ids.sort((a, b) => slot.get(a)! - slot.get(b)!);
+    for (let size = 1; size < template.length; size++) {
+      const prefix = combinationKey(ordered.slice(0, size));
+      counts.set(prefix, (counts.get(prefix) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+// Chooses up to limit distinct cores from a rank-sorted list. Each pick is the least-shown core (mean garment exposure, from
+// history plus the earlier picks) among those scoring within limits.fitBand of the best one left; ties go to the core that
+// differs most from the picks, then to rank. With no history the best-scoring core therefore comes first. With fill, other
+// states of an already chosen core follow in rank order until limit. Scores are never changed; this only picks and orders.
+function diversify<T extends { score: number }>(ranked: readonly T[], coreOf: (item: T) => readonly string[],
+  history: ReadonlyMap<string, number>, limit: number, fill: boolean): T[] {
+  // A fill list that already fits keeps everything, and the caller sorts it again.
+  if (fill && ranked.length <= limit) return [...ranked];
+  // gap: fewest garments by which the core differs from any core picked so far.
+  type Entry = { item: T; core: readonly string[]; gap: number };
+  const seen = new Set<string>();
+  const pending: Entry[] = [], rest: T[] = [];
+  for (const item of ranked) {
+    const core = coreOf(item), key = combinationKey(core);
+    if (seen.has(key)) rest.push(item); else { seen.add(key); pending.push({ item, core, gap: Infinity }); }
+  }
+  const exposure = new Map(history);
+  const load = (core: readonly string[]) => core.reduce((sum, id) => sum + (exposure.get(id) ?? 0), 0);
+  const picked: Entry[] = [];
+  while (picked.length < limit && pending.length) {
+    const best = pending[0]!.item.score;
+    let choice = 0, choiceLoad = load(pending[0]!.core);
+    for (let index = 1; index < pending.length && best - pending[index]!.item.score <= limits.fitBand; index++) {
+      const entry = pending[index]!, entryLoad = load(entry.core);
+      // Compares mean exposure entryLoad/size with choiceLoad/size without division.
+      const order = entryLoad * pending[choice]!.core.length - choiceLoad * entry.core.length;
+      if (order < 0 || order === 0 && entry.gap > pending[choice]!.gap) { choice = index; choiceLoad = entryLoad; }
+    }
+    const [entry] = pending.splice(choice, 1);
+    picked.push(entry!);
+    for (const id of entry!.core) exposure.set(id, (exposure.get(id) ?? 0) + 1);
+    for (const other of pending) other.gap = Math.min(other.gap, difference(other.core, entry!.core));
+  }
+  return fill ? [...picked.map(entry => entry.item), ...rest].slice(0, limit) : picked.map(entry => entry.item);
+}
+
 // Once the core is complete, acceptable states and disliked cores live in two separately capped beams. Disliked cores are
 // only seeds for added pieces, so they never take a slot from an acceptable state, and only acceptable states are returned.
 function search(template: readonly Category[], extra: readonly Step[], buckets: ReadonlyMap<Category, EngineItem[]>, cap: number,
-  score: (pieces: EngineItem[]) => number, excluded: ReadonlySet<string>, budget: { left: number }, filters: Filters): State[] {
+  score: (pieces: EngineItem[]) => number, excluded: ReadonlySet<string>, budget: { left: number }, filters: Filters,
+  history: ReadonlyMap<string, number>, skip: ReadonlySet<string>): State[] {
   const steps: Step[] = [...template.map(category => ({ categories: [category], optional: false })), ...extra];
+  const shownWith = shownBelow(template, buckets, cap, skip);
   let beam: State[] = [{ pieces: [], score: 0, key: '' }];
   let seeds: State[] = [];
   for (const [index, step] of steps.entries()) {
@@ -216,7 +285,10 @@ function search(template: readonly Category[], extra: readonly Step[], buckets: 
     for (const state of beam) expand(state, next);
     for (const state of seeds) expand(state, nextSeeds);
     const coreDone = index === template.length - 1;
-    beam = (coreDone ? next.filter(filters.core) : next).sort(byRank).slice(0, limits.beam);
+    // An unfinished core whose every completion was already shown only takes a slot from ones that still have something to show.
+    const room = template.slice(index + 1).reduce((total, category) => total * Math.min(buckets.get(category)?.length ?? 0, cap), 1);
+    const open = coreDone ? next.filter(filters.core) : next.filter(state => (shownWith.get(combinationKey(coreIds(state.pieces))) ?? 0) < room);
+    beam = diversify(open.sort(byRank), state => coreIds(state.pieces), history, limits.beam, true).sort(byRank);
     seeds = (coreDone ? nextSeeds.filter(filters.core) : nextSeeds).sort(byRank).slice(0, limits.beam);
     if (!beam.length && !seeds.length) return [];
   }
@@ -232,9 +304,6 @@ function formalityGate(pieces: readonly EngineItem[], target: number): boolean {
   return median >= target;
 }
 
-function difference(a: readonly string[], b: readonly string[]): number {
-  return Math.max(a.filter(id => !b.includes(id)).length, b.filter(id => !a.includes(id)).length);
-}
 
 export function recommend(input: EngineInput): SuggestionResult {
   const { context } = input;
@@ -290,11 +359,13 @@ export function recommend(input: EngineInput): SuggestionResult {
     const extra: Step[] = cover ? [{ categories: cover.categories, optional: false, accepts: cover.accepts }] : [];
     let found: State | undefined;
     let expansions = 0, passes = 0;
+    const history = exposureOf(skip);
     for (const cap of [limits.perCategory, limits.perCategory * 2]) {
       if (passes && ![...present, ...cover?.categories ?? []].some(category => (usable.get(category)?.length ?? 0) > limits.perCategory)) break;
       passes++;
       const budget = { left: limits.passBudget };
-      [found] = search(present, extra, usable, cap, score, excluded, budget, { core: unshown, allowed: notDisliked });
+      const states = search(present, extra, usable, cap, score, excluded, budget, { core: unshown, allowed: notDisliked }, history, skip);
+      [found] = diversify(states, state => coreIds(state.pieces), history, 1, false);
       expansions += limits.passBudget - budget.left;
       if (found) break;
     }
@@ -320,12 +391,13 @@ export function recommend(input: EngineInput): SuggestionResult {
   }
   let valid: Suggestion[] = [];
   let expansions = 0, passes = 0;
+  const history = exposureOf(skip);
   const filters: Filters = { core: state => unshown(state) && (!strict || formalityGate(state.pieces, target)), allowed: notDisliked };
   for (const cap of [limits.perCategory, limits.perCategory * 2]) {
     if (passes && ![...buckets.values()].some(list => list.length > limits.perCategory)) break;
     passes++;
     const budget = { left: limits.passBudget };
-    const states = templates.flatMap(template => search(template, extra, buckets, cap, score, excluded, budget, filters));
+    const states = templates.flatMap(template => search(template, extra, buckets, cap, score, excluded, budget, filters, history, skip));
     expansions += limits.passBudget - budget.left;
     const seen = new Set<string>();
     valid = [];
@@ -348,15 +420,7 @@ export function recommend(input: EngineInput): SuggestionResult {
     if (valid.length) break;
   }
   valid.sort((a, b) => b.score - a.score || compare(a.key, b.key));
-  const chosen: Suggestion[] = [];
-  for (const need of [2, 1]) {
-    for (const candidate of valid) {
-      if (chosen.length >= limits.suggestions) break;
-      if (chosen.includes(candidate)) continue;
-      const core = candidate.coreKey.split('|');
-      if (chosen.every(other => difference(core, other.coreKey.split('|')) >= need)) chosen.push(candidate);
-    }
-  }
+  const chosen = diversify(valid, suggestion => suggestion.coreKey.split('|'), history, limits.suggestions, false);
   chosen.sort((a, b) => b.score - a.score || compare(a.key, b.key));
   for (const suggestion of chosen) for (const detail of suggestion.missingDetails) if (!missingDetails.includes(detail)) missingDetails.push(detail);
   return { status: chosen.length ? 'ideas' : 'none', suggestions: chosen, missingDetails, expansions, passes };

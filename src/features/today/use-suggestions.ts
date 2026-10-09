@@ -33,6 +33,18 @@ export function defaultSeason(timeZone: string, now = new Date()): Season {
   return seasonForDate(localDate(timeZone, now));
 }
 
+// The next page skips the ideas on this page and every idea already shown, even one a refresh has since moved off the page.
+// A known idea that was never shown is not skipped.
+export function skipAfterPaging(skip: ReadonlySet<string>, page: readonly Suggestion[], shownKeys: readonly (string | null)[], known: ReadonlyMap<string, string>): Set<string> {
+  const next = new Set(skip);
+  for (const suggestion of page) next.add(suggestion.coreKey);
+  for (const key of shownKeys) {
+    const core = key === null ? undefined : known.get(key);
+    if (core !== undefined) next.add(core);
+  }
+  return next;
+}
+
 // `excluded` holds the avoided pairs as canonical `low|high` keys.
 type Data = { items: WardrobeItem[]; excluded: ReadonlySet<string> };
 // Ideas are ranked with the votes and avoided pairs known when the page was drawn, so a choice never moves a card.
@@ -132,7 +144,9 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   // Choices made on the page being shown keep their earlier ranking, so a hidden card stays in place with its Undo.
   const changedOnPage = useRef(new Set<string>());
   const changedPairs = useRef(new Set<string>());
-  const newPage = useCallback(() => { changedOnPage.current = new Set(); changedPairs.current = new Set(); }, []);
+  // The core of every idea this page has received, by idea key; a refresh can move an idea shown earlier off the page.
+  const knownCores = useRef(new Map<string, string>());
+  const newPage = useCallback(() => { changedOnPage.current = new Set(); changedPairs.current = new Set(); knownCores.current = new Map(); }, []);
   const lastRef = useRef<LastPair | null>(null);
   const remember = useCallback((value: LastPair | null) => { lastRef.current = value; setLast(value); }, []);
   // A pair choice that settles as made: avoided becomes the one Undo offers; allowed again, it is gone and its idea may come back.
@@ -202,13 +216,17 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
     feedback: run.feedback, excludedPairs: [...run.excluded].map(pair => pair.split('|') as [string, string]), skip: run.skip,
   }) : null, [data, engineItems, scope.ownerId, occasion, season, applied, run]);
 
-  const more = useCallback(() => {
+  useEffect(() => {
+    for (const suggestion of result?.suggestions ?? []) knownCores.current.set(suggestion.key, suggestion.coreKey);
+  }, [result]);
+
+  const more = useCallback((shownKeys: readonly (string | null)[] = []) => {
     if (!result || settling) return;
-    const shown = result.suggestions.map(suggestion => suggestion.coreKey);
+    const skip = skipAfterPaging(run.skip, result.suggestions, shownKeys, knownCores.current);
     newPage();
-    setRun(current => ({ feedback: feedbackFrom(votesRef.current), excluded: excludedRef.current, skip: new Set([...current.skip, ...shown]), paged: true }));
+    setRun({ feedback: feedbackFrom(votesRef.current), excluded: excludedRef.current, skip, paged: true });
     setFailed(null); setUnresolved(null);
-  }, [result, settling, newPage]);
+  }, [result, settling, newPage, run.skip]);
   const startOver = useCallback(() => {
     if (settling) return;
     newPage();
