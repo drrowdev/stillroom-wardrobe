@@ -1779,3 +1779,25 @@ describe('COL1 strict preservation pass and twelve-only probes (source order, no
     expect(verify).toContain('equal(after.rows, before.rows);');
   });
 });
+
+describe('RAIN1 stage order (source order, not executed backend proof)', () => {
+  it('compares the pre-RAIN inventory, seeds genuine v1, migrates, and only then verifies v2', async () => {
+    const source = (await readFile(path.join(root, 'scripts/preservation-rehearsal.mjs'), 'utf8')).replaceAll('\r\n', '\n');
+    let offset = 0;
+    for (const step of ["stage = 'COL1-A5-prior-compare';", "await verifyColourStage(colourSnapshot, privilegedLocalSql, 'target');",
+      "stage = 'RAIN1-seed';", 'await stylistUpgradeSeed(colourSnapshot, privilegedLocalSql)', "await migrateToStage(run, 'save1-prior', 'target')",
+      "stage = 'RAIN1-manifest-verify';", 'await verifyStylistV2Stage(colourSnapshot, privilegedLocalSql)', "stage = 'RAIN1-verify';",
+      'await stylistUpgradeVerify(rainSeed, colourSnapshot, privilegedLocalSql']) {
+      const next = source.indexOf(step, offset); expect(next, step).toBeGreaterThanOrEqual(offset); offset = next + step.length;
+    }
+    // The v2 verifier is never reached before the migration that installs v2.
+    expect(source.match(/verifyStylistV2Stage\(/g)).toHaveLength(1);
+    const normal = (await readFile(path.join(root, 'tests/integration/azure-preservation.sessions.mjs'), 'utf8')).replaceAll('\r\n', '\n');
+    const prior = normal.slice(normal.indexOf('export async function verifyColourStage'), normal.indexOf('export async function verifyStylistV2Stage'));
+    expect(prior).toContain('requireEvidence(!Object.hasOwn(after.manifests, STYLIST_V2_MANIFEST_ROW.id))');
+    expect(prior).not.toMatch(/equal\([^;]*STYLIST_V2_MANIFEST_ROW/);
+    const v2 = normal.slice(normal.indexOf('export async function verifyStylistV2Stage'), normal.indexOf('export async function colourProbes'));
+    expect(v2).toContain('STYLIST_V2_MANIFEST_ROW');
+    expect(v2).not.toMatch(/insert|update|delete|\.rpc\(/);
+  });
+});

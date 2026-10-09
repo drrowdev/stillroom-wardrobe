@@ -12,9 +12,9 @@ begin;
 
 insert into private.ai_execution_manifests values (
   'azure-eu-terra-stylist-v2','gpt-5.6-terra-2026-07-09',2,
-  '081daa2f49eb917dcc9b18c09e7db03e01398941c6e57b330e974435f9e75fd3',
+  '6ecb063a57f438b93c3aa9ec72a0d0901801004d6534c33a0a5309661ce8d88d',
   '003b745ceaca59678e2f274104fe7b0d3d2c34a181e1e9102df76c232d78409a',
-  '8417be329b1711b831cfc38635f460e4562266e4a4a503eeff530cea0bab4c2a',
+  'e877d4a8e70a38c1deb99fa2bb061ff5f557dbeddba748aa846e1047a0e035ec',
   'Azure OpenAI','stillroom-ai-eval.openai.azure.com','v1/chat/completions','EU','DataZoneStandard',
   'https://prices.azure.com/api/retail/prices',
   '2026-09-21T00:00:00Z',

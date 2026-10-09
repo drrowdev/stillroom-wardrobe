@@ -7,10 +7,11 @@ import { randomUUID } from 'node:crypto';
 import { canonicalTables, requireEvidence } from './preservation.sessions.mjs';
 import { equal, analysisHash } from './ai-analysis.sessions.mjs';
 import { imageChangeHarness } from './image-replacement.sessions.mjs';
-import { COLOUR_MANIFEST } from './azure-preservation.sessions.mjs';
+import { COLOUR_MANIFEST, STYLIST_MANIFEST_ROW, STYLIST_V2_MANIFEST_ROW } from './azure-preservation.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
 
 const MANIFEST = 'azure-eu-terra-stylist-v1';
+const MANIFEST_V2 = 'azure-eu-terra-stylist-v2';
 const RESERVED = 129360;
 const TAG_RESERVATION = 4097351;
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
@@ -361,4 +362,174 @@ export async function stylistLedgerProbes(snapshot, sql, mark) {
   const exportAfter = await exportTables();
   equal(exportAfter, exportBefore);
   requireEvidence(!JSON.stringify(exportAfter).includes('stylist'));
+}
+
+// RAIN1 populated upgrade: real v1 claims are made at the prior inventory (before 20261009090000), the migration is applied,
+// and verification then proves the v1 ledger, controls and function properties survived, v1 and v2 are admitted separately
+// (cross pairs write nothing), and held and provisionally expired v1 requests still settle across the controls cutover.
+// Seeds only the first owner; the verify step removes exactly what the seed and itself wrote and restores the controls.
+const CONTROL_COLUMNS = ['stylist_activated', 'stylist_notice_revision', 'stylist_manifest_id', 'stylist_max_request_micro',
+  'stylist_monthly_allowance_micro', 'stylist_max_requests_per_hour', 'stylist_consent_revision', 'stylist_consented_at',
+  'monthly_allowance_micro', 'max_requests_per_hour', 'updated_at'];
+const STYLIST_FUNCTIONS_SQL = `select jsonb_object_agg(p.proname,jsonb_build_array(pg_get_function_identity_arguments(p.oid),p.prosecdef,
+    to_jsonb(p.proconfig),pg_get_userbyid(p.proowner),coalesce((select jsonb_agg(x.grantee::text||':'||x.privilege_type
+    order by x.grantee,x.privilege_type) from aclexplode(p.proacl) x),'[]'::jsonb),md5(p.prosrc)))
+  from pg_proc p where p.pronamespace='public'::regnamespace and p.proname like 'stylist\\_%';`;
+
+const upgradeTools = (snapshot, sql) => {
+  const { client, owners: [a, b] } = snapshot;
+  const one = async (text) => JSON.parse(await sql(text));
+  const claim = (id, manifest) => one(`select public.stylist_claim(${literal(a.uid)},${literal(id)},${literal(manifest)});`);
+  const finish = (id, code, usage, owner = a) => one(`select public.stylist_finish(${literal(owner.uid)},${literal(id)},${literal(code)},
+    ${usage === null ? 'null::jsonb' : json(usage)});`);
+  const ledger = (id, owner = a) => one(`select coalesce((select jsonb_build_object('usage',to_jsonb(u),'evidence',to_jsonb(e))
+    from private.ai_usage u join private.ai_usage_evidence e using (owner_id,request_id)
+    where u.owner_id=${literal(owner.uid)} and u.request_id=${literal(id)}),'null'::jsonb);`);
+  const controls = () => one(`select to_jsonb(c) from private.ai_controls c where owner_id=${literal(a.uid)};`);
+  const rows = (owner) => one(`select jsonb_build_array((select count(*) from private.ai_usage where owner_id=${literal(owner.uid)}),
+    (select count(*) from private.ai_usage_evidence where owner_id=${literal(owner.uid)}));`);
+  const select = (manifest) => sql(`update private.ai_controls set stylist_manifest_id=${literal(manifest)},updated_at=clock_timestamp()
+    where owner_id=${literal(a.uid)};`);
+  return { client, a, b, one, claim, finish, ledger, controls, rows, select };
+};
+
+export async function stylistUpgradeSeed(snapshot, sql) {
+  const { client, a, b, one, claim, finish, ledger, controls, rows } = upgradeTools(snapshot, sql);
+  // The prior inventory admits only v1: the v2 manifest row and the replaced claim do not exist yet.
+  equal(await one(`select jsonb_build_array(exists(select 1 from private.ai_execution_manifests where id=${literal(MANIFEST_V2)}),
+    exists(select 1 from private.ai_execution_manifests where id=${literal(MANIFEST)}));`), [false, true]);
+  const baseline = await controls();
+  const baselineRows = [await rows(a), await rows(b)];
+  const functions = await one(STYLIST_FUNCTIONS_SQL);
+  await sql(`update private.ai_controls set stylist_activated=true,stylist_notice_revision=1,stylist_manifest_id=${literal(MANIFEST)},
+    stylist_max_request_micro=${RESERVED},stylist_monthly_allowance_micro=10000000,stylist_max_requests_per_hour=1000,
+    monthly_allowance_micro=100000000,max_requests_per_hour=1000,updated_at=clock_timestamp() where owner_id=${literal(a.uid)};`);
+  const consent = await client.rpc(a, 'stylist_set_consent', { p_enabled: true, p_notice_revision: 1 });
+  requireEvidence(consent?.code === 'OK' && consent.consent?.enabled === true && consent.policy?.manifestId === MANIFEST);
+  const seeded = {};
+  for (const name of ['settled', 'held', 'expired']) {
+    seeded[name] = randomUUID();
+    const claimed = await claim(seeded[name], MANIFEST);
+    requireEvidence(claimed.claimed === true && claimed.manifestId === MANIFEST);
+  }
+  equal((await finish(seeded.settled, 'OK', VALID)).code, 'OK');
+  await sql(`update private.ai_usage set dispatched_at=dispatched_at-interval '3 minutes'
+    where owner_id=${literal(a.uid)} and request_id=${literal(seeded.expired)};`);
+  const expiry = await one(`select public.stylist_expire_due(1000);`);
+  requireEvidence(expiry.code === 'OK' && expiry.expired >= 1);
+  const stored = { settled: await ledger(seeded.settled), held: await ledger(seeded.held), expired: await ledger(seeded.expired) };
+  requireEvidence(stored.settled.usage.charge_state === 'estimated' && stored.settled.evidence.manifest_id === MANIFEST
+    && stored.held.usage.charge_state === 'held' && stored.held.evidence.manifest_id === MANIFEST
+    && stored.expired.evidence.settlement_origin === 'provisional_expiry' && stored.expired.evidence.manifest_id === MANIFEST);
+  return { seeded, stored, baseline, baselineRows, functions, controls: await controls() };
+}
+
+export async function stylistUpgradeVerify(seed, snapshot, sql, mark) {
+  const { client, a, b, one, claim, finish, ledger, controls, rows, select } = upgradeTools(snapshot, sql);
+  const { seeded, stored, baseline, baselineRows, functions } = seed;
+  const written = Object.values(seeded);
+  const status = (owner) => client.rpc(owner, 'stylist_status', {});
+
+  mark('upgrade-structure');
+  const after = await one(STYLIST_FUNCTIONS_SQL);
+  equal(Object.keys(after).sort(), Object.keys(functions).sort());
+  // Signature, definer, search_path/lock_timeout, owner and grants are unchanged for every stylist function; only the claim
+  // body changes (the admitted manifest check).
+  for (const name of Object.keys(functions)) {
+    equal(after[name].slice(0, 5), functions[name].slice(0, 5));
+    requireEvidence((after[name][5] === functions[name][5]) === (name !== 'stylist_claim'));
+  }
+  equal(await one(`select jsonb_build_array((select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(MANIFEST)}),
+    (select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(MANIFEST_V2)}));`),
+  [STYLIST_MANIFEST_ROW, STYLIST_V2_MANIFEST_ROW]);
+  // The migration touches no controls, usage or evidence, and the owner's controls still select v1.
+  equal(await controls(), seed.controls);
+  for (const name of Object.keys(stored)) equal(await ledger(seeded[name]), stored[name]);
+  equal((await controls()).stylist_manifest_id, MANIFEST);
+  // Every later claim runs the 2-minute expiry, so re-arm the held row now; the window must not depend on the migration time.
+  await sql(`update private.ai_usage set dispatched_at=clock_timestamp() where owner_id=${literal(a.uid)}
+    and request_id=${literal(seeded.held)};`);
+  const heldBefore = await ledger(seeded.held);
+  const consent = await status(a);
+  requireEvidence(consent.code === 'OK' && consent.policy?.manifestId === MANIFEST);
+
+  mark('upgrade-admission');
+  // v1 controls: the v1 claim is admitted, the v2 claim and an unknown manifest are refused and write nothing.
+  const before = await rows(a);
+  const v1Open = randomUUID();
+  const v1Claim = await claim(v1Open, MANIFEST);
+  requireEvidence(v1Claim.claimed === true && v1Claim.manifestId === MANIFEST);
+  written.push(v1Open);
+  const afterV1 = await rows(a);
+  equal(afterV1, [before[0] + 1, before[1] + 1]);
+  const refusedV2 = randomUUID();
+  equal(await claim(refusedV2, MANIFEST_V2), { code: 'CONFIG_CHANGED', claimed: false });
+  equal(await claim(randomUUID(), 'azure-eu-terra-stylist-v3'), { code: 'UNCONFIGURED', claimed: false });
+  equal(await rows(a), afterV1);
+  equal(await ledger(refusedV2), null);
+  equal((await finish(v1Open, 'NOT_DISPATCHED', null)).code, 'NOT_DISPATCHED');
+  // Settled and provisionally expired v1 rows replay, conflict and late-finish exactly as before the upgrade.
+  const replay = await finish(seeded.settled, 'OK', VALID);
+  requireEvidence(replay.code === 'OK' && replay.replayed === true);
+  equal((await finish(seeded.settled, 'OK', { ...VALID, output: 201, total: 1201 })).code, 'USAGE_CONFLICT');
+  equal(await ledger(seeded.settled), stored.settled);
+
+  mark('upgrade-cutover');
+  // The later approved controls change (simulated on the disposable database only): v2 claims are admitted and v1 claims are
+  // refused without a write, while the held and the provisionally expired v1 requests still settle on their own manifest.
+  await select(MANIFEST_V2);
+  const mid = await rows(a);
+  equal(await claim(randomUUID(), MANIFEST), { code: 'CONFIG_CHANGED', claimed: false });
+  equal(await rows(a), mid);
+  const v2Id = randomUUID();
+  const v2Claim = await claim(v2Id, MANIFEST_V2);
+  requireEvidence(v2Claim.claimed === true && v2Claim.manifestId === MANIFEST_V2);
+  written.push(v2Id);
+  const v2Open = await ledger(v2Id);
+  requireEvidence(v2Open.evidence.manifest_id === MANIFEST_V2 && v2Open.usage.purpose === 'stylist' && v2Open.usage.charge_state === 'held');
+  equal((await finish(v2Id, 'OK', VALID)).code, 'OK');
+  const v2Done = await ledger(v2Id);
+  requireEvidence(v2Done.usage.accounted_micro === 4840 && v2Done.evidence.settlement_origin === 'observed'
+    && v2Done.evidence.manifest_id === MANIFEST_V2);
+  equal((await finish(v2Id, 'OK', VALID)).replayed, true);
+
+  equal(await ledger(seeded.held), heldBefore);
+  // The unchanged v1 finisher withholds the answer once the owner's controls select another manifest: the usage is still
+  // settled on the v1 evidence at the v1 rates, the request closes UNAVAILABLE, and a replay returns the same code and writes nothing.
+  const heldFinish = await finish(seeded.held, 'OK', VALID);
+  equal(heldFinish.code, 'UNAVAILABLE');
+  const heldDone = await ledger(seeded.held);
+  requireEvidence(heldDone.usage.accounted_micro === 4840 && heldDone.usage.closed_reason === 'UNAVAILABLE'
+    && heldDone.usage.charge_state === 'estimated' && heldDone.evidence.settlement_origin === 'observed'
+    && heldDone.evidence.manifest_id === MANIFEST);
+  const heldReplay = await finish(seeded.held, 'OK', VALID);
+  requireEvidence(heldReplay.code === 'UNAVAILABLE' && heldReplay.replayed === true);
+  equal(await ledger(seeded.held), heldDone);
+  equal((await finish(seeded.expired, 'OK', VALID)).code, 'EXPIRED');
+  const lateDone = await ledger(seeded.expired);
+  requireEvidence(lateDone.usage.accounted_micro === 4840 && lateDone.usage.closed_reason === 'EXPIRED'
+    && lateDone.evidence.settlement_origin === 'observed' && lateDone.evidence.manifest_id === MANIFEST);
+  equal((await finish(seeded.expired, 'OK', VALID)).replayed, true);
+
+  mark('upgrade-isolation');
+  // Another owner can neither settle nor see these rows and has no stylist state of its own.
+  const settledRow = await ledger(seeded.held);
+  requireEvidence((await finish(seeded.held, 'OK', VALID, b)).code !== 'OK');
+  equal(await ledger(seeded.held), settledRow);
+  equal(await ledger(seeded.held, b), null);
+  equal(await rows(b), baselineRows[1]);
+  const bControls = await one(`select to_jsonb(c) from private.ai_controls c where owner_id=${literal(b.uid)};`);
+  requireEvidence(bControls.stylist_activated === false && bControls.stylist_manifest_id === null);
+
+  mark('upgrade-restore');
+  // Remove exactly the rows written here and restore the owner's controls to the state before the seed.
+  const ids = written.map(literal).join(',');
+  await sql(`begin;
+    delete from private.ai_usage_evidence where owner_id=${literal(a.uid)} and request_id in (${ids});
+    delete from private.ai_usage where owner_id=${literal(a.uid)} and request_id in (${ids});
+    update private.ai_controls c set ${CONTROL_COLUMNS.map((column) => `${column}=r.${column}`).join(',')}
+      from jsonb_populate_record(null::private.ai_controls,${json(baseline)}) r where c.owner_id=${literal(a.uid)};
+    commit;`);
+  equal(await controls(), baseline);
+  equal(await rows(a), baselineRows[0]);
 }

@@ -359,6 +359,43 @@ test.describe('ST1b stylist', () => {
     expect((api.stylistControl.chats[0]!.body as Row).weather).toBeNull();
   });
 
+  test('cold weather leaves a saved indoor idea usable; outerwear outside its confirmed range is not (RAIN1)', async ({ page }) => {
+    const api = await mockBackend(page, { initialLanguage: 'en', weather: { a: { weather_enabled: true, weather_city: 'Oulu, Finland', latitude: 65, longitude: 25.5 } } });
+    await page.route(/^https:\/\/(geocoding-api|api)\.open-meteo\.com\//, (route) => route.fulfill({ status: 503, json: { error: true } }));
+    const clothes = seed(api);
+    // Temperature ranges the owner confirmed (provenance 'user'); only outerwear's range may matter.
+    const confirmed = { min_temp: { kind: 'user', revision: 1 }, max_temp: { kind: 'user', revision: 1 } };
+    for (const garment of [clothes.shirt, clothes.trousers, clothes.boots]) Object.assign(garment, { min_temp: 18, max_temp: 26, field_provenance: confirmed });
+    const coat = api.seedSavedItem('a', 'Light coat').item as Row & { id: string };
+    Object.assign(coat, { category: 'outerwear', seasons: ['autumn'], min_temp: 15, max_temp: 25, field_provenance: confirmed });
+    api.stylistControl.setup[owners.a] = { configured: true, activated: true };
+    api.stylistControl.consent[owners.a] = 1;
+    await page.goto('/#/today'); await signIn(page);
+    await expectSignedIn(page);
+    await page.locator('#weather-trigger').click();
+    await page.getByRole('button', { name: text('weather.enterTemperature'), exact: true }).click();
+    await page.locator('#weather-temperature').fill('4');
+    await page.getByRole('button', { name: text('weather.useTemperature'), exact: true }).click();
+    await expect(page.locator('#weather-temperature')).toHaveCount(0);
+    await page.evaluate(() => { location.hash = '#/stylist'; });
+    api.stylistControl.replies.push({ status: 200, body: { code: 'OK', reply: 'Two ideas.', outfits: [
+      { itemIds: [clothes.shirt.id, clothes.trousers.id, clothes.boots.id], note: '' },
+      { itemIds: [clothes.shirt.id, clothes.trousers.id, coat.id], note: '' },
+    ] } });
+    await ask(page, 'Office tomorrow');
+    await expect(ideas(page)).toHaveCount(2);
+    // The cold temperature was really sent with the request.
+    expect((api.stylistControl.chats[0]!.body as Row).weather).toMatchObject({ setting: 'outdoors', temperatureC: 4 });
+    const save = (index: number) => ideas(page).nth(index).getByRole('button', { name: text('today.save'), exact: true });
+    await expect(ideas(page).nth(0)).not.toContainText(text('stylist.itemUnavailable'));
+    await expect(save(0)).toBeEnabled();
+    await expect(ideas(page).nth(1)).toContainText(text('stylist.itemUnavailable'));
+    await expect(save(1)).toBeDisabled();
+    await save(0).click();
+    await expect(page.locator('#outfit-editor-title')).toBeFocused();
+    await expect(page.locator('.outfit-slot')).toHaveCount(3);
+  });
+
   test('offline keeps the draft and sends nothing; nothing is stored in the browser', async ({ page, context }) => {
     const { api, clothes } = await start(page, { setup: {}, consent: true });
     api.stylistControl.replies.push(reply(clothes, { reply: 'reply-marker-7f3a' }));
