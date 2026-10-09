@@ -14,7 +14,7 @@ import { openAccountMenu } from './shell-support';
 // and sampled pixel values read in the page. No image is looked at by the test author or the model.
 type Fixture = Awaited<ReturnType<typeof aiFixture>>;
 type Entry = Record<string, number | string>;
-type DiagnosticStage = 'seeded' | 'reloaded' | 'card-opened' | 'editor-ready' | 'finished';
+type DiagnosticStage = 'wardrobe-ready' | 'card-opened' | 'editor-ready' | 'finished';
 type DiagnosticTime = { elapsedMs: number; remainingBudgetEstimateMs: number };
 type DiagnosticEvent = DiagnosticTime & {
   endpoint: 'collection-items' | 'detail-items' | 'item-images' | 'profile' | 'auth-user' | 'auth-token'
@@ -566,13 +566,19 @@ const flows = {
   add: { photo: '.capture-photo img', edit: '#edit-photo', scope: '' },
   replace: { photo: '.image-change .capture-photo img', edit: '#image-change-edit', scope: '.image-change' },
 } as const;
-async function openFlow(page: Page, api: Fixture, flow: keyof typeof flows) {
-  if (flow === 'add') { await openAdd(page); return null; }
-  const saved = api.seedSavedItem();
-  const before = { item: structuredClone(saved.item), image: structuredClone(saved.image), images: api.images.length };
-  replacementDiagnostics.get(page)?.capture('seeded', api);
-  await page.reload();
-  replacementDiagnostics.get(page)?.capture('reloaded');
+type Saved = ReturnType<Fixture['seedSavedItem']>;
+/** The saved garment exists before the first navigation, so the app's own first wardrobe read lists it. */
+async function savedFixture(page: Page) {
+  const prepared: Saved[] = [];
+  const api = await aiFixture(page, 'en', true, undefined, false, undefined, '/', (backend) => { prepared.push(backend.seedSavedItem()); });
+  const saved = prepared[0];
+  if (!saved) throw new Error('Saved item fixture was not prepared.');
+  return { api, saved, before: { item: structuredClone(saved.item), image: structuredClone(saved.image), images: api.images.length } };
+}
+async function openFlow(page: Page, flow: keyof typeof flows) {
+  if (flow === 'add') { const api = await aiFixture(page); await openAdd(page); return { api, unchanged: null }; }
+  const { api, saved, before } = await savedFixture(page);
+  replacementDiagnostics.get(page)?.capture('wardrobe-ready', api);
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
   replacementDiagnostics.get(page)?.capture('card-opened');
   await editItem(page);
@@ -583,19 +589,18 @@ async function openFlow(page: Page, api: Fixture, flow: keyof typeof flows) {
   await openPhotoMenu(page);
   await page.getByRole('button', { name: text('imageChange.replace'), exact: true }).click();
   await expect(page.locator('.image-change .background-note')).toBeVisible();
-  return () => {
+  return { api, unchanged: () => {
     expect(saved.item).toEqual(before.item);
     expect(saved.image).toEqual(before.image);
     expect(api.images).toHaveLength(before.images);
-  };
+  } };
 }
 for (const flow of ['add', 'replace'] as const) {
   const selectors = flows[flow];
   test(`${flow}: cancelling a crop while removal runs returns to the removed photo, and its original is disclosed as a new analysis`, async ({ page }) => {
     engineOnly();
     await hook(page, { mask: 'left' });
-    const api = await aiFixture(page);
-    const unchanged = await openFlow(page, api, flow);
+    const { api, unchanged } = await openFlow(page, flow);
     await choose(page, await syntheticPhoto(page), selectors.scope);
     await settled(page, 1);
     await expect.poll(() => analyses(api)).toBe(1);
@@ -626,8 +631,7 @@ for (const flow of ['add', 'replace'] as const) {
   test(`${flow}: pressing "Use original background" twice during removal settles once and keeps crop editing`, async ({ page }) => {
     engineOnly();
     await hook(page, { mask: 'left', runDelayMs: 2_500 });
-    const api = await aiFixture(page);
-    const unchanged = await openFlow(page, api, flow);
+    const { api, unchanged } = await openFlow(page, flow);
     await choose(page, await syntheticPhoto(page), selectors.scope);
     const original = page.locator('#background-original');
     await expect(original).toBeEnabled({ timeout: 15_000 });
@@ -697,13 +701,74 @@ test('Add item: crop editing uses the unsegmented photo, and re-preparing remove
   near((await sample(page, '.crop-stage img', [[0.73, 0.5]]))[0], RED);
 });
 
+// The first collection GET request of the saved items list, whatever happens to it: its own response is awaited, and
+// a failed request or a non-success status is reported, never replaced by a later successful retry.
+const itemsOrigin = 'http://127.0.0.1:54321';
+function firstItemsCollectionRead(page: Page) {
+  let first: Request | undefined;
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (!first && url.origin === itemsOrigin && url.pathname === '/rest/v1/items' && !url.searchParams.has('id') && request.method() === 'GET') first = request;
+  });
+  return async () => {
+    await expect.poll(() => first !== undefined).toBe(true);
+    const response = await first!.response();
+    if (!response) return { responded: false as const, status: 0, ids: [] as string[] };
+    const body = response.ok() ? await response.json() as Array<{ id: string }> : [];
+    return { responded: true as const, status: response.status(), ids: body.map((row) => row.id) };
+  };
+}
+test('first-read observer: an initial 503 followed by a successful retry, or no response, is not a first-read success', async ({ page }) => {
+  const known = 'c329a000-0000-4000-8000-000000000001';
+  await page.goto('about:blank');
+  let calls = 0;
+  const accepted: Array<Promise<{ id: string }[]>> = [];
+  page.on('response', (response) => {
+    if (response.url().startsWith(`${itemsOrigin}/rest/v1/items`) && response.ok()) accepted.push(response.json());
+  });
+  await page.route(`${itemsOrigin}/rest/v1/items**`, async (route) => {
+    calls++;
+    const headers = { 'access-control-allow-origin': '*' };
+    if (calls === 1) await route.fulfill({ status: 503, headers, json: { message: 'unavailable' } });
+    else if (calls === 2) await route.fulfill({ status: 200, headers, json: [{ id: known }] });
+    else await route.abort();
+  });
+  const read = firstItemsCollectionRead(page);
+  const fetchItems = () => page.evaluate((origin) => fetch(`${origin}/rest/v1/items?select=id`).then((reply) => reply.status, () => 0), itemsOrigin);
+  expect(await fetchItems()).toBe(503);
+  expect(await fetchItems()).toBe(200);
+  // The superseded observer kept only successful responses, so it accepted the retry as if it were the first read.
+  await expect.poll(() => accepted.length).toBe(1);
+  expect((await accepted[0]!).map((row) => row.id)).toContain(known);
+  const result = await read();
+  expect(result).toEqual({ responded: true, status: 503, ids: [] });
+  expect(result.ids).not.toContain(known);
+
+  const lost = await page.context().newPage();
+  await lost.route(`${itemsOrigin}/rest/v1/items**`, (route) => route.abort());
+  const lostRead = firstItemsCollectionRead(lost);
+  await lost.goto('about:blank');
+  await lost.evaluate((origin) => fetch(`${origin}/rest/v1/items?select=id`).then(() => 0, () => 0), itemsOrigin);
+  expect(await lostRead()).toEqual({ responded: false, status: 0, ids: [] });
+  await lost.close();
+});
+
+test('Replace photo: the saved item is in the first wardrobe read, so setup needs no reload', async ({ page }) => {
+  let documents = 0;
+  page.on('request', (request) => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents++; });
+  const read = firstItemsCollectionRead(page);
+  const { saved } = await savedFixture(page);
+  const first = await read();
+  expect(first.responded, 'the first collection read must receive a response').toBe(true);
+  expect(first.status).toBe(200);
+  expect(first.ids).toContain(saved.item.id);
+  await expect(page.locator(`a[href="#/items/${saved.item.id}"]`)).toBeVisible();
+  expect(documents).toBe(1);
+});
 test('Replace photo: the saved item is unchanged until Save, crop editing uses the unsegmented photo, and discard keeps the stored image', async ({ page }) => {
   engineOnly();
   await hook(page, { mask: 'left' });
-  const api = await aiFixture(page);
-  const saved = api.seedSavedItem();
-  const item = structuredClone(saved.item), image = structuredClone(saved.image), images = api.images.length;
-  await page.reload();
+  const { saved, before: { item, image, images }, api } = await savedFixture(page);
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
   await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
