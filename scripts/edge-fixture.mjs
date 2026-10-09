@@ -215,7 +215,7 @@ const ACTIVATE = (where) => `-- stillroom-edge-gate-activation (CI fixture only;
 update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.6-terra-2026-07-09',prompt_version=2,
   max_request_micro=4097351,monthly_allowance_micro=100000000,max_requests_per_hour=200,result_ttl_seconds=3600,
   execution_manifest_id='azure-eu-terra-devtest-v2',stylist_activated=true,stylist_notice_revision=1,
-  stylist_manifest_id='azure-eu-terra-stylist-v1',stylist_max_request_micro=129360,stylist_monthly_allowance_micro=10000000,
+  stylist_manifest_id='azure-eu-terra-stylist-v2',stylist_max_request_micro=129360,stylist_monthly_allowance_micro=10000000,
   stylist_max_requests_per_hour=50,enhance_activated=true,enhance_notice_revision=2,
   enhance_manifest_id='azure-global-image25-sunburst-cleanup-v1',enhance_max_request_micro=300000,
   enhance_monthly_allowance_micro=4000000,enhance_max_requests_per_hour=6,tryon_activated=true,tryon_notice_revision=1,

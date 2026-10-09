@@ -506,6 +506,13 @@ export const STYLIST_MANIFEST_ROW = Object.freeze({
   reservation_micro: 129360, maximum_image_bytes: 0, maximum_side: 0, maximum_response_bytes: 262144,
   maximum_result_bytes: 8192, request_seconds: 25, review_expires_at: '2026-12-01T00:00:00+00:00',
 });
+// RAIN1 adds a second immutable stylist manifest: v1 numbers, new prompt version and hashes (weather influences only outerwear).
+export const STYLIST_V2_MANIFEST_ROW = Object.freeze({
+  ...STYLIST_MANIFEST_ROW, id: 'azure-eu-terra-stylist-v2', prompt_version: 2,
+  prompt_sha256: '6ecb063a57f438b93c3aa9ec72a0d0901801004d6534c33a0a5309661ce8d88d',
+  settings_sha256: 'e877d4a8e70a38c1deb99fa2bb061ff5f557dbeddba748aa846e1047a0e035ec',
+  tariff_description: STYLIST_TARIFF_DESCRIPTION.replace('stylist text chat on', 'stylist text chat v2 (weather influences only outerwear) on'),
+});
 const ENHANCEMENT_TARIFF_DESCRIPTION = 'INACTIVE photo enhancement on existing DEV/TEST eval-image25-sunburst-20260908 (GlobalStandard, 2 requests/min). Retail API USD per1M: text input 5.00, image input 8.00, image output 30.00. Reservation 300000 micro values the 7500 input/8000 output envelope with all input at image-in 8.00; the images API has no token cap, so this is an estimated envelope with possible in-flight overrun, handled by the anomaly kill switch. Frozen parameters n1 1024x1280 medium jpeg compression85 opaque, no input_fidelity. Only the prepared garment photo is sent. Global processing may happen outside the EU. Probe and paid activation remain owner gates.';
 // The one immutable manifest BG2b-1 adds, validated field by field.
 export const ENHANCEMENT_MANIFEST_ROW = Object.freeze({
@@ -657,7 +664,8 @@ export async function captureColourPreservation(env, sql) {
   return { before, expected, client, owners, env };
 }
 
-// A3/A5: read-only comparison after M1 ('colours') or M2 ('target').
+// A3/A5: read-only comparison after M1 ('colours') or, before the later SAVE1 and RAIN1 migrations, 'target'.
+// 'target' therefore expects the pre-RAIN manifest set; the stylist v2 row is verified by verifyStylistV2Stage after its migration.
 export async function verifyColourStage(snapshot, sql, stage) {
   requireEvidence(['colours', 'target'].includes(stage));
   const { before, expected } = snapshot, after = await colourDigests(sql);
@@ -674,6 +682,7 @@ export async function verifyColourStage(snapshot, sql, stage) {
     equal(JSON.parse(await sql(stylistDefaultsSql)), { controls: 0, usage: 0, evidence: 0 });
     equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(STYLIST_MANIFEST_ROW.id)};`)),
       STYLIST_MANIFEST_ROW);
+    requireEvidence(!Object.hasOwn(after.manifests, STYLIST_V2_MANIFEST_ROW.id));
     equal(JSON.parse(await sql(enhancementDefaultsSql)), { controls: 0, usage: 0, evidence: 0 });
     equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(ENHANCEMENT_MANIFEST_ROW.id)};`)),
       ENHANCEMENT_MANIFEST_ROW);
@@ -683,6 +692,19 @@ export async function verifyColourStage(snapshot, sql, stage) {
     equal((await sql(`select count(*) from private.ai_usage_evidence where num_nonnulls(provider_refusal,usage_absent)>0;`)).trim(), '0');
     equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(TRYON_MANIFEST_ROW.id)};`)),
       TRYON_MANIFEST_ROW);
+  }
+  return after;
+}
+
+// RAIN1: read-only check after the forward stylist migration. The v1 seed is still in place and later migrations (SAVE1)
+// legitimately replace the colour function bodies, so this checks only the manifest catalogue: nothing earlier changed and
+// the v2 row is added exactly as pinned. Seeded rows, controls and ledger are verified by stylistUpgradeVerify.
+export async function verifyStylistV2Stage(snapshot, sql) {
+  const after = await colourDigests(sql);
+  for (const [id, md5] of Object.entries(snapshot.before.manifests)) equal(after.manifests[id], md5);
+  requireEvidence(Object.hasOwn(after.manifests, STYLIST_V2_MANIFEST_ROW.id));
+  for (const row of [STYLIST_MANIFEST_ROW, STYLIST_V2_MANIFEST_ROW]) {
+    equal(JSON.parse(await sql(`select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(row.id)};`)), row);
   }
   return after;
 }

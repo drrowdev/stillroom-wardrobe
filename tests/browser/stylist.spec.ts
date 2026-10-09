@@ -46,6 +46,18 @@ const reply = (clothes: Clothes, extra: Row = {}) => ({ status: 200, body: { cod
   { itemIds: [clothes.shirt.id, clothes.trousers.id, clothes.boots.id], note: 'Crisp and simple.' },
   { itemIds: [clothes.dress.id, clothes.boots.id], note: '' },
 ], ...extra } });
+/**
+ * A focus joins a status read that is already running, and that read may have started before the change below.
+ * Focus again until a read has started after the change, so the page shows what the change made true.
+ */
+async function changeThenRefocus(page: Page, api: Api, change: () => void) {
+  change();
+  const reads = api.stylistControl.statusReads;
+  await expect.poll(async () => {
+    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    return api.stylistControl.statusReads > reads;
+  }).toBe(true);
+}
 async function ask(page: Page, words: string, language: Language = 'en') {
   await message(page).fill(words);
   await sendButton(page, language).click();
@@ -308,8 +320,7 @@ test.describe('ST1b stylist', () => {
     api.stylistControl.replies.push(reply(clothes));
     await ask(page, 'Before the pause');
     await expect(ideas(page)).toHaveCount(2);
-    api.stylistControl.setup[owners.a] = { configured: true, activated: false };
-    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    await changeThenRefocus(page, api, () => { api.stylistControl.setup[owners.a] = { configured: true, activated: false }; });
     await expect(page.getByText(text('stylist.paused'), { exact: true })).toBeVisible();
     await expect(message(page)).toHaveCount(0);
     await clearButton.click();
@@ -329,18 +340,15 @@ test.describe('ST1b stylist', () => {
     await expect(message(page)).toHaveCount(0);
     await clearButton.click();
     await expect(clearButton).toHaveCount(0);
-    api.stylistControl.consent[owners.a] = 1;
-    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    await changeThenRefocus(page, api, () => { api.stylistControl.consent[owners.a] = 1; });
     await expect(message(page)).toHaveValue('');
     // The same after a pause.
     await message(page).fill('Draft before the pause');
-    api.stylistControl.setup[owners.a] = { configured: true, activated: false };
-    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    await changeThenRefocus(page, api, () => { api.stylistControl.setup[owners.a] = { configured: true, activated: false }; });
     await expect(page.getByText(text('stylist.paused'), { exact: true })).toBeVisible();
     await clearButton.click();
     await expect(clearButton).toHaveCount(0);
-    api.stylistControl.setup[owners.a] = { configured: true, activated: true };
-    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    await changeThenRefocus(page, api, () => { api.stylistControl.setup[owners.a] = { configured: true, activated: true }; });
     await expect(message(page)).toHaveValue('');
     expect(api.stylistControl.chats).toHaveLength(0);
   });
@@ -357,6 +365,43 @@ test.describe('ST1b stylist', () => {
     await ask(page, 'What should I wear?');
     await expect(ideas(page)).toHaveCount(2);
     expect((api.stylistControl.chats[0]!.body as Row).weather).toBeNull();
+  });
+
+  test('cold weather leaves a saved indoor idea usable; outerwear outside its confirmed range is not (RAIN1)', async ({ page }) => {
+    const api = await mockBackend(page, { initialLanguage: 'en', weather: { a: { weather_enabled: true, weather_city: 'Oulu, Finland', latitude: 65, longitude: 25.5 } } });
+    await page.route(/^https:\/\/(geocoding-api|api)\.open-meteo\.com\//, (route) => route.fulfill({ status: 503, json: { error: true } }));
+    const clothes = seed(api);
+    // Temperature ranges the owner confirmed (provenance 'user'); only outerwear's range may matter.
+    const confirmed = { min_temp: { kind: 'user', revision: 1 }, max_temp: { kind: 'user', revision: 1 } };
+    for (const garment of [clothes.shirt, clothes.trousers, clothes.boots]) Object.assign(garment, { min_temp: 18, max_temp: 26, field_provenance: confirmed });
+    const coat = api.seedSavedItem('a', 'Light coat').item as Row & { id: string };
+    Object.assign(coat, { category: 'outerwear', seasons: ['autumn'], min_temp: 15, max_temp: 25, field_provenance: confirmed });
+    api.stylistControl.setup[owners.a] = { configured: true, activated: true };
+    api.stylistControl.consent[owners.a] = 1;
+    await page.goto('/#/today'); await signIn(page);
+    await expectSignedIn(page);
+    await page.locator('#weather-trigger').click();
+    await page.getByRole('button', { name: text('weather.enterTemperature'), exact: true }).click();
+    await page.locator('#weather-temperature').fill('4');
+    await page.getByRole('button', { name: text('weather.useTemperature'), exact: true }).click();
+    await expect(page.locator('#weather-temperature')).toHaveCount(0);
+    await page.evaluate(() => { location.hash = '#/stylist'; });
+    api.stylistControl.replies.push({ status: 200, body: { code: 'OK', reply: 'Two ideas.', outfits: [
+      { itemIds: [clothes.shirt.id, clothes.trousers.id, clothes.boots.id], note: '' },
+      { itemIds: [clothes.shirt.id, clothes.trousers.id, coat.id], note: '' },
+    ] } });
+    await ask(page, 'Office tomorrow');
+    await expect(ideas(page)).toHaveCount(2);
+    // The cold temperature was really sent with the request.
+    expect((api.stylistControl.chats[0]!.body as Row).weather).toMatchObject({ setting: 'outdoors', temperatureC: 4 });
+    const save = (index: number) => ideas(page).nth(index).getByRole('button', { name: text('today.save'), exact: true });
+    await expect(ideas(page).nth(0)).not.toContainText(text('stylist.itemUnavailable'));
+    await expect(save(0)).toBeEnabled();
+    await expect(ideas(page).nth(1)).toContainText(text('stylist.itemUnavailable'));
+    await expect(save(1)).toBeDisabled();
+    await save(0).click();
+    await expect(page.locator('#outfit-editor-title')).toBeFocused();
+    await expect(page.locator('.outfit-slot')).toHaveCount(3);
   });
 
   test('offline keeps the draft and sends nothing; nothing is stored in the browser', async ({ page, context }) => {

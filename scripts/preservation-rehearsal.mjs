@@ -18,7 +18,7 @@ import {
 } from '../tests/integration/preservation.sessions.mjs';
 import { captureAzurePreservation, verifyAzurePreservation,
   captureImageChangePreservation, verifyImageChangePreservation,
-  captureColourPreservation, verifyColourStage, colourProbes } from '../tests/integration/azure-preservation.sessions.mjs';
+  captureColourPreservation, verifyColourStage, verifyStylistV2Stage, colourProbes } from '../tests/integration/azure-preservation.sessions.mjs';
 
 const PRIOR_MAIN_VERSION = '20260913120000';
 const AZURE_TARGET_VERSION = '20260921193000';
@@ -66,6 +66,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261005090000_provider_refusal.sql', version: '20261005090000', time: '2026-10-05 09:00:00', bytes: 38858, sha256: SOURCE_HASHES.providerRefusal },
   { name: '20261007090000_outfit_lifecycle.sql', version: '20261007090000', time: '2026-10-07 09:00:00', bytes: 3754, sha256: '243c41376a2c3d708e2cd78739a3352e5461c441a41eb5b50b3e535a14e432ef' },
   { name: '20261008080000_analysis_model_identity.sql', version: '20261008080000', time: '2026-10-08 08:00:00', bytes: 11083, sha256: '1a3b8c3d1723378f0734dd1828bddf235a68af5e6fe1c7711ff7fa2a4a952e19' },
+  { name: '20261009090000_stylist_weather_outerwear.sql', version: '20261009090000', time: '2026-10-09 09:00:00', bytes: 7237, sha256: '72f11f973476ac8d92f73cdca826871d41350e6161655c1f4f23eb97de691e56' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1311,10 +1312,18 @@ async function main() {
       stage = 'SAVE1-seed';
       const { analysisModelSeed, analysisModelVerify } = await import('../tests/integration/analysis-missing-model.sessions.mjs');
       const modelSeed = await analysisModelSeed(colourSnapshot, privilegedLocalSql);
+      stage = 'RAIN1-seed';
+      // Real v1 stylist claims are made at the prior inventory, before the forward v2 manifest migration is applied.
+      const { stylistUpgradeSeed, stylistUpgradeVerify } = await import('../tests/integration/stylist-ledger.sessions.mjs');
+      const rainSeed = await stylistUpgradeSeed(colourSnapshot, privilegedLocalSql);
       stage = 'SAVE1-prior-to-target';
       await migrateToStage(run, 'save1-prior', 'target');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
       await history('target'); await verifyCiStorageGuard();
+      stage = 'RAIN1-manifest-verify';
+      await verifyStylistV2Stage(colourSnapshot, privilegedLocalSql);
+      stage = 'RAIN1-verify';
+      await stylistUpgradeVerify(rainSeed, colourSnapshot, privilegedLocalSql, (label) => { stage = `RAIN1-${label}`; });
       stage = 'SAVE1-verify';
       await analysisModelVerify(modelSeed, privilegedLocalSql, (label) => { stage = `SAVE1-${label}`; });
       stage = 'COL1-A6-fifteen-probes';
@@ -1346,6 +1355,7 @@ async function main() {
     console.log('PASS: FILT1 upgrade; try-on and enhancement rows settled by the old finishes keep their digest, origin, anomaly and amount after the provider_refusal migration, the new columns are null, replays with the refusal arguments omitted or null match and write nothing; seeded rows removed before the compare; no provider calls');
     console.log('PASS: COL1 populated11/twelve/fifteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after fifteen; no provider calls');
     console.log('PASS: P6d tag history; v2 equals legacy for recorded history, recorded history re-imported through the RPC and a second generation imported, concurrent and completion races settle serially; no provider calls');
+    console.log('PASS: RAIN1 stylist upgrade; real v1 claims (settled, held, provisionally expired) made before the v2 manifest migration keep their ledger, controls and function properties, v1 and v2 are admitted separately with cross pairs and unknown manifests writing nothing, held and expired v1 requests settle across the controls cutover, owner isolation; seeded rows removed and controls restored; no provider calls');
     console.log('PASS: ST1a stylist ledger; service-only claim/finish, idempotent and conflicting finish, invalid/anomaly/overrun precedence disables only the stylist, scheduled expiry then observed finish, UTC month, sub-limit and shared allowance, shared-limit and freeze races, operator allocation, confirmed-weather and fenced context, export unchanged; no provider calls');
     console.log('PASS: BG2b enhancement ledger; service-only claim/finish/probe, idempotent finish over output hash, anomaly and operator shutdown on the shared switch, expiry then late finish without evidence, consent/freeze overlap, shared A/B slots, mixed tagging/stylist/enhancement admission and clamp, operator probe limits, snapshot bindings attached once on pending->ready, expired-output refusal, legacy/v4/unlabelled restore modes and v1->v2 resume; inactive state restored; no provider calls');
     console.log('PASS: AD1 admin limits; non-admin UNAVAILABLE before any target work, operator grant bound to the current admission, spending disclosure allowlist with confirmed/estimated/reserved months, guarded exact-micro writes with audit, overlap and deletion-safety cases, export unchanged; no provider calls');
