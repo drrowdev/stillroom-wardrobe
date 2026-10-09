@@ -31,6 +31,8 @@
 .today-idea-title:focus { outline-offset: 4px; }
 .today-page .today-reasons { flex-direction: row; flex-wrap: wrap; gap: 6px 14px; }
 .today-quiet { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; }
+.today-undo { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; max-width: 640px; margin: 8px 0 0; }
+.today-undo .notice { margin: 0; }
 .today-like[aria-pressed="true"] { color: var(--primary); font-weight: 600; }
 .today-menu { position: relative; display: inline-flex; flex-direction: column; align-items: flex-start; }
 .today-menu-toggle { min-width: 44px; min-height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 1.25rem; line-height: 1; }

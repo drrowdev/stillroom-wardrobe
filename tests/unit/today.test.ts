@@ -196,12 +196,14 @@ describe('pair ranking on a page', () => {
     expect([...rankingPairs(new Set(['a|b', 'c|d']), new Set(['e|f']), new Set(['a|b', 'e|f']))].sort()).toEqual(['c|d', 'e|f']);
     expect([...rankingPairs(new Set(['a|b']), new Set(), new Set())]).toEqual(['a|b']);
   });
-  it('leaves out ideas holding a newly avoided pair, except the card it was chosen on', () => {
+  it('leaves out ideas holding a newly avoided pair, except a card whose choice is still being written or settled', () => {
     const idea = (key: string, itemIds: string[]) => ({ key, itemIds }) as unknown as Suggestion;
     const ideas = [idea('one', ['a', 'b', 'c']), idea('two', ['a', 'b', 'd']), idea('three', ['a', 'd']), idea('four', ['c', 'd'])];
-    const keys = (live: string[], ranked: string[], chosen: [string, string][]) =>
-      visibleIdeas(ideas, new Set(live), new Set(ranked), new Map(chosen)).map(entry => entry.key);
-    expect(keys(['a|b'], [], [['one', 'a|b']])).toEqual(['one', 'three', 'four']);
+    const keys = (live: string[], ranked: string[], kept: string[]) =>
+      visibleIdeas(ideas, new Set(live), new Set(ranked), new Set(kept)).map(entry => entry.key);
+    expect(keys(['a|b'], [], ['one'])).toEqual(['one', 'three', 'four']);
+    // A confirmed pair no longer keeps its card: the next idea shows in its place.
+    expect(keys(['a|b'], [], [])).toEqual(['three', 'four']);
     expect(keys(['a|b'], ['a|b'], [])).toEqual(['one', 'two', 'three', 'four']);
     expect(keys([], [], [])).toEqual(['one', 'two', 'three', 'four']);
   });

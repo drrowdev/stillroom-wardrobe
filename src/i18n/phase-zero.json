@@ -226,7 +226,7 @@
   "today.dontPair": {"en":"Don't suggest these together","fi":"Älä ehdota näitä yhdessä","sv":"Föreslå inte de här tillsammans"},
   "today.pickPair": {"en":"Choose the two you don't want together.","fi":"Valitse kaksi vaatetta, joita et halua yhdessä.","sv":"Välj de två plagg du inte vill ha tillsammans."},
   "today.pairConfirm": {"en":"Save preference","fi":"Tallenna valinta","sv":"Spara valet"},
-  "today.pairHidden": {"en":"These two won't be suggested together.","fi":"Näitä kahta ei ehdoteta yhdessä.","sv":"De här två föreslås inte tillsammans."},
+  "today.undoPair": {"en":"Undo: don't suggest these together","fi":"Kumoa: älä ehdota näitä yhdessä","sv":"Ångra: föreslå inte de här tillsammans"},
   "pairs.title": {"en":"Avoided pairs","fi":"Vältettävät parit","sv":"Undvikna par"},
   "pairs.empty": {"en":"No avoided pairs yet.","fi":"Ei vältettäviä pareja.","sv":"Inga undvikna par."},
   "pairs.loadFailed": {"en":"Couldn't load avoided pairs.","fi":"Vältettäviä pareja ei voitu ladata.","sv":"Det gick inte att läsa in undvikna par."},

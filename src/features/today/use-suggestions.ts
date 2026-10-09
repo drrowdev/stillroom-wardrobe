@@ -40,7 +40,7 @@ type Run = { feedback: EngineFeedback[]; excluded: ReadonlySet<string>; skip: Re
 type Choice = { kind: 'like' | 'hide' | 'undo'; vote: Vote | null } | { kind: 'avoid' | 'allow'; pair: string };
 export type Pending = { key: string; kind: Choice['kind'] };
 // `after` counts the reads started when the choice became unsettled; only a later read can settle it.
-type Unresolved = { key: string; choice: Choice; after: number };
+type Unresolved = { key: string; choice: Choice; after: number; ctx: string };
 
 const votesFrom = (feedback: readonly EngineFeedback[]) => new Map(feedback.map(entry => [combinationKey(entry.itemIds), entry.vote]));
 const feedbackFrom = (votes: ReadonlyMap<string, Vote>): EngineFeedback[] =>
@@ -82,8 +82,8 @@ export function rankingPairs(fresh: ReadonlySet<string>, ranked: ReadonlySet<str
   for (const pair of changed) if (ranked.has(pair)) result.add(pair); else result.delete(pair);
   return result;
 }
-// Ideas on the page holding a pair avoided since the page was drawn are left out, except the cards in `kept`: the card a pair
-// was avoided on, which shows the choice and its Undo, and a card whose pair choice is still being written or settled.
+// Ideas on the page holding a pair avoided since the page was drawn are left out, except the cards in `kept`: a card whose
+// pair choice is still being written or settled.
 export function visibleIdeas(suggestions: readonly Suggestion[], live: ReadonlySet<string>, ranked: ReadonlySet<string>,
   kept: { has(key: string): boolean }): Suggestion[] {
   const added = [...live].filter(pair => !ranked.has(pair)).map(pair => pair.split('|'));
@@ -93,6 +93,11 @@ export function visibleIdeas(suggestions: readonly Suggestion[], live: ReadonlyS
 
 export type WeatherContext = Pick<EngineContext, 'setting' | 'temperatureC' | 'rainProbability' | 'windMetresPerSecond'>;
 
+// The latest pair avoided in this Today context, with the card it was avoided on, so Undo can allow it again.
+export type LastPair = { pair: string; key: string };
+// Undo is not on a card, and a two-piece idea's key equals its pair, so its own write key keeps it apart from any card.
+export const undoKeyOf = (pair: string) => `${pair}#undo`;
+
 export function useSuggestions(client: AppClient, scope: OwnerScope, online: boolean, invalidation: number, occasion: Occasion, season: Season,
   weather: WeatherContext = {}) {
   const [data, setData] = useState<Data | null>(null);
@@ -100,8 +105,11 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   const [tick, setTick] = useState(0);
   const [votes, setVotes] = useState<Map<string, Vote>>(() => new Map());
   const [run, setRun] = useState<Run>({ feedback: [], excluded: new Set(), skip: new Set(), paged: false });
-  // Cards on this page where a pair was avoided, with that pair.
-  const [chosen, setChosen] = useState<Map<string, string>>(() => new Map());
+  const [last, setLast] = useState<LastPair | null>(null);
+  // Counts pairs confirmed as avoided and Undo choices confirmed, so Today can move on or bring the idea back once for each.
+  // Each carries the Today context (occasion, season, weather) its write started in; a receipt from an earlier context is never acted on.
+  const [avoided, setAvoided] = useState({ count: 0, ctx: '' });
+  const [restored, setRestored] = useState<{ key: string; count: number; ctx: string } | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [unresolved, setUnresolved] = useState<Unresolved | null>(null);
@@ -111,6 +119,7 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   const weatherId = JSON.stringify([weather.setting ?? null, weather.temperatureC ?? null, weather.rainProbability ?? null, weather.windMetresPerSecond ?? null]);
   const [applied, setApplied] = useState({ id: weatherId, weather });
   if (!settling && applied.id !== weatherId) setApplied({ id: weatherId, weather });
+  const contextKey = `${occasion}|${season}|${applied.id}`;
   const wasOnline = useRef(online);
   const votesRef = useRef(votes);
   const excludedRef = useRef<ReadonlySet<string>>(new Set());
@@ -123,7 +132,19 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   // Choices made on the page being shown keep their earlier ranking, so a hidden card stays in place with its Undo.
   const changedOnPage = useRef(new Set<string>());
   const changedPairs = useRef(new Set<string>());
-  const newPage = useCallback(() => { changedOnPage.current = new Set(); changedPairs.current = new Set(); setChosen(new Map()); }, []);
+  const newPage = useCallback(() => { changedOnPage.current = new Set(); changedPairs.current = new Set(); }, []);
+  const lastRef = useRef<LastPair | null>(null);
+  const remember = useCallback((value: LastPair | null) => { lastRef.current = value; setLast(value); }, []);
+  // A pair choice that settles as made: avoided becomes the one Undo offers; allowed again, it is gone and its idea may come back.
+  // A choice found not to have taken effect (a failed Undo, a failed avoid) changes nothing here.
+  const settledPair = useCallback((pair: string, stored: boolean, key: string, chosen: boolean, ctx: string) => {
+    if (stored !== chosen) return;
+    if (stored) { remember({ pair, key }); setAvoided(current => ({ count: current.count + 1, ctx })); return; }
+    const was = lastRef.current;
+    if (was?.pair !== pair) return;
+    remember(null);
+    setRestored(current => ({ key: was.key, count: (current?.count ?? 0) + 1, ctx }));
+  }, [remember]);
   const reload = useCallback(() => setTick(value => value + 1), []);
   useEffect(() => { votesRef.current = votes; }, [votes]);
   useEffect(() => { unresolvedRef.current = unresolved; }, [unresolved]);
@@ -143,17 +164,13 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
       const pairs = mergePairs(new Set(inputs.excludedPairs.map(([low, high]) => pairKey(low, high))), confirmedPairs.current, startSeq);
       for (const [key, entry] of confirmed.current) if (entry.seq <= startSeq) confirmed.current.delete(key);
       for (const [pair, entry] of confirmedPairs.current) if (entry.seq <= startSeq) confirmedPairs.current.delete(pair);
-      // An unsettled pair choice that this read (started after it) finds stored as chosen is done: its card shows the choice.
+      // An unsettled pair choice that this read (started after it) finds stored as chosen is done.
       const open = unresolvedRef.current;
       if (open && 'pair' in open.choice && started > open.after) {
-        const key = open.key, choice = open.choice;
+        const choice = open.choice;
         const stored = inputs.excludedPairs.some(([low, high]) => pairKey(low, high) === choice.pair);
         if (stored === (choice.kind === 'avoid')) {
-          setChosen(current => {
-            const updated = new Map(current);
-            if (stored) updated.set(key, choice.pair); else updated.delete(key);
-            return updated;
-          });
+          settledPair(choice.pair, stored, open.key, choice.kind === 'avoid', open.ctx);
           unresolvedRef.current = null;
           setUnresolved(null);
         }
@@ -166,7 +183,7 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
       if (!controller.signal.aborted && !isAborted(problem)) setError(errorKey(problem));
     });
     return () => controller.abort();
-  }, [client, scope, tick, invalidation]);
+  }, [client, scope, tick, invalidation, settledPair]);
   useEffect(() => {
     const controller = new AbortController();
     writes.current = controller;
@@ -174,10 +191,10 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   }, []);
   // A new occasion, season or weather starts again from the first ideas.
   useEffect(() => {
-    newPage();
+    newPage(); remember(null);
     setRun({ feedback: feedbackFrom(votesRef.current), excluded: excludedRef.current, skip: new Set(), paged: false });
     setFailed(null); setUnresolved(null);
-  }, [occasion, season, applied.id, newPage]);
+  }, [occasion, season, applied.id, newPage, remember]);
 
   const engineItems = useMemo(() => suggestionPool(data?.items ?? []), [data]);
   const result: SuggestionResult | null = useMemo(() => data ? recommend({
@@ -209,6 +226,7 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
     changedOnPage.current.add(key);
     if ('pair' in choice) changedPairs.current.add(choice.pair);
     const owner = { ownerId: scope.ownerId, epoch: scope.epoch };
+    const ctx = contextKey;
     const state: { outcome: WriteOutcome | null } = { outcome: null };
     // Sends the choice; a lost reply is checked against what was stored. True when the stored value is the choice.
     const settleWith = async <T,>(send: () => Promise<WriteOutcome>, read: () => Promise<T>, settle: (stored: T) => void, target: T) => {
@@ -230,7 +248,7 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
         return updated;
       });
     };
-    const settlePair = (pair: string) => (avoided: boolean) => {
+    const settlePair = (pair: string, chosen: boolean) => (avoided: boolean) => {
       seq.current += 1;
       confirmedPairs.current.set(pair, { avoided, seq: seq.current });
       setData(current => {
@@ -239,46 +257,44 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
         if (avoided) excluded.add(pair); else excluded.delete(pair);
         return { ...current, excluded };
       });
-      setChosen(current => {
-        const updated = new Map(current);
-        if (avoided) updated.set(key, pair); else updated.delete(key);
-        return updated;
-      });
+      settledPair(pair, avoided, key, chosen, ctx);
     };
     try {
       const stored = 'pair' in choice
         ? await settleWith(() => writePair(client, scope, { ...owner, pair: choice.pair, avoid: choice.kind === 'avoid' }, signal),
-          () => readPair(client, scope, { ...owner, pair: choice.pair, avoid: choice.kind === 'avoid' }, signal), settlePair(choice.pair), choice.kind === 'avoid')
+          () => readPair(client, scope, { ...owner, pair: choice.pair, avoid: choice.kind === 'avoid' }, signal), settlePair(choice.pair, choice.kind === 'avoid'), choice.kind === 'avoid')
         : await settleWith(() => writeVote(client, scope, { ...owner, key, choice: choice.vote }, signal),
           () => readVote(client, scope, { ...owner, key, choice: choice.vote }, signal), settleVote, choice.vote);
       if (!stored) setFailed(key);
     } catch (problem) {
       if (signal.aborted || isAborted(problem)) return;
       // The choice may have been stored; keep it so Try again can settle it.
-      if (state.outcome === 'unknown') setUnresolved({ key, choice, after: reads.current }); else setFailed(key);
+      if (state.outcome === 'unknown') setUnresolved({ key, choice, after: reads.current, ctx }); else setFailed(key);
     } finally {
       if (!signal.aborted) setPending(null);
     }
-  }, [client, scope, online, pending, unresolved]);
+  }, [client, scope, online, pending, unresolved, settledPair, contextKey]);
 
   const ideas = useMemo(() => {
     if (!result) return [];
-    const kept = new Set(chosen.keys());
+    const kept = new Set<string>();
     if (pending && (pending.kind === 'avoid' || pending.kind === 'allow')) kept.add(pending.key);
     if (unresolved && 'pair' in unresolved.choice) kept.add(unresolved.key);
     return visibleIdeas(result.suggestions, data?.excluded ?? new Set(), run.excluded, kept);
-  }, [result, data, run.excluded, chosen, pending, unresolved]);
+  }, [result, data, run.excluded, pending, unresolved]);
   return {
     data, error, result, votes, pending, failed, unresolved: unresolved?.key ?? null, settling, paged: run.paged, reload, more, startOver,
-    ideas, avoided: (key: string) => { const pair = chosen.get(key); return pair && data?.excluded.has(pair) ? pair : null; },
-    // The pair of an uncertain Don't pair these or its Undo on this card, until it is settled.
-    unsettledPair: (key: string) => unresolved?.key === key && 'pair' in unresolved.choice ? unresolved.choice.pair : null,
+    ideas, last, avoids: avoided.count, avoidContext: avoided.ctx, restored, contextKey,
+    // A pair choice (a Don't pair these or its Undo) is being written or is unsettled, which holds navigation away from Today as well.
+    pairBusy: pending?.kind === 'avoid' || pending?.kind === 'allow' || (unresolved !== null && 'pair' in unresolved.choice), undoKey: last ? undoKeyOf(last.pair) : null,
+    // The pair of an uncertain Don't pair these on this card, until it is settled.
+    unsettledPair: (key: string) => unresolved?.key === key && unresolved.choice.kind === 'avoid' ? unresolved.choice.pair : null,
     retry: () => { if (unresolved) void write(unresolved.key, unresolved.choice); },
     hasClothes: Boolean(data?.items.some(item => item.lifecycle === 'active')),
     like: (key: string) => { void write(key, { kind: 'like', vote: votes.get(key) === 1 ? null : 1 }); },
     hide: (key: string) => { void write(key, { kind: 'hide', vote: -1 }); },
     undo: (key: string) => { void write(key, { kind: 'undo', vote: null }); },
     avoid: (key: string, first: string, second: string) => { if (first !== second) void write(key, { kind: 'avoid', pair: pairKey(first, second) }); },
-    allow: (key: string) => { const pair = chosen.get(key); if (pair) void write(key, { kind: 'allow', pair }); },
+    allow: () => { if (last) void write(undoKeyOf(last.pair), { kind: 'allow', pair: last.pair }); },
   };
 }
