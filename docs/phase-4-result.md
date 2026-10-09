@@ -90,3 +90,44 @@ that packet; the I15 record above is unchanged.
 - Captures added to i15-today-ui-<head>: pair-chooser-fi-mobile,
   pair-chooser-fi-320-200, pair-hidden-en-desktop,
   voided-pairs-sv-mobile.
+
+## PAIR1: Don't pair these moves straight on (9 October 2026)
+
+Owner request: choosing Don't pair these showed a summary of the decision that
+was not needed. Tier B UI change on base b2c09aae; no schema, storage, security,
+privacy or ranking change. It supersedes the card described above ("shows the
+two pieces ... and Undo") and its pair-hidden-en-desktop capture; the rest of
+that section is unchanged.
+
+- **Today**: once the pair is confirmed saved (including a lost reply confirmed
+  by reading the pair back), the idea gives way to the next eligible one, on the
+  next page when the current page is used up, or to the existing no-more state.
+  There is no summary, status line or extra Show another tap. With more than two
+  pieces the pair chooser stays; Apply then behaves the same way.
+- **Undo** is a compact button below the suggestion. It restores the latest
+  confirmed pair only, for the current Today context (occasion, season,
+  weather); a newer pair, a context change or leaving Today replaces it. The
+  rejected idea returns when it is still on the page. It stays available when no
+  ideas are left. A failed Undo says so and stays available; an unsettled one
+  offers Try again and locks other choices.
+- Nothing moves on for a rejected, offline or unsettled write; the existing
+  Try again and locking rules are unchanged, as are writePair, readPair, merging
+  and the stale-read and owner/epoch guards. Focus lands on the next suggestion
+  heading or the no-more state only when it was on the removed idea; focus
+  elsewhere is left alone.
+- Strings: today.pairHidden replaced by today.undoPair (en/fi/sv).
+- Captures: pair-next-en-desktop and pair-next-fi-mobile in i15-today-ui-<head>
+  replace pair-hidden-en-desktop (ci.yml artifact list and its unit test).
+  Written by tests, not viewed by the builder; coordinator visual review pending.
+- Review repair: while an Undo is being written or unsettled, Save as outfit and
+  Wear today are disabled with the other choices, so leaving Today cannot lose a
+  pending Try again. A pair receipt carries the occasion, season and weather it
+  came from; one that lands after the context changed is consumed without
+  restoring the idea or moving the new page. Tests hold the Undo write and the
+  forecast to cover direct confirmation and a lost reply. Removing the Save/Wear
+  lock fails its tests; removing the receipt guard does not, because the old idea
+  is still excluded when the receipt lands, so the guard is defence in depth.
+- Validation (local, pinned Node 24.19.0): lint, typecheck, check:translations,
+  tests/unit/today.test.ts and ci-workflow.test.ts, and tests/browser/today.spec.ts
+  on chromium, mobile and webkit-photo (47 tests each). Full integration,
+  security and browser suites run in CI.

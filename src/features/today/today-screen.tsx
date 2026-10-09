@@ -65,20 +65,28 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
   useEffect(() => { if (!featured.armed) setFeatured(value => value.armed ? value : { ...value, armed: true }); }, [featured.armed]);
   const keys = useMemo(() => result?.status === 'ideas' ? ideas.ideas.map(suggestion => suggestion.key) : [], [result, ideas.ideas]);
   const reconciled = reconcile(keys, featured);
-  if (reconciled.state !== featured && stored.token === token) setFeatured(reconciled.state);
-  const shown = reconciled.shown;
+  // The idea a pair was just avoided on gives way to the next one, which counts as another idea.
+  const moved = featured.armed && featured.current !== null && reconciled.state.current !== featured.current && ideas.last?.key === featured.current;
+  const settled = moved ? { ...reconciled.state, number: featured.number + 1 } : reconciled.state;
+  if (settled !== featured && stored.token === token) setFeatured(settled);
+  const shown = moved && reconciled.shown.kind === 'idea' ? { ...reconciled.shown, number: featured.number + 1 } : reconciled.shown;
   // Where keyboard focus goes after Show another or Start over has rendered.
   const focusAfter = useRef(false);
+  // Set when a confirmed pair moves to the next page: focus goes once that page has rendered.
+  const focusPage = useRef<number | null>(null);
   const busy = ideas.settling || wear.state.kind === 'inFlight';
   const browseLocked = ideas.settling || wear.state.kind === 'inFlight';
+  function nextPage() {
+    ideas.more();
+    setPage(page + 1);
+    setFeatured(featuredStart(transitionToken(page + 1, occasion, season, appliedWeather), featured.number + 1));
+  }
   function another() {
     if (browseLocked) return;
     focusAfter.current = true;
     const following = next(keys, featured);
     if (following !== 'page') { setFeatured(following); return; }
-    ideas.more();
-    setPage(page + 1);
-    setFeatured(featuredStart(transitionToken(page + 1, occasion, season, appliedWeather), featured.number + 1));
+    nextPage();
   }
   function startOver() {
     if (browseLocked) return;
@@ -89,9 +97,36 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
   }
   const status = result?.status;
   const shownKey = shown.kind === 'idea' ? shown.key : null;
+  const handled = useRef({ avoids: ideas.avoids, restored: ideas.restored?.count ?? 0 });
+  // Once a pair or its Undo is confirmed and nothing is unsettled, move on (or back) a single time. Focus follows only when it was lost
+  // with the removed card or Undo button, never when it is somewhere else.
   useEffect(() => {
-    if (!focusAfter.current || !status) return;
-    focusAfter.current = false;
+    if (browseLocked || !result) return;
+    const avoidChanged = ideas.avoids !== handled.current.avoids;
+    const restoreChanged = ideas.restored !== null && ideas.restored.count !== handled.current.restored;
+    if (!avoidChanged && !restoreChanged) return;
+    handled.current = { avoids: ideas.avoids, restored: ideas.restored?.count ?? 0 };
+    // A confirmation from before the occasion, season or weather changed is consumed without moving this context's page.
+    const avoided = avoidChanged && ideas.avoidContext === ideas.contextKey;
+    const restored = restoreChanged && ideas.restored?.ctx === ideas.contextKey;
+    if (!avoided && !restored) return;
+    const active = document.activeElement;
+    const lost = active === null || active === document.body || !active.isConnected || active.matches('main');
+    if (restored && ideas.restored && keys.includes(ideas.restored.key)) {
+      const back = ideas.restored.key;
+      setFeatured(value => ({ ...value, current: back, seen: value.current !== null && !value.seen.includes(value.current) ? [...value.seen, value.current] : value.seen }));
+      focusAfter.current = lost;
+    } else if (restored && !avoided) {
+      if (lost) focusById(document.getElementById(titleId) ? titleId : 'today-title');
+    } else if (shown.kind === 'gone' && status === 'ideas') {
+      focusPage.current = lost ? page + 1 : null;
+      nextPage();
+    } else if (lost) focusAfter.current = true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- nextPage and the focus helpers only read this render's state
+  }, [ideas.avoids, ideas.restored, browseLocked, result, shown.kind, shownKey, status]);
+  useEffect(() => {
+    if (!status || !focusAfter.current && focusPage.current !== page) return;
+    focusAfter.current = false; focusPage.current = null;
     focusById(document.getElementById(titleId) ? titleId : status === 'none' ? 'today-no-more' : 'today-gone');
   }, [shownKey, shown.kind, status, page]);
   // An idea that disappears in a refresh takes focus with it only when focus was on it.
@@ -99,6 +134,8 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
     if (shown.kind === 'gone' && status === 'ideas' && document.activeElement === document.body) focusById('today-gone');
   }, [shown.kind, status]);
   const suggestion = shownKey ? ideas.ideas.find(entry => entry.key === shownKey) ?? null : null;
+  // Until the page moves on after a pair is avoided, nothing is shown in place of the idea.
+  const advancing = shown.kind === 'gone' && ideas.avoids !== handled.current.avoids && ideas.avoidContext === ideas.contextKey;
   const moreButton = <button type="button" className="button button-secondary" disabled={browseLocked} onClick={another}><Icon name="refresh" />{t('today.more')}</button>;
   return <section className="today-page" aria-labelledby="today-title">
     <WeatherBar weather={forecast} language={language} timeZone={timeZone} online={online} locked={busy} t={t} onTurnOnWeather={onTurnOnWeather} />
@@ -144,16 +181,44 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
             online={online} vote={ideas.votes.get(suggestion.key) ?? null} pending={ideas.pending} failed={ideas.failed === suggestion.key} unresolved={ideas.unresolved === suggestion.key} locked={ideas.unresolved !== null || wear.state.kind === 'inFlight'} onRetry={ideas.retry}
             onSave={() => onSave(suggestion.itemIds, occasion)} onLike={() => ideas.like(suggestion.key)}
             onHide={() => ideas.hide(suggestion.key)} onUndo={() => ideas.undo(suggestion.key)}
-            avoided={ideas.avoided(suggestion.key)} unsettled={ideas.unsettledPair(suggestion.key)} onAvoid={(first, second) => ideas.avoid(suggestion.key, first, second)} onAllow={() => ideas.allow(suggestion.key)}
-            wearBlocked={wear.blocked} onWear={() => wear.wear(suggestion.itemIds, byId)} more={moreButton} />
-            : <div className="today-empty">
+            unsettled={ideas.unsettledPair(suggestion.key)} onAvoid={(first, second) => ideas.avoid(suggestion.key, first, second)}
+            wearBlocked={wear.blocked} pairBusy={ideas.pairBusy} onWear={() => wear.wear(suggestion.itemIds, byId)} more={moreButton} />
+            : advancing ? null : <div className="today-empty">
               <p id="today-gone" tabIndex={-1} role="status">{t('today.ideaGone')}</p>
               {moreButton}
             </div>}
         </div>
       </>}
+    {ideas.undoKey && <UndoPair t={t} online={online} locked={browseLocked} pending={ideas.pending?.key === ideas.undoKey}
+      failed={ideas.failed === ideas.undoKey} unresolved={ideas.unresolved === ideas.undoKey} onUndo={ideas.allow} onRetry={ideas.retry} />}
     {stylistEntry && <div className="today-more"><button type="button" className="button button-secondary" onClick={onStylist}>{t('stylist.open')}</button></div>}
   </section>;
+}
+
+function UndoPair({ t, online, locked, pending, failed, unresolved, onUndo, onRetry }: {
+  t: Translate; online: boolean; locked: boolean; pending: boolean; failed: boolean; unresolved: boolean; onUndo: () => void; onRetry: () => void;
+}) {
+  const undo = useRef<HTMLButtonElement>(null);
+  const retry = useRef<HTMLButtonElement>(null);
+  const was = useRef(pending);
+  // When a write from here ends without removing this row, focus returns to its Undo, or to Try again when the result is uncertain.
+  useEffect(() => {
+    if (was.current && !pending) {
+      const active = document.activeElement;
+      if (active === null || active === document.body || !active.isConnected || active.matches('main') || active.closest('.today-undo')) {
+        (unresolved ? retry : undo).current?.focus();
+      }
+    }
+    was.current = pending;
+  }, [pending, unresolved]);
+  return <div className="today-undo">
+    {unresolved
+      ? <div className="notice notice-error" role="alert"><span>{t('today.voteFailed')}</span><button ref={retry} type="button" className="text-button" disabled={!online || pending} onClick={onRetry}>{t('common.retry')}</button></div>
+      : <>
+        <button ref={undo} type="button" className="text-button" aria-label={t('today.undoPair')} disabled={!online || locked} aria-busy={pending || undefined} onClick={onUndo}>{t('common.undo')}</button>
+        {failed && <p className="notice notice-error" role="alert">{t('today.voteFailed')}</p>}
+      </>}
+  </div>;
 }
 
 function Pieces({ ids, byId, images, t }: { ids: readonly string[]; byId: ReadonlyMap<string, WardrobeItem>; images: PrivateImages; t: Translate }) {
@@ -172,21 +237,19 @@ type IdeaProps = {
   list: (categories: readonly Category[]) => string;
   vote: 1 | -1 | null; pending: Pending | null; failed: boolean; unresolved: boolean; locked: boolean;
   onSave: () => void; onLike: () => void; onHide: () => void; onUndo: () => void; onRetry: () => void;
-  avoided: string | null; unsettled: string | null; onAvoid: (first: string, second: string) => void; onAllow: () => void;
-  wearBlocked: boolean; onWear: () => void; more: ReactNode;
+  unsettled: string | null; onAvoid: (first: string, second: string) => void;
+  wearBlocked: boolean; pairBusy: boolean; onWear: () => void; more: ReactNode;
 };
 function Idea({ suggestion, number, byId, images, t, list, online, vote, pending, failed, unresolved, locked, onSave, onLike, onHide, onUndo, onRetry,
-  avoided, unsettled, onAvoid, onAllow, wearBlocked, onWear, more }: IdeaProps) {
+  unsettled, onAvoid, wearBlocked, pairBusy, onWear, more }: IdeaProps) {
   const [menu, setMenu] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
   const legend = useRef<HTMLLegendElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
-  const undoPair = useRef<HTMLButtonElement>(null);
   const undoHide = useRef<HTMLButtonElement>(null);
   const retry = useRef<HTMLButtonElement>(null);
   const card = useRef<HTMLElement>(null);
-  const wasAvoided = useRef(avoided);
   const wasUnsettled = useRef(unsettled);
   const wasHidden = useRef(vote === -1);
   // Focus moves with the card only when it is on the card, or was lost when a button on it went away.
@@ -198,19 +261,13 @@ function Idea({ suggestion, number, byId, images, t, list, online, vote, pending
   // The More options toggle is the card's resting place once a choice made from its menu is undone or settled.
   const returnFocus = () => requestAnimationFrame(() => { if (here()) toggle.current?.focus(); });
   useEffect(() => { if (choosing) legend.current?.focus(); }, [choosing]);
-  useEffect(() => {
-    if (avoided && !wasAvoided.current) { if (here()) undoPair.current?.focus(); }
-    else if (!avoided && wasAvoided.current) returnFocus();
-    wasAvoided.current = avoided;
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- here and returnFocus only read refs
-  }, [avoided]);
   // An uncertain pair choice turns the card into its Try again, and back once it is settled, without taking focus from elsewhere.
   useEffect(() => {
-    if (unsettled && !wasUnsettled.current && !avoided) { if (here()) retry.current?.focus(); }
-    else if (!unsettled && wasUnsettled.current && !avoided) returnFocus();
+    if (unsettled && !wasUnsettled.current) { if (here()) retry.current?.focus(); }
+    else if (!unsettled && wasUnsettled.current) returnFocus();
     wasUnsettled.current = unsettled;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- here and returnFocus only read refs
-  }, [unsettled, avoided]);
+  }, [unsettled]);
   const hidden = vote === -1;
   useEffect(() => {
     if (hidden && !wasHidden.current) { if (here()) undoHide.current?.focus(); }
@@ -226,16 +283,6 @@ function Idea({ suggestion, number, byId, images, t, list, online, vote, pending
     : failed && <p className="notice notice-error" role="alert">{t('today.voteFailed')}</p>;
   const mine = pending?.key === suggestion.key;
   const heading = <h2 id={titleId} className="today-idea-title" tabIndex={-1}>{t('today.idea', { number })}</h2>;
-  if (avoided) return <article ref={card} className="today-card today-featured today-card-hidden" aria-labelledby={titleId}>
-    {heading}
-    <Pieces ids={suggestion.itemIds.filter(id => avoided.split('|').includes(id))} byId={byId} images={images} t={t} />
-    <p role="status">{t('today.pairHidden')}</p>
-    {problem}
-    <div className="today-actions">
-      <button ref={undoPair} type="button" className="text-button" disabled={!online || busy} aria-busy={mine || undefined} onClick={onAllow}>{t('common.undo')}</button>
-      {more}
-    </div>
-  </article>;
   // Until it is settled the pair may already be avoided, so the card offers nothing but its Try again.
   if (unsettled) return <article ref={card} className="today-card today-featured today-card-hidden" aria-labelledby={titleId}>
     {heading}
@@ -252,8 +299,8 @@ function Idea({ suggestion, number, byId, images, t, list, online, vote, pending
       {more}
     </div>
   </article>;
-  // Saving waits while a pair on this card is being written.
-  const pairing = mine && (pending.kind === 'avoid' || pending.kind === 'allow');
+  // Saving and wearing wait while any pair choice (on this card, or the Undo below) is being written or is unsettled.
+  const pairing = pairBusy;
   const wearDisabled = !online || pairing || wearBlocked || locked;
   return <article ref={card} className="today-card today-featured" aria-labelledby={titleId}>
     {heading}
