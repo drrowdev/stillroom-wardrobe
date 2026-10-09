@@ -46,6 +46,18 @@ const reply = (clothes: Clothes, extra: Row = {}) => ({ status: 200, body: { cod
   { itemIds: [clothes.shirt.id, clothes.trousers.id, clothes.boots.id], note: 'Crisp and simple.' },
   { itemIds: [clothes.dress.id, clothes.boots.id], note: '' },
 ], ...extra } });
+/**
+ * A focus joins a status read that is already running, and that read may have started before the change below.
+ * Focus again until a read has started after the change, so the page shows what the change made true.
+ */
+async function changeThenRefocus(page: Page, api: Api, change: () => void) {
+  change();
+  const reads = api.stylistControl.statusReads;
+  await expect.poll(async () => {
+    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    return api.stylistControl.statusReads > reads;
+  }).toBe(true);
+}
 async function ask(page: Page, words: string, language: Language = 'en') {
   await message(page).fill(words);
   await sendButton(page, language).click();
@@ -308,8 +320,7 @@ test.describe('ST1b stylist', () => {
     api.stylistControl.replies.push(reply(clothes));
     await ask(page, 'Before the pause');
     await expect(ideas(page)).toHaveCount(2);
-    api.stylistControl.setup[owners.a] = { configured: true, activated: false };
-    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    await changeThenRefocus(page, api, () => { api.stylistControl.setup[owners.a] = { configured: true, activated: false }; });
     await expect(page.getByText(text('stylist.paused'), { exact: true })).toBeVisible();
     await expect(message(page)).toHaveCount(0);
     await clearButton.click();
@@ -329,18 +340,15 @@ test.describe('ST1b stylist', () => {
     await expect(message(page)).toHaveCount(0);
     await clearButton.click();
     await expect(clearButton).toHaveCount(0);
-    api.stylistControl.consent[owners.a] = 1;
-    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    await changeThenRefocus(page, api, () => { api.stylistControl.consent[owners.a] = 1; });
     await expect(message(page)).toHaveValue('');
     // The same after a pause.
     await message(page).fill('Draft before the pause');
-    api.stylistControl.setup[owners.a] = { configured: true, activated: false };
-    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    await changeThenRefocus(page, api, () => { api.stylistControl.setup[owners.a] = { configured: true, activated: false }; });
     await expect(page.getByText(text('stylist.paused'), { exact: true })).toBeVisible();
     await clearButton.click();
     await expect(clearButton).toHaveCount(0);
-    api.stylistControl.setup[owners.a] = { configured: true, activated: true };
-    await page.evaluate(() => dispatchEvent(new Event('focus')));
+    await changeThenRefocus(page, api, () => { api.stylistControl.setup[owners.a] = { configured: true, activated: true }; });
     await expect(message(page)).toHaveValue('');
     expect(api.stylistControl.chats).toHaveLength(0);
   });
