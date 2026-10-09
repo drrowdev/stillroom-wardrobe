@@ -16,7 +16,8 @@ export const UNCLEAR_FACTS = Object.freeze({ outcome: 'unclear', fields: { categ
 export const USAGE = Object.freeze({ prompt_tokens: 100, completion_tokens: 30, total_tokens: 130,
   prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 }, completion_tokens_details: { reasoning_tokens: 20 } });
 /** The fixture image width selects the double's behaviour. */
-export const MODES = Object.freeze({ 121: 'unclear', 122: 'malformed', 123: 'server-error' });
+export const MODES = Object.freeze({ 121: 'unclear', 122: 'malformed', 123: 'server-error', 124: 'missing-model',
+  125: 'unrecognised-model', 126: 'cache-read' });
 
 /** Frame width from the first SOF marker of a JPEG, or null. */
 export function jpegWidth(bytes) {
@@ -232,8 +233,10 @@ export function tryonResponse(mode) {
 }
 export function completion(mode) {
   const content = mode === 'malformed' ? '{"outcome":"ready","fields":' : JSON.stringify(mode === 'unclear' ? UNCLEAR_FACTS : READY_FACTS);
-  return { model: RETURNED_MODEL, usage: USAGE, choices: [{ index: 0, finish_reason: 'stop',
-    message: { role: 'assistant', refusal: null, content } }] };
+  const usage = mode === 'cache-read' ? { ...USAGE, prompt_tokens_details: { cached_tokens: 10, cache_write_tokens: 0 } } : USAGE;
+  const reply = { usage, choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', refusal: null, content } }] };
+  if (mode === 'missing-model') return reply;
+  return { model: mode === 'unrecognised-model' ? 'synthetic-unlisted-model' : RETURNED_MODEL, ...reply };
 }
 
 function main() {

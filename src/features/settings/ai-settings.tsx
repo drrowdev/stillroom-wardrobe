@@ -19,11 +19,13 @@ type Pending = 'on' | 'off' | 'retry' | null;
 export function AiSettings({ ai, controller, scope, profile, busy, unresolved, online, language, t, onSpend }: Props) {
   const [status, setStatus] = useState<AiStatus | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [modelNotice, setModelNotice] = useState(false);
   const [error, setError] = useState<MessageKey | null>(null);
   const [pending, setPending] = useState<Pending>(null);
   const sequence = useRef(0);
   const latch = useRef(false);
   const reading = useRef<AbortController | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const heading = useRef<HTMLHeadingElement>(null);
   const switchButton = useRef<HTMLButtonElement>(null);
   const card = aiCardState({ status, loadFailed, unresolved });
@@ -36,14 +38,23 @@ export function AiSettings({ ai, controller, scope, profile, busy, unresolved, o
     }
     const own = new AbortController(), signal = AbortSignal.any([scope.signal, own.signal]), at = ++sequence.current;
     reading.current = own;
-    void ai.status(signal).then((next) => {
-      if (!signal.aborted && at === sequence.current) { setStatus(next); setLoadFailed(false); }
+    const startedAt = performance.now();
+    void ai.settingsStatus(signal).then((next) => {
+      if (signal.aborted || at !== sequence.current) return;
+      setStatus(next); setLoadFailed(false);
+      // The server clock decides the deadline; a monotonic timer from this read hides the notice when it passes.
+      const until = next.photoModelNoticeUntilMs ?? null;
+      const left = until === null ? 0 : until - next.serverTimeMs - (performance.now() - startedAt);
+      setModelNotice(left > 0);
+      clearTimeout(noticeTimer.current);
+      if (left > 0) noticeTimer.current = setTimeout(() => setModelNotice(false), Math.min(left, 2 ** 31 - 1));
     }, () => {
       if (!signal.aborted && at === sequence.current) setLoadFailed(true);
     }).finally(() => { if (reading.current === own) reading.current = null; });
   }, [ai, scope]);
   useEffect(() => { read(true); }, [read, profile.version]);
-  useEffect(() => () => { reading.current?.abort(); reading.current = null; }, []);
+  useEffect(() => () => { reading.current?.abort(); reading.current = null; clearTimeout(noticeTimer.current); }, []);
+  useEffect(() => { setModelNotice(false); clearTimeout(noticeTimer.current); }, [scope]);
   // After a pressed button is replaced, focus moves to the heading so it isn't lost. Passive refreshes never move focus.
   const pressedButton = useRef<HTMLElement | null>(null);
   const keepFocus = useCallback((pressed: HTMLElement | null) => { pressedButton.current = pressed; }, []);
@@ -64,9 +75,9 @@ export function AiSettings({ ai, controller, scope, profile, busy, unresolved, o
     } catch (failure) { if (!scope.signal.aborted && pressed) setError(errorKey(failure)); }
     finally {
       latch.current = false;
-      if (!scope.signal.aborted) { setPending(null); if (pressed) keepFocus(pressed); }
+      if (!scope.signal.aborted) { setPending(null); if (pressed) keepFocus(pressed); read(true); }
     }
-  }, [ai, busy, controller, keepFocus, scope]);
+  }, [ai, busy, controller, keepFocus, read, scope]);
   useEffect(() => {
     const refresh = () => {
       if (document.visibilityState !== 'visible' || !navigator.onLine || busy) return;
@@ -87,17 +98,15 @@ export function AiSettings({ ai, controller, scope, profile, busy, unresolved, o
     const binding = enabled ? aiPolicyBinding(scope, status) : null;
     latch.current = true; ++sequence.current; reading.current?.abort(); reading.current = null;
     setPending(enabled ? 'on' : 'off'); setError(null);
-    let changed = false;
     try {
       const next = await controller.saveAiConsent(scope, profile, ai, enabled, enabled ? status.policy?.noticeRevision ?? null : null, binding);
       if (!scope.signal.aborted) { setStatus(next); setLoadFailed(false); }
     } catch (failure) {
       if (scope.signal.aborted) return;
-      changed = failure instanceof AiError && failure.code === 'CONFIG_CHANGED';
-      setError(changed ? 'aiC.changed' : errorKey(failure));
+      setError(failure instanceof AiError && failure.code === 'CONFIG_CHANGED' ? 'aiC.changed' : errorKey(failure));
     } finally {
       latch.current = false;
-      if (!scope.signal.aborted) { setPending(null); keepFocus(pressed); if (changed) read(true); }
+      if (!scope.signal.aborted) { setPending(null); keepFocus(pressed); read(true); }
     }
   }
   const policy = status?.policy ?? null;
@@ -125,6 +134,7 @@ export function AiSettings({ ai, controller, scope, profile, busy, unresolved, o
     onSwitch={() => { if (control.checked) void change(false, switchButton.current); else sheet.show(); }}
     status={<>
       {state && <p>{t(state)}</p>}
+      {modelNotice && !state && <p>{t('aiC.photoModelNotice')}</p>}
       {pending !== null && pending !== 'retry' && <p>{t('common.saving')}</p>}
     </>}
     actions={(card.retry || card.turnOn && card.turnOff) && <div className="settings-actions">

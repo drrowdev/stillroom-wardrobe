@@ -6,7 +6,7 @@ import { messages, pluralText, type Language } from '../../src/i18n/all';
 import { formatUsdCents } from '../../src/domain/admin-limits';
 import { aiFixture } from './ai-photo-first-support';
 import { enhanced, held, redraw, removals, start, syntheticPhoto } from './enhancement-support';
-import { enhanceServerNow, signIn } from './mock-backend';
+import { enhanceServerNow, owners, signIn } from './mock-backend';
 import { shellNav, signOutThroughMenu } from './shell-support';
 
 type Fixture = Awaited<ReturnType<typeof aiFixture>>;
@@ -253,6 +253,18 @@ test('Save all with a lost reservation reply: the rest save, and Retry keeps the
   expect(reserved).toHaveLength(3);
   expect(new Set(reserved).size).toBe(2);
   expect(posts(api)).toHaveLength(2);
+});
+
+test('SAVE1 one photo whose analysis fails does not pause the batch: the other photos are still analysed', async ({ page }) => {
+  const api = await aiFixture(page);
+  api.failNext(1);
+  await startBatch(page, api, 3);
+  await expect(page.locator('.bulk-status-ready')).toHaveCount(3);
+  await expect(page.locator('.bulk-lines').getByText(messages['bulk.paused'].en, { exact: true })).toHaveCount(0);
+  expect(posts(api)).toHaveLength(3);
+  expect(api.results.size).toBe(2);
+  expect(api.items).toHaveLength(0);
+  expect(api.consent.get(owners.a)).toBe(true);
 });
 
 test('two unsettled analyses pause the rest: no third request, Retry is off, and the photo can still be saved by hand', async ({ page }) => {

@@ -31,16 +31,24 @@ export type AiStatus = Readonly<{
   consent: Readonly<{ enabled: boolean; noticeRevision: number | null; consentedAt: string | null; profileVersion: string }>;
   policy: AiPolicy | null;
   usage: Readonly<{ accountedMicro: string; requestsLastHour: number; warning: boolean }>;
+  /** Only on the Settings read that asked for status version 2: end of the unexpected-model notice window, or null. */
+  photoModelNoticeUntilMs?: number | null;
 }>;
+export const photoModelNoticeWindowMs = 7 * 24 * 60 * 60 * 1000;
 export type AiAccounting = Readonly<{ basis: 'held' | 'estimated' | 'confirmed'; amountMicro: string; currency: 'USD' }>;
 export type AiAnalysisReply =
   | Readonly<{ code: 'OK'; status: 'dispatched' | 'ready'; result: AiResult | null; accounting: AiAccounting }>
   | Readonly<{ code: Exclude<AiCode, 'OK'>; reason?: string }>;
 
-export function parseAiStatus(value: unknown): AiStatus | null {
-  if (!hasOnlyDataKeys(value, ['code', 'period', 'serverTimeMs', 'consent', 'policy', 'usage'])
+/** `negotiated` is the Settings read that sent status version 2: it must carry the notice field, and no other read may. */
+export function parseAiStatus(value: unknown, negotiated = false): AiStatus | null {
+  const keys = ['code', 'period', 'serverTimeMs', 'consent', 'policy', 'usage'];
+  if (!hasOnlyDataKeys(value, negotiated ? [...keys, 'photoModelNoticeUntilMs'] : keys)
     || !isAiCode(value.code) || typeof value.period !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value.period)
     || !isAiTimestamp(value.serverTimeMs)) return null;
+  const until = negotiated ? value.photoModelNoticeUntilMs : undefined;
+  if (negotiated && until !== null && !(isAiTimestamp(until) && until >= value.serverTimeMs
+    && until <= value.serverTimeMs + photoModelNoticeWindowMs)) return null;
   const c = value.consent, p = value.policy, u = value.usage;
   if (!hasOnlyDataKeys(c, ['enabled', 'noticeRevision', 'consentedAt', 'profileVersion'])
     || typeof c.enabled !== 'boolean' || !(c.noticeRevision === null || isAiCounter(c.noticeRevision))
@@ -66,7 +74,8 @@ export function parseAiStatus(value: unknown): AiStatus | null {
   }
   return freezeValues({ code: value.code, period: value.period, serverTimeMs: value.serverTimeMs,
     consent: { enabled: c.enabled, noticeRevision: c.noticeRevision, consentedAt: c.consentedAt, profileVersion: c.profileVersion },
-    policy, usage: { accountedMicro: u.accountedMicro, requestsLastHour: u.requestsLastHour, warning: u.warning } });
+    policy, usage: { accountedMicro: u.accountedMicro, requestsLastHour: u.requestsLastHour, warning: u.warning },
+    ...(negotiated ? { photoModelNoticeUntilMs: until as number | null } : {}) });
 }
 function azureProfile(policy: AiPolicy): boolean {
   return azureAiProfiles.some((profile) => profile.executionManifestId === policy.executionManifestId

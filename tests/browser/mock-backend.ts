@@ -824,6 +824,13 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   const fixture = await readFile(new URL('../../blueprint/validation/fixture.jpg', import.meta.url));
   const tokens = new Map<string, string>();
     const statusProofs: StatusProof[] = [];
+  // The unexpected-model notice window the Settings status read (version 2) reports; `omit` models a server that predates it.
+  const photoModelNotice: { until: number | null; omit: boolean } = { until: null, omit: false };
+  const negotiatedStatus = (request: Request, body: JsonRow): JsonRow => {
+    if (request.headers()['x-stillroom-ai-status-version'] !== '2' || photoModelNotice.omit) return body;
+    const now = Number(body.serverTimeMs);
+    return { ...body, photoModelNoticeUntilMs: photoModelNotice.until !== null && photoModelNotice.until > now ? photoModelNotice.until : null };
+  };
   const admitAiStatus = (request: Request) => {
     const url = new URL(request.url());
     if (url.origin !== 'http://127.0.0.1:54321' || url.pathname !== '/rest/v1/rpc/ai_status') return false;
@@ -1157,9 +1164,9 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     if (url.pathname === '/rest/v1/rpc/ai_status') {
       if (!admitAiStatus(request)) { await json({ code: 'UNAUTHENTICATED' }, 401); return; }
-      await json({ code: 'UNCONFIGURED', period: new Date().toISOString().slice(0, 7), serverTimeMs: Date.now(),
+      await json(negotiatedStatus(request, { code: 'UNCONFIGURED', period: new Date().toISOString().slice(0, 7), serverTimeMs: Date.now(),
         consent: { enabled: false, noticeRevision: null, consentedAt: null, profileVersion: String(profiles[owner]!.version) },
-        policy: null, usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } }); return;
+        policy: null, usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } })); return;
     }
     if (['image_change_status', 'image_change_requests', 'image_recovery_versions', 'cancel_image_change'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
       const body: unknown = request.postDataJSON();
@@ -2175,7 +2182,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
   return { provenance: provenanceRows, stylistControl, enhanceControl, tryonControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, trashControl, holdFeedbackReads, outfitControl, outfitLifecycleControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
-    analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus,
+    analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus, photoModelNotice, negotiatedStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),
     seedSavedItem(account: 'a' | 'b' = 'a', title = 'Olive overshirt') {
       const owner = owners[account], id = randomUUID(), imageId = randomUUID(), now = '2026-09-09T00:00:00Z';
