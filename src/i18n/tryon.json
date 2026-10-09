@@ -64,7 +64,5 @@
   "tryon.failure.unavailable": {"en":"Try-on isn't available right now.","fi":"Sovitus ei ole juuri nyt käytettävissä.","sv":"Provning är inte tillgänglig just nu."},
   "tryon.startAgain": {"en":"Start again","fi":"Aloita alusta","sv":"Börja om"},
   "tryon.saved": {"en":"Try-ons","fi":"Sovitukset","sv":"Provningar"},
-  "tryon.savedLine": {"en":"Kept until {date}","fi":"Säilyy {date} asti","sv":"Sparas till {date}"},
-  "tryon.view": {"en":"View try-on","fi":"Näytä sovitus","sv":"Visa provning"},
   "tryon.noGarments": { "en": "None of these items can be tried on.", "fi": "Mitään näistä vaatteista ei voi sovittaa.", "sv": "Inget av de här plaggen kan provas." }
 }
