@@ -73,9 +73,10 @@ export async function sharedBudgetProbes(snapshot, sql, mark) {
     await sql(`${slotKey === null ? '' : `with s as (insert into private.provider_slots(slot_id,deployment_key,held_until)
       values (gen_random_uuid(),${literal(slotKey)},clock_timestamp()-interval '1 hour') returning slot_id)`}
       insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,
-        dispatched_at,purpose,provider_slot_id) values (${literal(owner.uid)},${literal(id)},
+        dispatched_at,purpose,provider_slot_id,tryon_chain_id,tryon_step) values (${literal(owner.uid)},${literal(id)},
         to_char(clock_timestamp() at time zone 'UTC','YYYY-MM'),clock_timestamp(),${Math.max(micro, 1)},${micro},'${state}',
-        ${state === 'released' ? 'null' : 'clock_timestamp()'},'${purpose}',${slotKey === null ? 'null::uuid' : '(select slot_id from s)'});`);
+        ${state === 'released' ? 'null' : 'clock_timestamp()'},'${purpose}',${slotKey === null ? 'null::uuid' : '(select slot_id from s)'},
+        ${purpose === 'try_on' ? 'gen_random_uuid(),1::smallint' : 'null::uuid,null::smallint'});`);
   };
   const rowCount = async (owner) => Number(await scalar(`select count(*) from private.ai_usage where owner_id=${literal(owner.uid)};`));
   const claimStylist = (owner, id = randomUUID()) => one(`select public.stylist_claim(${literal(owner.uid)},${literal(id)},${literal(STYLIST)});`);
@@ -203,7 +204,7 @@ export async function sharedBudgetProbes(snapshot, sql, mark) {
 
     mark('cleanup-capacity');
     // Cleanup: money is checked before capacity; a full shared deployment is BUSY, never a quota code.
-    equal(await one(`select public.enhance_provider_control(${literal(cleanupKey)},true,null);`), { code: 'OK', dispatchEnabled: true });
+    equal(await one(`select public.enhance_provider_control(${literal(cleanupKey)},true,null::text);`), { code: 'OK', dispatchEnabled: true });
     await sql(`update private.provider_capacity set max_dispatch=1,updated_at=clock_timestamp() where deployment_key=${literal(cleanupKey)};
       update private.provider_slots set held_until=clock_timestamp()-interval '1 second'
         where deployment_key=${literal(cleanupKey)} and held_until>clock_timestamp();`);

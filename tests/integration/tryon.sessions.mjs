@@ -16,8 +16,9 @@ import { equal } from './ai-analysis.sessions.mjs';
 import { intent, saveHarness } from './item-save.sessions.mjs';
 
 // The admin parsers: the frozen AD1b v1 parser that already-installed apps run (tests/fixtures/admin-limits-v1.ts, a
-// verbatim copy) and the app's current v2 parser. The app's extensionless imports ('../i18n') are resolved to the .ts
-// sources for this test only; Node strips the types.
+// verbatim copy) and the VTO-2b v2 parser as it stood at this inventory (tests/fixtures/admin-limits-v2.ts, also a verbatim
+// copy; the app's current parser reads the BUDGET1 shape). The app's extensionless imports ('../i18n') are resolved to the
+// .ts sources for this test only; Node strips the types.
 let hooked = false;
 const adminParser = () => {
   if (!hooked) {
@@ -38,7 +39,7 @@ const adminParser = () => {
     });
   }
   return Promise.all([import(new URL('../fixtures/admin-limits-v1.ts', import.meta.url).href),
-    import(new URL('../../src/domain/admin-limits.ts', import.meta.url).href)])
+    import(new URL('../fixtures/admin-limits-v2.ts', import.meta.url).href)])
     .then(([v1, v2]) => ({ parseSpending: v1.parseSpending, parseSpendingV2: v2.parseSpending }));
 };
 
