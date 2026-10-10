@@ -4,7 +4,7 @@ import { assertLoopbackUrl, createServedDiagnostics, servedCode } from '../../sc
 import { isMain } from '../../scripts/quality/files.mjs';
 import { readJson, readBounded } from '../../supabase/functions/analyze-clothing/protocol.ts';
 import { jpegHeaderFixture, joinBytes, exifSegment } from '../fixtures/jpeg-helpers.ts';
-import { aiClients, aiStatus, aiControl, requireReady, AI_IDS, beginArgs } from './ai-controls.sessions.mjs';
+import { aiClients, aiStatus, aiControl, requireReady, AI_IDS, AI_POLICY, beginArgs } from './ai-controls.sessions.mjs';
 import { requireEvidence } from './preservation.sessions.mjs';
 
 export const analysisId = (label, n) => {
@@ -84,8 +84,8 @@ export async function baseline(client, owners) {
   for (const owner of owners) {
     equal(await analysisStatus(client, owner, AI_IDS[owner.label].ready), { code: 'UNAVAILABLE' });
     const status = await aiStatus(client, owner);
-    requireEvidence(status.budget.usedMicro === (owner.label === 'A' ? '16001' : '0'));
-    requireEvidence(status.budget.warning === (owner.label === 'A'));
+    requireEvidence(status.budget.usedMicro === (owner.label === 'A' ? '16001' : AI_POLICY.B.readyBill));
+    requireEvidence(status.budget.warning === true);
   }
   return ready;
 }

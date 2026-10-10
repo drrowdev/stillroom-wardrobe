@@ -469,7 +469,7 @@ cron timezone, run logging and each `cron` function signature/ACL.
 * **P5:** a normal owner reads the remaining expired fixture against actual server
   time, receives no facts and removes the full context. Both owners finish
   configured/consented with distinct ready results; final A accounted cost is
-  16001, B zero. No new reserve can bypass the tested allowance/rate.
+  16001, B's ready result is billed 12000 (BUDGET1: the one monthly budget of 15000 leaves both owners unable to reserve). No new reserve can bypass the tested budget.
 * **S6:** privileged structural verification checks two remaining ready full
   rows, fourteen admitted ledger rows, twelve explained closures, no outstanding
   reserved/held rows and retained expiry reason/cost. SQL grants/RLS and actual
@@ -932,7 +932,7 @@ ALLOW_SECURITY_TESTS=1 node scripts/ai-analysis-rehearsal.mjs
 This is an opt-in **disposable local** parent fixture process, not a hosted or
 paid test. It first checks the exact warm AI18 baseline: two old ready envelopes,
 14 ledger rows, no held/reserved rows, exact eight-key policies, A's 16001
-accounted amount and B's three recent admissions. Sufficient TTL/rate headroom
+accounted amount and B's 12000 ready bill (one monthly budget of 15000 each; no hourly count). Sufficient TTL headroom
 and an empty B1 namespace are mandatory; it never reruns the fresh-only AI
 provisioner against warm state. A ten-minute progress deadline bounds the
 rehearsal; child/request/owned-process limits apply independently.

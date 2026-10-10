@@ -8,9 +8,11 @@ import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 
 export const AI_POLICY = Object.freeze({
   model: 'fictional:controls/v1', prompt: 1, notice: 1, maximum: '5000', ttl: 3600,
-  // BUDGET1: the one monthly budget is the only limit; B's allowance admits the same three 5000 reservations the retired
-  // hourly count of 3 did. `rate` only fills the retired, inert max_requests_per_hour column.
-  A: { allowance: '15000', rate: 20 }, B: { allowance: '15000', rate: 3 },
+  // BUDGET1: the one monthly budget is the only limit; `rate` only fills the retired, inert max_requests_per_hour column.
+  // The fixture's final state leaves BOTH owners unable to reserve a new analysis (A is over its budget, B's ready result is
+  // billed `readyBill`), as the retired hourly count of 3 left B at base. Without that, later normal-session jobs such as the
+  // isolation audit could admit B and add a ledger row to the fixture ledger that the AI rehearsal's entry requires exact.
+  A: { allowance: '15000', rate: 20, readyBill: '0' }, B: { allowance: '15000', rate: 3, readyBill: '12000' },
 });
 const fixed = (n) => `a129e000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 export const AI_IDS = Object.freeze({
@@ -219,7 +221,7 @@ async function full(client, owners) {
     const before = await aiStatus(client, owner);
     requireEvidence(owner.label === 'A'
       ? before.budget.usedMicro === '16001' && before.budget.warning === true && before.budget.remainingMicro === '0'
-      : before.budget.usedMicro === '0' && before.budget.warning === false && before.budget.remainingMicro === AI_POLICY.B.allowance);
+      : before.budget.usedMicro === AI_POLICY.B.readyBill && before.budget.warning === true && before.budget.remainingMicro === '3000');
     eq(await client.rpc(owner, 'ai_begin_request', beginArgs(own, owner.label)), { code: 'OK', status: 'ready', replayed: true });
     for (const change of [{ p_draft_id: AI_IDS.missing }, { p_generation: 2 }, { p_image_sha256: 'c'.repeat(64) }]) {
       eq(await client.rpc(owner, 'ai_begin_request', { ...beginArgs(own, owner.label), ...change }), { code: 'CONFLICT' });
@@ -237,8 +239,7 @@ async function full(client, owners) {
     const after = await aiStatus(client, owner);
     requireEvidence(before.period === after.period);
     eq(after.budget, before.budget);
-    // Only A is over its budget here; B's used amount is back to zero, so a new request would be admitted.
-    if (owner.label === 'A') eq(await client.rpc(owner, 'ai_begin_request', beginArgs(AI_IDS.missing, owner.label)), { code: 'ALLOWANCE' });
+    eq(await client.rpc(owner, 'ai_begin_request', beginArgs(AI_IDS.missing, owner.label)), { code: 'ALLOWANCE' });
     for (const args of [
       { ...beginArgs(own, owner.label), p_generation: 0 },
       { ...beginArgs(own, owner.label), p_image_sha256: 'invalid' },
