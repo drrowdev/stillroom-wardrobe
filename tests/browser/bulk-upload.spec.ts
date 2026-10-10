@@ -485,7 +485,7 @@ test('hiding the page cancels a busy clean-up backoff; once visible one fresh re
   expect(api.inputs[0]!.sha256).not.toBe(sent(api)[1]!.sha256);
 });
 
-for (const code of ['RATE_LIMIT', 'ALLOWANCE'] as const) {
+for (const code of ['ALLOWANCE'] as const) {
   test(`clean-up ${code} mid-batch stops further clean-ups; every photo is still filled in and saves`, async ({ page }) => {
     engineOnly();
     const api = await start(page);

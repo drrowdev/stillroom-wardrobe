@@ -2,6 +2,7 @@ import {
   CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_LIMITS, ENHANCE_MODEL, ENHANCE_RESERVATION_MICRO, ENHANCE_REVIEW_EXPIRES,
 } from '../../../src/domain/enhancement.ts';
 import { readJpegHeader } from '../../../src/images/jpeg.ts';
+import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
 import { refusalFinishArgs } from '../../../src/domain/provider-refusal.ts';
 import { isPhotoInputJpeg } from '../../../src/images/restore-jpeg.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
@@ -12,14 +13,15 @@ export type EnhanceConfig = { supabaseUrl: string; publicKey: string; serviceKey
 export const ENHANCE_RPCS = ['enhance_status', 'enhance_claim', 'enhance_finish'] as const;
 const statusCodes: Record<string, number> = {
   INVALID_INPUT: 400, UNAUTHENTICATED: 401, UNAVAILABLE: 403, CONSENT_REQUIRED: 403, TERMINAL: 409, TOO_LARGE: 413,
-  UNSUPPORTED_MEDIA: 415, FILTERED: 422, OUTPUT_REJECTED: 422, RATE_LIMIT: 429, ALLOWANCE: 429, FAILED: 502,
+  UNSUPPORTED_MEDIA: 415, FILTERED: 422, OUTPUT_REJECTED: 422, ALLOWANCE: 429, FAILED: 502,
   UNCONFIGURED: 503, INACTIVE: 503, CONFIG_CHANGED: 503, BUSY: 503, TIMEOUT: 504,
 };
 const finishCodes: Record<string, string> = {
   EXPIRED: 'TIMEOUT', NOT_DISPATCHED: 'FAILED', INVALID_USAGE: 'FAILED', USAGE_ANOMALY: 'FAILED', USAGE_CONFLICT: 'FAILED',
   PROBE_LIMIT: 'UNAVAILABLE',
 };
-const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info', 'x-stillroom-request-id'];
+const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info', 'x-stillroom-request-id',
+  AI_BUDGET_CONTRACT_HEADER.toLowerCase()];
 const exposedHeaders = ['x-stillroom-enhancement-sha256', 'x-stillroom-enhancement-usable-until'];
 function closedCode(value: unknown): string {
   const code = typeof value === 'string' && Object.hasOwn(finishCodes, value) ? finishCodes[value] : value;
@@ -83,6 +85,7 @@ export function createEnhanceHandler(config: EnhanceConfig, registrar: EnhanceRe
       const bearer = request.headers.get('Authorization') ?? '';
       if (!bearer.startsWith('Bearer ') || !/^[A-Za-z0-9._~+/-]{1,8192}={0,2}$/.test(bearer.slice(7))) return error('UNAUTHENTICATED');
       if (!serverConfig(config)) return error('UNCONFIGURED');
+      if (request.headers.get(AI_BUDGET_CONTRACT_HEADER) !== AI_BUDGET_CONTRACT) return error('UNAVAILABLE');
       const requestId = request.headers.get('X-Stillroom-Request-Id') ?? '';
       if (!UUID.test(requestId)) return error('INVALID_INPUT');
       const probe = await probeGate(request, origin, config.probeToken ?? null);
@@ -110,6 +113,8 @@ export function createEnhanceHandler(config: EnhanceConfig, registrar: EnhanceRe
 
       const preflight = await rpc('enhance_status', {}, false, signal);
       if (preflight.code !== 'OK' && !(probe.id !== null && preflight.code === 'INACTIVE')) return error(closedCode(preflight.code));
+      // A database that ignored the contract header answers in the old shape: refused before any claim.
+      if (parseAiBudget(preflight.budget) === null) return error('UNAVAILABLE');
       const policy = preflight.policy, consent = preflight.consent;
       if (probe.id !== null) {
         // A1: the probe runs only while the owner's ordinary enhancement is switched off, whatever the consent state.
@@ -176,7 +181,8 @@ function rpcClient(config: EnhanceConfig, bearer: string, timers: ReturnType<typ
     const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
       method: 'POST', redirect: 'error', cache: 'no-store', signal: dbSignal,
       headers: { Authorization: service ? 'Bearer '.concat(config.serviceKey) : bearer,
-        apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json' },
+        apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json',
+        [AI_BUDGET_CONTRACT_HEADER]: AI_BUDGET_CONTRACT },
       body: JSON.stringify(body),
     });
     const result = await readJson(response, 32768, dbSignal);
@@ -217,7 +223,9 @@ function runClaimed(work: ClaimedWork): Promise<ClaimedOutcome> {
       const output = outcome.code === 'OK' ? { sha256: await sha256(outcome.image), bytes: outcome.image.length } : null;
       const finished = await finish(outcome.code, outcome.usage, output, refusalFinishArgs(outcome));
       if (finished.code !== 'OK' || outcome.code !== 'OK' || !output) {
-        return { code: closedCode(finished.code === 'OK' ? outcome.code : String(finished.code)), output: null };
+        // BUSY is a pre-claim refusal only. Contention while settling is a failure the client must not retry with a new ID.
+        const settled = finished.code === 'OK' ? outcome.code : String(finished.code);
+        return { code: closedCode(settled === 'BUSY' ? 'FAILED' : settled), output: null };
       }
       if (typeof finished.usableUntilMs !== 'number' || !Number.isSafeInteger(finished.usableUntilMs)) throw new ProtocolError('FAILED');
       return { code: 'OK', output: { bytes: outcome.image, sha256: output.sha256, usableUntilMs: finished.usableUntilMs } };

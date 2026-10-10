@@ -28,9 +28,11 @@ const env = (over: Record<string, string | undefined> = {}) => ({
   ALLOW_ENHANCEMENT_PROBE: '1', PROBE_PROJECT_URL: HOSTED_URL, PROBE_AUTHORISATION_ID: '11111111-1111-4111-8111-111111111111',
   PROBE_ACCESS_TOKEN: JWT, ENHANCE_PROBE_TOKEN: TOKEN, PROBE_PUBLISHABLE_KEY: KEY, PROBE_SAMPLES: '/samples', PROBE_OUTPUT: '/out', PROBE_SWITCH_ON_AT: SWITCH_ON, ...over,
 });
+const budget = (used = '0', allowance = '20000000') => ({ monthlyAllowanceMicro: allowance, usedMicro: used,
+  remainingMicro: String(BigInt(allowance) - BigInt(used)), warning: false });
 const statusBody = (over: Record<string, unknown> = {}) => JSON.stringify({ code: 'INACTIVE', policy: { activated: false,
   manifestId: 'azure-global-image25-sunburst-cleanup-v1', modelId: 'gpt-image-2.5-sunburst', providerAvailable: true, maxRequestMicro: '300000',
-  enhanceAllowanceMicro: '5000000', totalAllowanceMicro: '20000000' }, usage: { enhanceMicro: '0', totalMicro: '0', enhanceLastHour: 0 }, ...over });
+  }, budget: budget(), ...over });
 
 type HarnessOptions = { listing?: unknown; reply?: (call: number) => Response; status?: () => Response; output?: string[];
   binding?: (index: number) => unknown; reference?: (index: number) => Uint8Array; latencyMs?: (call: number) => number;
@@ -135,10 +137,14 @@ describe('enhancement probe script', () => {
     for (const entry of sent) {
       const headers = entry.init.headers as Record<string, string>;
       expect(headers['X-Stillroom-Probe-Authorisation']).toBe('11111111-1111-4111-8111-111111111111');
+      expect(headers['X-Stillroom-AI-Budget-Contract']).toBe('2');
       expect(Object.keys(headers).some(name => name.toLowerCase() === 'origin')).toBe(false);
       expect(entry.init.redirect).toBe('error');
       expect(entry.url).toBe(`${HOSTED_URL}/functions/v1/enhance-photo`);
     }
+    const statusCalls = h.fetches.filter(entry => entry.url.endsWith('/rpc/enhance_status'));
+    expect(statusCalls.length).toBeGreaterThan(0);
+    for (const entry of statusCalls) expect((entry.init.headers as Record<string, string>)['X-Stillroom-AI-Budget-Contract']).toBe('2');
     expect(lines.some((line: string) => line.startsWith('Ledger after 180 s'))).toBe(true);
     expect(lines).toContain('Paid calls sent: 6 of at most 6.');
     expect(lines.at(-1)).toMatch(/^Evidence: \{"state":"pending"/);
@@ -155,7 +161,11 @@ describe('enhancement probe script', () => {
 
   it('stops before dispatch when the owner is activated or the allowance cannot hold a reservation', async () => {
     for (const body of [statusBody({ code: 'OK', policy: { ...JSON.parse(statusBody()).policy, activated: true } }),
-      statusBody({ usage: { enhanceMicro: '4800000', totalMicro: '0', enhanceLastHour: 0 } })]) {
+      statusBody({ budget: budget('19800000') }),
+      statusBody({ budget: null }),
+      // The retired usage/allowance shape is never accepted as a fallback.
+      statusBody({ usage: { enhanceMicro: '0', totalMicro: '0', enhanceLastHour: 0 }, budget: undefined }),
+      statusBody({ budget: { ...budget(), extra: 1 } })]) {
       const h = harness({ status: () => new Response(body, { headers: { 'content-type': 'application/json' } }) });
       const { calls } = await runProbe(env(), h.deps);
       expect(calls).toHaveLength(0);
@@ -204,14 +214,14 @@ describe('enhancement probe script', () => {
     expect(earliestStart({ notBefore: 5 }, [], [])).toBe(5);
   });
 
-  it('stops on RATE_LIMIT with no retry and leaves the rest pending', async () => {
-    const h = harness({ reply: (call) => call === 3 ? new Response(JSON.stringify({ code: 'RATE_LIMIT' }), { status: 429,
+  it('stops on a refusal with no retry and leaves the rest pending', async () => {
+    const h = harness({ reply: (call) => call === 3 ? new Response(JSON.stringify({ code: 'ALLOWANCE' }), { status: 429,
       headers: { 'content-type': 'application/json' } }) : new Response(outputBytes, { headers: { 'content-type': 'image/jpeg',
       'content-length': String(outputBytes.byteLength), 'x-stillroom-enhancement-sha256': hash(outputBytes) } }) });
     const { calls, lines } = await runProbe(env(), h.deps);
     expect(h.providerCalls()).toBe(3);
-    expect(calls.map((entry: { code: string }) => entry.code)).toEqual(['OK', 'OK', 'RATE_LIMIT']);
-    expect(lines).toContain('Stopped after call 3: RATE_LIMIT.');
+    expect(calls.map((entry: { code: string }) => entry.code)).toEqual(['OK', 'OK', 'ALLOWANCE']);
+    expect(lines).toContain('Stopped after call 3: ALLOWANCE.');
     expect(lines.at(-1)).toContain('"state":"pending"');
   });
 

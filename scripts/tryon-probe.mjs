@@ -122,7 +122,8 @@ async function readJson(response, limit = JSON_BYTES) {
 async function rpc(run, deps, name, body, limit = JSON_BYTES) {
   const response = await deps.fetch(`${run.url}/rest/v1/rpc/${name}`, {
     method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10_000),
-    headers: { apikey: run.key, Authorization: 'Bearer '.concat(run.jwt), Accept: 'application/json', 'Content-Type': 'application/json' },
+    headers: { apikey: run.key, Authorization: 'Bearer '.concat(run.jwt), Accept: 'application/json', 'Content-Type': 'application/json',
+      'X-Stillroom-AI-Budget-Contract': '2' },
     body: JSON.stringify(body),
   });
   const value = await readJson(response, limit);
@@ -132,28 +133,26 @@ async function rpc(run, deps, name, body, limit = JSON_BYTES) {
 /** The owner's own status, with the probe's preflight checks (the handler and SQL repeat them). */
 async function status(run, deps) {
   const value = await rpc(run, deps, 'tryon_status', {});
-  if (!value || !record(value.policy) || !record(value.usage)) return { ok: false, code: 'statusUnreadable' };
-  const p = value.policy, u = value.usage;
-  if (![p.maxRequestMicro, p.tryOnAllowanceMicro, p.totalAllowanceMicro, u.tryOnMicro, u.totalMicro].every((v) => typeof v === 'string' && MICRO.test(v))) {
-    return { ok: false, code: 'statusUnreadable' };
-  }
-  const usage = { tryOnMicro: u.tryOnMicro, totalMicro: u.totalMicro, tryOnLastHour: Number(u.tryOnLastHour) };
+  if (!value || !record(value.policy)) return { ok: false, code: 'statusUnreadable' };
+  // The closed shared-budget reply (BUDGET1). Any other shape, including the retired usage/allowance one, is unreadable.
+  const b = value.budget, p = value.policy;
+  const closed = record(b) && Object.keys(b).length === 4 && ['monthlyAllowanceMicro', 'usedMicro', 'remainingMicro'].every((key) => typeof b[key] === 'string' && MICRO.test(b[key]))
+    && typeof b.warning === 'boolean' && typeof p.maxRequestMicro === 'string' && MICRO.test(p.maxRequestMicro);
+  if (!closed) return { ok: false, code: 'statusUnreadable' };
+  const usage = { usedMicro: b.usedMicro, remainingMicro: b.remainingMicro };
   // Ordinary try-on must be off (not activated) for the whole window.
   if (value.code !== 'INACTIVE' || p.activated !== false) return { ok: false, code: 'activated', usage };
   if (p.manifestId !== MANIFEST || p.modelId !== MODEL || p.providerAvailable !== true) return { ok: false, code: 'policy', usage };
-  const reservation = BigInt(p.maxRequestMicro);
-  if (BigInt(p.tryOnAllowanceMicro) - BigInt(u.tryOnMicro) < reservation || BigInt(p.totalAllowanceMicro) - BigInt(u.totalMicro) < reservation) {
-    return { ok: false, code: 'allowance', usage };
-  }
+  if (BigInt(b.remainingMicro) < BigInt(p.maxRequestMicro)) return { ok: false, code: 'allowance', usage };
   return { ok: true, usage };
 }
 
-// Only these refusals are returned before a claim and nowhere after one, so only they are unpaid. Of those, RATE_LIMIT
-// and BUSY may clear, so they are tried again (the handler maps a post-claim BUSY to FAILED). Every other code, and any
+// Only these refusals are returned before a claim and nowhere after one, so only they are unpaid. Of those, BUSY (the
+// shared deployment's physical capacity) may clear, so it is tried again (the handler maps a post-claim BUSY to FAILED). Every other code, and any
 // transport failure, may follow a claim: it counts, is never retried and its request ID is kept for reconciliation.
 // INACTIVE, CONSENT_REQUIRED, UNCONFIGURED and UNAVAILABLE also come from the mark's and finish's permission checks (a probe
 // authorisation stopped or expired while the provider ran), and CHAIN_MISMATCH from the mark for a stale chain.
-export const RETRY_BEFORE_CLAIM = Object.freeze(['RATE_LIMIT', 'BUSY']);
+export const RETRY_BEFORE_CLAIM = Object.freeze(['BUSY']);
 // TOO_LARGE is left out as well: the handler maps an oversized post-claim reply to FAILED, but its body can't prove ingress.
 export const REFUSED_BEFORE_CLAIM = Object.freeze([...RETRY_BEFORE_CLAIM, 'ALLOWANCE', 'RESULTS_FULL', 'NO_GARMENTS',
   'UNAUTHENTICATED', 'UNSUPPORTED_MEDIA']);
@@ -180,7 +179,7 @@ async function step(run, deps, plan) {
     const response = await deps.fetch(`${run.url}/functions/v1/try-on`, {
       method: 'POST', redirect: 'error', cache: 'no-store', signal: controller.signal, body,
       headers: { apikey: run.key, Authorization: 'Bearer '.concat(run.jwt), 'X-Stillroom-Probe-Authorisation': run.authorisation,
-        'X-Stillroom-Probe-Token': run.token },
+        'X-Stillroom-Probe-Token': run.token, 'X-Stillroom-AI-Budget-Contract': '2' },
     });
     result.status = response.status;
     const type = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();

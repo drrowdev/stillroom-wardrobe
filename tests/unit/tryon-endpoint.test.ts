@@ -69,16 +69,18 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
   const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service',
     azure: { apiKey: 'fictional-azure-image' } };
   const status = { code: 'OK', consent: { enabled: true, noticeRevision: 1 }, policy: { activated: true, noticeRevision: 1,
-    manifestId: TRYON_MANIFEST, modelId: TRYON_MODEL, maxRequestMicro: TRYON_RESERVATION_MICRO, providerAvailable: true } };
+    manifestId: TRYON_MANIFEST, modelId: TRYON_MODEL, maxRequestMicro: TRYON_RESERVATION_MICRO, providerAvailable: true },
+  budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false } };
   const accounting = { basis: 'estimated', amountMicro: '252000', currency: 'USD' };
-  type Call = { url: string; body: Record<string, unknown> | null; auth: string | null };
+  type Call = { url: string; body: Record<string, unknown> | null; auth: string | null; contract?: string | null };
   type Options = { status?: unknown; claim?: Record<string, unknown>; steps?: number; dispatch?: () => Response | Promise<Response>;
     finish?: Record<string, unknown>; garment?: () => Response; onDispatch?: () => void };
   function backend(options: Options = {}) {
     const calls: Call[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const parsed = typeof init.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null;
-      calls.push({ url, body: parsed, auth: new Headers(init.headers).get('Authorization') });
+      calls.push({ url, body: parsed, auth: new Headers(init.headers).get('Authorization'),
+        contract: new Headers(init.headers).get('X-Stillroom-AI-Budget-Contract') });
       if (url.endsWith('/auth/v1/user')) return Response.json({ id: OWNER, role: 'authenticated', is_anonymous: false });
       if (url.endsWith('/rpc/tryon_status')) return Response.json(options.status ?? status);
       if (url.endsWith('/rpc/tryon_claim')) {
@@ -118,7 +120,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     return body;
   };
   const post = (body: FormData = form(), extra: Record<string, string> = {}, signal?: AbortSignal) =>
-    new Request('http://127.0.0.1:54321/functions/v1/try-on', { method: 'POST', headers: { Authorization: 'Bearer fictional-user-jwt', ...extra }, body, signal });
+    new Request('http://127.0.0.1:54321/functions/v1/try-on', { method: 'POST', headers: { Authorization: 'Bearer fictional-user-jwt', 'X-Stillroom-AI-Budget-Contract': '2', ...extra }, body, signal });
   const rpcBody = (calls: Call[], name: string) => calls.find((call) => call.url.endsWith(`/rpc/${name}`))?.body;
   const names = (calls: Call[]) => calls.map((call) => call.url.includes('/storage/') ? 'storage' : call.url.split('/').pop());
 
@@ -198,7 +200,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
       [post(form(2, {}, flatJpeg({ width: 1024, height: 1280, mode: 'progressive' }))), 400],
       [post(form(2, {}, new Uint8Array(600_001))), 413],
       [new Request('http://127.0.0.1:54321/functions/v1/try-on', { method: 'POST', headers: { Authorization: 'Bearer fictional-user-jwt',
-        'Content-Type': 'image/jpeg' }, body: PERSON as BodyInit }), 415],
+        'Content-Type': 'image/jpeg', 'X-Stillroom-AI-Budget-Contract': '2' }, body: PERSON as BodyInit }), 415],
     ];
     for (const [request, code] of bad) expect((await createTryOnHandler(config, register, transport)(request)).status).toBe(code);
     expect(calls).toHaveLength(0);
@@ -221,8 +223,37 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     }
   });
 
+  it('refuses a missing or unsupported budget contract and an old-shape status before any claim', async () => {
+    for (const contract of [undefined, '1', '3']) {
+      const calls = backend();
+      const { transport } = provider(() => Response.json(imageBody()));
+      const request = post(form(), contract === undefined ? {} : { 'X-Stillroom-AI-Budget-Contract': contract });
+      if (contract === undefined) request.headers.delete('X-Stillroom-AI-Budget-Contract');
+      const response = await createTryOnHandler(config, register, transport)(request);
+      expect([response.status, await response.json()]).toEqual([403, { code: 'UNAVAILABLE' }]);
+      expect(calls).toHaveLength(0);
+      expect(transport).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    }
+    const old = Object.fromEntries(Object.entries(status).filter(([key]) => key !== 'budget'));
+    for (const legacy of [old, { ...old, usage: { tryOnMicro: '0', totalMicro: '0', tryOnLastHour: 0, warning: false } },
+      { ...status, budget: null }]) {
+      const calls = backend({ status: legacy });
+      const { transport } = provider(() => Response.json(imageBody()));
+      const response = await createTryOnHandler(config, register, transport)(post());
+      expect([response.status, await response.json()]).toEqual([403, { code: 'UNAVAILABLE' }]);
+      expect(names(calls)).not.toContain('tryon_claim');
+      expect(transport).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    }
+    const calls = backend();
+    const { transport } = provider(() => Response.json(imageBody()));
+    await createTryOnHandler(config, register, transport)(post());
+    expect(calls.filter((call) => call.url.includes('/rest/v1/rpc/')).map((call) => call.contract).every((value) => value === '2')).toBe(true);
+  });
+
   it('passes claim refusals through without a download, mark or provider call', async () => {
-    for (const code of ['ALLOWANCE', 'RATE_LIMIT', 'BUSY', 'RESULTS_FULL', 'CHAIN_MISMATCH', 'WITHDRAWN', 'CANCELLED', 'CONFLICT',
+    for (const code of ['ALLOWANCE', 'BUSY', 'RESULTS_FULL', 'CHAIN_MISMATCH', 'WITHDRAWN', 'CANCELLED', 'CONFLICT',
       'NO_GARMENTS', 'NOT_FOUND', 'TERMINAL', 'PROBE_LIMIT']) {
       const calls = backend({ claim: { code, claimed: false } });
       const { transport } = provider(() => Response.json(imageBody()));

@@ -1,4 +1,5 @@
 import { aiFields, hasOnlyDataKeys, isAiCounter, isAiTimestamp, parseAiResult, type AiResult } from './ai-analysis';
+import { parseOptionalAiBudget, type AiBudget } from './ai-budget';
 import { freezeValues } from './garment-fields';
 
 export const aiModel = 'gemini-3.8-flash';
@@ -11,7 +12,7 @@ export const azureAiProfiles = [
 ] as const;
 export const azureAiReviewExpires = Date.parse('2026-10-21T00:00:00Z');
 export const aiCodes = ['OK', 'UNAVAILABLE', 'UNAUTHENTICATED', 'INVALID_INPUT', 'CONSENT_REQUIRED',
-  'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'CONFLICT', 'ACTIVE_DRAFT', 'RATE_LIMIT',
+  'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'CONFLICT', 'ACTIVE_DRAFT',
   'ALLOWANCE', 'TERMINAL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA', 'ANALYSIS_FAILED', 'TIMEOUT'] as const;
 export type AiCode = typeof aiCodes[number];
 export function isAiCode(value: unknown): value is AiCode { return aiCodes.some((code) => code === value); }
@@ -23,14 +24,15 @@ export function isProfileVersion(value: unknown): value is string {
 }
 export type AiPolicy = Readonly<{
   activated: boolean; noticeRevision: number; modelId: string; promptVersion: number;
-  maxRequestMicro: string; monthlyAllowanceMicro: string; maxRequestsPerHour: number; resultTtlSeconds: number;
+  maxRequestMicro: string; resultTtlSeconds: number;
   executionManifestId?: string | null;
 }>;
 export type AiStatus = Readonly<{
   code: AiCode; period: string; serverTimeMs: number;
   consent: Readonly<{ enabled: boolean; noticeRevision: number | null; consentedAt: string | null; profileVersion: string }>;
   policy: AiPolicy | null;
-  usage: Readonly<{ accountedMicro: string; requestsLastHour: number; warning: boolean }>;
+  /** The account's one monthly budget; null when the account has no AI controls. */
+  budget: AiBudget | null;
   /** Only on the Settings read that asked for status version 2: end of the unexpected-model notice window, or null. */
   photoModelNoticeUntilMs?: number | null;
 }>;
@@ -42,39 +44,37 @@ export type AiAnalysisReply =
 
 /** `negotiated` is the Settings read that sent status version 2: it must carry the notice field, and no other read may. */
 export function parseAiStatus(value: unknown, negotiated = false): AiStatus | null {
-  const keys = ['code', 'period', 'serverTimeMs', 'consent', 'policy', 'usage'];
+  const keys = ['code', 'period', 'serverTimeMs', 'consent', 'policy', 'budget'];
   if (!hasOnlyDataKeys(value, negotiated ? [...keys, 'photoModelNoticeUntilMs'] : keys)
     || !isAiCode(value.code) || typeof value.period !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value.period)
     || !isAiTimestamp(value.serverTimeMs)) return null;
   const until = negotiated ? value.photoModelNoticeUntilMs : undefined;
   if (negotiated && until !== null && !(isAiTimestamp(until) && until >= value.serverTimeMs
     && until <= value.serverTimeMs + photoModelNoticeWindowMs)) return null;
-  const c = value.consent, p = value.policy, u = value.usage;
+  const c = value.consent, p = value.policy;
+  const budget = parseOptionalAiBudget(value.budget);
   if (!hasOnlyDataKeys(c, ['enabled', 'noticeRevision', 'consentedAt', 'profileVersion'])
     || typeof c.enabled !== 'boolean' || !(c.noticeRevision === null || isAiCounter(c.noticeRevision))
     || !(c.consentedAt === null || typeof c.consentedAt === 'string' && Number.isFinite(Date.parse(c.consentedAt)))
-    || !isProfileVersion(c.profileVersion)
-    || !hasOnlyDataKeys(u, ['accountedMicro', 'requestsLastHour', 'warning']) || !isMicro(u.accountedMicro)
-    || !isAiTimestamp(u.requestsLastHour) || typeof u.warning !== 'boolean') return null;
+    || !isProfileVersion(c.profileVersion) || !budget.ok || (p === null) !== (budget.budget === null)) return null;
   let policy: AiPolicy | null = null;
   if (p !== null) {
     if (!hasOnlyDataKeys(p, ['activated', 'noticeRevision', 'modelId', 'promptVersion', 'maxRequestMicro',
-      'monthlyAllowanceMicro', 'maxRequestsPerHour', 'resultTtlSeconds', 'executionManifestId'],
+      'resultTtlSeconds', 'executionManifestId'],
       ['activated', 'noticeRevision', 'modelId', 'promptVersion', 'maxRequestMicro',
-        'monthlyAllowanceMicro', 'maxRequestsPerHour', 'resultTtlSeconds']) || typeof p.activated !== 'boolean'
+        'resultTtlSeconds']) || typeof p.activated !== 'boolean'
       || Object.hasOwn(p, 'executionManifestId') && p.executionManifestId !== null && (typeof p.executionManifestId !== 'string'
         || !/^[A-Za-z0-9._-]{1,128}$/.test(p.executionManifestId))
       || !isAiCounter(p.noticeRevision) || typeof p.modelId !== 'string' || !/^[A-Za-z0-9._:/-]{1,128}$/.test(p.modelId)
-      || !isAiCounter(p.promptVersion) || !isMicro(p.maxRequestMicro) || !isMicro(p.monthlyAllowanceMicro)
-      || !isAiCounter(p.maxRequestsPerHour) || !isAiCounter(p.resultTtlSeconds) || p.resultTtlSeconds > 86400) return null;
+      || !isAiCounter(p.promptVersion) || !isMicro(p.maxRequestMicro)
+      || !isAiCounter(p.resultTtlSeconds) || p.resultTtlSeconds > 86400) return null;
     policy = { activated: p.activated, noticeRevision: p.noticeRevision, modelId: p.modelId,
-      promptVersion: p.promptVersion, maxRequestMicro: p.maxRequestMicro, monthlyAllowanceMicro: p.monthlyAllowanceMicro,
-      maxRequestsPerHour: p.maxRequestsPerHour, resultTtlSeconds: p.resultTtlSeconds,
+      promptVersion: p.promptVersion, maxRequestMicro: p.maxRequestMicro, resultTtlSeconds: p.resultTtlSeconds,
       ...(typeof p.executionManifestId === 'string' || p.executionManifestId === null ? { executionManifestId: p.executionManifestId } : {}) };
   }
   return freezeValues({ code: value.code, period: value.period, serverTimeMs: value.serverTimeMs,
     consent: { enabled: c.enabled, noticeRevision: c.noticeRevision, consentedAt: c.consentedAt, profileVersion: c.profileVersion },
-    policy, usage: { accountedMicro: u.accountedMicro, requestsLastHour: u.requestsLastHour, warning: u.warning },
+    policy, budget: budget.budget,
     ...(negotiated ? { photoModelNoticeUntilMs: until as number | null } : {}) });
 }
 function azureProfile(policy: AiPolicy): boolean {
@@ -85,7 +85,7 @@ export function supportedAiPolicy(status: AiStatus, now = Date.now()): boolean {
   const p = status.policy;
   return !!p && p.activated && p.modelId === azureAiModel && p.noticeRevision === 2
     && azureProfile(p) && BigInt(p.maxRequestMicro) >= 4097351n
-    && BigInt(p.monthlyAllowanceMicro) > 0n && now < azureAiReviewExpires && status.serverTimeMs < azureAiReviewExpires;
+    && status.budget !== null && now < azureAiReviewExpires && status.serverTimeMs < azureAiReviewExpires;
 }
 export function aiNoticeProfile(policy: AiPolicy | null): 'google' | 'azure' | null {
   if (!policy) return null;
@@ -102,7 +102,7 @@ export function canAnalyze(status: AiStatus, now = Date.now()): boolean {
 export function aiPolicyBinding(scope: Readonly<{ ownerId: string; epoch: number }>, status: AiStatus): string | null {
   const p = status.policy;
   return p ? JSON.stringify([scope.ownerId, scope.epoch, p.modelId, p.promptVersion, p.noticeRevision,
-    p.executionManifestId ?? null, p.maxRequestMicro, p.monthlyAllowanceMicro]) : null;
+    p.executionManifestId ?? null, p.maxRequestMicro, status.budget?.monthlyAllowanceMicro ?? null]) : null;
 }
 export type AiCardState = 'unconfirmed' | 'loading' | 'loadFailed' | 'unavailable' | 'on' | 'renew' | 'off';
 export type AiCardView = Readonly<{ state: AiCardState; turnOn: boolean; turnOff: boolean; retry: boolean; details: boolean }>;

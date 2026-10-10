@@ -1443,7 +1443,9 @@ private JSON file with exactly these keys:
 UUID), `allocationMicro`, `reply` (the RPC's `code`, `previousTotalMicro`,
 `newTotalMicro`), `readBack` (`monthlyAllowanceMicro`,
 `stylistMonthlyAllowanceMicro`), `allocatedAt` (ISO UTC) and `approvalRef` (the
-approving GitHub comment URL). `init` refuses a receipt whose arithmetic,
+approving GitHub comment URL). Since BUDGET1 the kind is `stylist-probe-allocation-v2`:
+its `readBack` is `monthlyAllowanceMicro` alone (the one monthly budget; no
+stylist sub-limit exists), and v1 receipts stay accepted unchanged. `init` refuses a receipt whose arithmetic,
 read-back or month does not match, or whose allocation cannot cover both slots
 (2 × 129,360 = 258,720 micro; the 1,280 left over is not a third call). The value
 is a USD operational allocation, not the Azure budget, which is in billing

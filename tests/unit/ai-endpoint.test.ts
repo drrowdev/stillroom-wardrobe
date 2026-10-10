@@ -12,10 +12,11 @@ import { exifSegment, insertSegments, jpegHeaderFixture, jpegSegment, joinBytes 
 import { AI_FACT_VECTORS } from '../integration/ai-controls.sessions.mjs';
 const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service', azure: {} };
 const id = 'b1290000-0000-4000-8000-000000000001';
+const BUDGET = { monthlyAllowanceMicro: '100000000', usedMicro: '0', remainingMicro: '100000000', warning: false };
 function request(changes: RequestInit = {}, suffix = '') {
   return new Request(`http://127.0.0.1:54321/functions/v1/analyze-clothing${suffix}`, {
     method: 'POST', body: jpegHeaderFixture(), headers: {
-      Authorization: 'Bearer '.concat('fictional-user'), 'Content-Type': 'image/jpeg',
+      Authorization: 'Bearer '.concat('fictional-user'), 'Content-Type': 'image/jpeg', 'X-Stillroom-AI-Budget-Contract': '2',
       'X-Stillroom-Request-Id': id, 'X-Stillroom-Draft-Id': id, 'X-Stillroom-Generation': '1',
     }, ...changes,
   });
@@ -109,12 +110,44 @@ describe('B1 source runtime and fixed protocol', () => {
       expect(fetcher).toHaveBeenCalledTimes(1);
     }
   });
+  it('refuses a request without the budget contract, or a status in the old shape, before any claim or provider call', async () => {
+    const headers = { Authorization: 'Bearer '.concat('fictional-user'), 'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': id,
+      'X-Stillroom-Draft-Id': id, 'X-Stillroom-Generation': '1' };
+    for (const contract of [undefined, '1', '3']) {
+      const fetcher = vi.fn(async () => Response.json({ id, role: 'authenticated', is_anonymous: false }));
+      vi.stubGlobal('fetch', fetcher);
+      const provider = vi.fn();
+      const response = await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(new Request(
+        'http://127.0.0.1:54321/functions/v1/analyze-clothing', { method: 'POST', body: jpegHeaderFixture(),
+          headers: contract === undefined ? headers : { ...headers, 'X-Stillroom-AI-Budget-Contract': contract } }));
+      expect([response.status, await response.json()]).toEqual([403, { code: 'UNAVAILABLE' }]);
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(provider).not.toHaveBeenCalled();
+    }
+    const policy = { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2,
+      executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351', monthlyAllowanceMicro: '100000000', maxRequestsPerHour: 200 };
+    for (const status of [{ code: 'OK', consent: { enabled: true, noticeRevision: 2 }, policy,
+      usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } },
+    { code: 'OK', consent: { enabled: true, noticeRevision: 2 }, policy, budget: null }]) {
+      const calls: string[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+        calls.push(url.split('/').at(-1)!);
+        if (!url.endsWith('/user')) expect(new Headers(init.headers).get('X-Stillroom-AI-Budget-Contract')).toBe('2');
+        return Response.json(url.endsWith('/user') ? { id, role: 'authenticated', is_anonymous: false } : status);
+      }));
+      const provider = vi.fn();
+      const response = await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
+      expect([response.status, await response.json()]).toEqual([403, { code: 'UNAVAILABLE' }]);
+      expect(calls).toEqual(['user', 'ai_status']);
+      expect(provider).not.toHaveBeenCalled();
+    }
+  });
   it('leaves the DB untouched when Azure configuration is missing', async () => {
     const fetcher = vi.fn(async (url: string) => Response.json(url.endsWith('/user')
       ? { id, role: 'authenticated', is_anonymous: false }
       : { code: 'OK', consent: { enabled: true, noticeRevision: 2 },
         policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2,
-          executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' } }));
+          executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' }, budget: BUDGET }));
     vi.stubGlobal('fetch', fetcher);
     const google = vi.fn();
     expect(await (await createHandler(config, google)(request())).json()).toEqual({ code: 'UNCONFIGURED' });
@@ -130,7 +163,7 @@ describe('B1 source runtime and fixed protocol', () => {
   ])('rejects ineligible preflight before any Google access %#', async (policy, consent, code) => {
     const fetcher = vi.fn(async (url: string) => Response.json(url.endsWith('/user')
       ? { id, role: 'authenticated', is_anonymous: false }
-      : { code: 'OK', policy, consent }));
+      : { code: 'OK', policy, consent, budget: BUDGET }));
     vi.stubGlobal('fetch', fetcher);
     const google = vi.fn();
     expect(await (await createHandler(config, google)(request())).json()).toEqual({ code });
@@ -159,7 +192,7 @@ describe('B1 source runtime and fixed protocol', () => {
         if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
         if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
           policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2,
-            executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' } });
+            executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' }, budget: BUDGET });
         expect(url.endsWith('/ai_claim_analysis')).toBe(true);
         if (failure === 'lost-ack') throw new Error('private transport failure');
         if (failure === 'config-changed') return Response.json({ code: 'CONFIG_CHANGED', claimed: false });
@@ -185,7 +218,7 @@ describe('B1 source runtime and fixed protocol', () => {
         if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
         return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
           policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion,
-            executionManifestId: manifest, maxRequestMicro: '4097351' } });
+            executionManifestId: manifest, maxRequestMicro: '4097351' }, budget: BUDGET });
       }));
       const provider = vi.fn();
       const response = await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
@@ -203,7 +236,7 @@ describe('B1 source runtime and fixed protocol', () => {
       if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
       if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
         policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2,
-          executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' } });
+          executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' }, budget: BUDGET });
       return Response.json({ code: 'OK', claimed: true, manifestId: 'azure-eu-terra-devtest-v1',
         resultExpiresAtMs: Date.now() + 10000, dispatchBeforeMs: Date.now() + 1000 });
     }));

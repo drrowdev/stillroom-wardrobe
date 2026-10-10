@@ -60,9 +60,9 @@ describe('Turn on (fail closed)', () => {
     code: 'CONSENT_REQUIRED', period: '2026-10', serverTimeMs: Date.parse('2026-10-05T00:00:00Z'),
     consent: { enabled: false, noticeRevision: null, consentedAt: null },
     policy: { activated: true, noticeRevision: TRYON_NOTICE_REVISION, manifestId: TRYON_MANIFEST, modelId: TRYON_MODEL,
-      maxRequestMicro: '400000', tryOnAllowanceMicro: '5000000', totalAllowanceMicro: '20000000', maxRequestsPerHour: 20,
+      maxRequestMicro: '400000',
       maxSteps: 3, maxResults: 20, resultDays: 7, providerAvailable: true, ...policy },
-    results: 0, usage: { tryOnMicro: '0', totalMicro: '0', tryOnLastHour: 0, warning: false }, ...over });
+    results: 0, budget: { monthlyAllowanceMicro: '20000000', usedMicro: '0', remainingMicro: '20000000', warning: false }, ...over });
   const view = (status: ReturnType<typeof raw>, consentOn = false) => {
     const state: TryOnState = { read: { kind: 'ready', status: status! }, known: true, unresolved: false, reading: false, writing: false, settingsError: null };
     return tryOnViewOf({ consentOn } as TryOnStore, state);

@@ -2,7 +2,7 @@
 // BG2b-2 operator probe (plan rev2 §7.3, amendment A1), on the cleanup-v1 manifest since BG2c-1 (plan rev4 §11). Run only
 // by the coordinator, inside a separately approved probe window, against the approved hosted project with non-personal
 // samples prepared by `scripts/cleanup-probe-harness.mjs`. At most 6 paid calls: 5 visual and 1 disconnect (F4). There are
-// no retries and no 7th call; a failed call, including RATE_LIMIT, still counts and stops the run. Calls are paced against
+// no retries and no 7th call; a failed call, including ALLOWANCE or BUSY, still counts and stops the run. Calls are paced against
 // the real slot lifetime (R4). Every refusal happens before any network call. The report is text only: codes, numbers,
 // hashes and IDs. It never contains tokens, JWTs, headers, image bytes or base64.
 import { createHash, randomUUID } from 'node:crypto';
@@ -263,22 +263,20 @@ async function readJson(response) {
 async function status(run, deps) {
   const response = await deps.fetch(`${run.url}/rest/v1/rpc/enhance_status`, {
     method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(10_000),
-    headers: { apikey: run.key, Authorization: `Bearer ${run.jwt}`, Accept: 'application/json', 'Content-Type': 'application/json' }, body: '{}',
+    headers: { apikey: run.key, Authorization: `Bearer ${run.jwt}`, Accept: 'application/json', 'Content-Type': 'application/json', 'X-Stillroom-AI-Budget-Contract': '2' }, body: '{}',
   });
   const value = await readJson(response);
-  if (response.status !== 200 || !record(value) || !record(value.policy) || !record(value.usage)) return { ok: false, code: 'statusUnreadable' };
-  const p = value.policy, u = value.usage;
-  if (![p.maxRequestMicro, p.enhanceAllowanceMicro, p.totalAllowanceMicro, u.enhanceMicro, u.totalMicro].every(v => typeof v === 'string' && MICRO.test(v))) {
-    return { ok: false, code: 'statusUnreadable' };
-  }
-  const usage = { enhanceMicro: u.enhanceMicro, totalMicro: u.totalMicro, enhanceLastHour: Number(u.enhanceLastHour) };
+  if (response.status !== 200 || !record(value) || !record(value.policy)) return { ok: false, code: 'statusUnreadable' };
+  // The closed shared-budget reply (BUDGET1). Any other shape, including the retired usage/allowance one, is unreadable.
+  const b = value.budget, p = value.policy;
+  const closed = record(b) && Object.keys(b).length === 4 && ['monthlyAllowanceMicro', 'usedMicro', 'remainingMicro'].every(key => typeof b[key] === 'string' && MICRO.test(b[key]))
+    && typeof b.warning === 'boolean' && typeof p.maxRequestMicro === 'string' && MICRO.test(p.maxRequestMicro);
+  if (!closed) return { ok: false, code: 'statusUnreadable' };
+  const usage = { usedMicro: b.usedMicro, remainingMicro: b.remainingMicro };
   // A1: ordinary enhancement must be off (not activated), whatever the consent state.
   if (value.code !== 'INACTIVE' || p.activated !== false) return { ok: false, code: 'activated', usage };
   if (p.manifestId !== MANIFEST || p.modelId !== MODEL || p.providerAvailable !== true) return { ok: false, code: 'policy', usage };
-  const reservation = BigInt(p.maxRequestMicro);
-  if (BigInt(p.enhanceAllowanceMicro) - BigInt(u.enhanceMicro) < reservation || BigInt(p.totalAllowanceMicro) - BigInt(u.totalMicro) < reservation) {
-    return { ok: false, code: 'allowance', usage };
-  }
+  if (BigInt(b.remainingMicro) < BigInt(p.maxRequestMicro)) return { ok: false, code: 'allowance', usage };
   return { ok: true, usage };
 }
 
@@ -290,7 +288,7 @@ async function call(run, deps, sample, index, disconnect, started) {
   try {
     const response = await deps.fetch(`${run.url}/functions/v1/enhance-photo`, {
       method: 'POST', redirect: 'error', cache: 'no-store', signal: controller.signal, body: sample.bytes,
-      headers: { apikey: run.key, Authorization: `Bearer ${run.jwt}`, 'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': requestId,
+      headers: { apikey: run.key, Authorization: `Bearer ${run.jwt}`, 'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': requestId, 'X-Stillroom-AI-Budget-Contract': '2',
         'X-Stillroom-Probe-Authorisation': run.authorisation, 'X-Stillroom-Probe-Token': run.token },
     });
     result.status = response.status;

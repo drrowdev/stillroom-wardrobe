@@ -1,6 +1,7 @@
 import type { OwnerScope } from '../auth/session';
 import type { AiContext } from '../domain/ai-draft';
 import { hasOnlyDataKeys, isAiCounter, isImageSha256 } from '../domain/ai-analysis';
+import { aiBudgetHeaders } from '../domain/ai-budget';
 import { canAnalyze, isAiCode, isProfileVersion, parseAiStatus, parseAnalysisReply, type AiCode } from '../domain/ai-controls';
 import { isUuid } from '../domain/wardrobe';
 import type { AnalyzedSaveAttempt } from '../domain/analyzed-save';
@@ -72,7 +73,7 @@ export class AiClient {
       const response = await wait(fetch(`${this.config.url}${path}`, {
         method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', signal,
         headers: { apikey: this.config.publishableKey, Authorization: `Bearer ${session.access_token}`,
-          Accept: 'application/json', 'Content-Type': body instanceof Blob ? 'image/jpeg' : 'application/json', ...extra },
+          Accept: 'application/json', 'Content-Type': body instanceof Blob ? 'image/jpeg' : 'application/json', ...aiBudgetHeaders, ...extra },
         body: body instanceof Blob ? body : JSON.stringify(body),
       }));
       if (response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json' || !response.body) {

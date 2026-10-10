@@ -66,9 +66,8 @@ describe('SAVE1 model identity: client contract', () => {
   const base = { code: 'OK', period: '2026-10', serverTimeMs: 1_790_000_000_000,
     consent: { enabled: true, noticeRevision: 2, consentedAt: '2026-10-01T00:00:00Z', profileVersion: '1' },
     policy: { activated: true, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 2, noticeRevision: 2,
-      executionManifestId: 'azure-eu-terra-devtest-v2', maxRequestMicro: '4097351', monthlyAllowanceMicro: '100000000',
-      maxRequestsPerHour: 200, resultTtlSeconds: 3600 },
-    usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } };
+      executionManifestId: 'azure-eu-terra-devtest-v2', maxRequestMicro: '4097351', resultTtlSeconds: 3600 },
+    budget: { monthlyAllowanceMicro: '100000000', usedMicro: '0', remainingMicro: '100000000', warning: false } };
 
   it('mirrors the seven-day server window', () => {
     expect(photoModelNoticeWindowMs).toBe(7 * 24 * 60 * 60 * 1000);

@@ -107,7 +107,7 @@ export function canSend(state: StylistState): boolean {
   const status = statusOf(state);
   if (state.writing || !viewOf(state).send || !status) return false;
   const limits = stylistLimits(status);
-  return !limits.own && !limits.shared;
+  return !limits.reached;
 }
 
 /**

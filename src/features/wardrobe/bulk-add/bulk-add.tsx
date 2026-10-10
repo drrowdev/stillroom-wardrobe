@@ -7,7 +7,7 @@ import { pluralText, type Language, type Translate } from '../../../i18n';
 import { Icon } from '../../../app/icon';
 import { formatUsdCents } from '../../../domain/admin-limits';
 import { loadImaging, type BulkPipeline } from '../use-photo-draft';
-import { BATCH_LIMIT, BulkQueue, estimateMicro, remainingMicro } from './bulk-queue';
+import { BATCH_LIMIT, BulkQueue, estimateMicro } from './bulk-queue';
 import { BulkDraft, type DraftHandle, type DraftLink } from './bulk-draft';
 import '../../../styles/bulk-add.css';
 
@@ -136,8 +136,8 @@ export function BulkAdd({ client, scope, ai, currency, language, t, online, onDi
     let amount: string | null = null;
     try {
       const status = await ai.status(scope.signal);
-      if (status.policy?.activated && status.consent.enabled) {
-        const estimate = estimateMicro(chosen.length, remainingMicro(status.policy.monthlyAllowanceMicro, status.usage.accountedMicro));
+      if (status.policy?.activated && status.consent.enabled && status.budget) {
+        const estimate = estimateMicro(chosen.length, BigInt(status.budget.remainingMicro));
         if (estimate !== null) amount = formatUsdCents(estimate.toString(), language);
       }
     } catch { /* Unknown usage: start without an estimate; the server still enforces the allowance. */ }
@@ -214,7 +214,6 @@ export function BulkAdd({ client, scope, ai, currency, language, t, online, onDi
         </div>}
         {(ids.length > 0 || summary) && <div className="bulk-lines" role="status">
           {!online && <p className="notice notice-offline">{t('common.offline')}</p>}
-          {halt === 'rate' && <p className="notice">{t('bulk.hourly')}</p>}
           {halt === 'allowance' && <p className="notice">{t('aiC.limit')}</p>}
           {snap.paused && <p className="notice">{t('bulk.paused')}</p>}
           {processing && !snap.stopped && <p className="fine muted">{t('bulk.keepOpen')}</p>}

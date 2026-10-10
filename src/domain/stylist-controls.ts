@@ -7,6 +7,7 @@ import {
 } from './stylist';
 import type { WardrobeItem } from './wardrobe';
 import type { MessageKey } from '../i18n';
+import { budgetExhausted, parseOptionalAiBudget, type AiBudget } from './ai-budget';
 
 type JsonObject = Record<string, unknown>;
 const record = (value: unknown): value is JsonObject => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -22,46 +23,42 @@ export const stylistStatusCodes = ['OK', 'UNAVAILABLE', 'UNCONFIGURED', 'INACTIV
 export type StylistStatusCode = (typeof stylistStatusCodes)[number];
 export type StylistPolicy = {
   activated: boolean; noticeRevision: number | null; manifestId: string; modelId: string | null;
-  maxRequestMicro: string; stylistAllowanceMicro: string; totalAllowanceMicro: string; maxRequestsPerHour: number;
+  maxRequestMicro: string;
 };
 export type StylistStatus = {
   code: StylistStatusCode; serverTimeMs: number | null;
   consent: { enabled: boolean; noticeRevision: number | null } | null;
   policy: StylistPolicy | null;
-  usage: { stylistMicro: string; totalMicro: string; stylistLastHour: number } | null;
+  budget: AiBudget | null;
 };
 
 /** Parses the closed `stylist_status` reply; null for anything else. UNAVAILABLE carries only its code. */
 export function parseStylistStatus(value: unknown): StylistStatus | null {
   if (exactKeys(value, ['code'])) {
-    return value.code === 'UNAVAILABLE' ? { code: 'UNAVAILABLE', serverTimeMs: null, consent: null, policy: null, usage: null } : null;
+    return value.code === 'UNAVAILABLE' ? { code: 'UNAVAILABLE', serverTimeMs: null, consent: null, policy: null, budget: null } : null;
   }
-  if (!exactKeys(value, ['code', 'period', 'serverTimeMs', 'consent', 'policy', 'usage'])) return null;
+  if (!exactKeys(value, ['code', 'period', 'serverTimeMs', 'consent', 'policy', 'budget'])) return null;
   const code = stylistStatusCodes.find((entry) => entry === value.code);
   if (!code || code === 'UNAVAILABLE' || typeof value.period !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value.period)
     || typeof value.serverTimeMs !== 'number' || !Number.isSafeInteger(value.serverTimeMs) || value.serverTimeMs < 0) return null;
-  const c = value.consent, p = value.policy, u = value.usage;
+  const c = value.consent, p = value.policy;
+  const budget = parseOptionalAiBudget(value.budget);
   if (!exactKeys(c, ['enabled', 'noticeRevision', 'consentedAt']) || typeof c.enabled !== 'boolean'
     || !(c.noticeRevision === null || revision(c.noticeRevision)) || c.enabled !== (c.noticeRevision !== null)
     || !(c.consentedAt === null || typeof c.consentedAt === 'string') || (c.consentedAt === null) !== (c.noticeRevision === null)) return null;
-  if (!exactKeys(u, ['stylistMicro', 'totalMicro', 'stylistLastHour', 'warning']) || !micro(u.stylistMicro) || !micro(u.totalMicro)
-    || typeof u.stylistLastHour !== 'number' || !Number.isSafeInteger(u.stylistLastHour) || u.stylistLastHour < 0
-    || typeof u.warning !== 'boolean') return null;
+  if (!budget.ok) return null;
   let policy: StylistPolicy | null = null;
   if (p !== null) {
-    if (!exactKeys(p, ['activated', 'noticeRevision', 'manifestId', 'modelId', 'maxRequestMicro', 'stylistAllowanceMicro',
-      'totalAllowanceMicro', 'maxRequestsPerHour']) || typeof p.activated !== 'boolean'
+    if (!exactKeys(p, ['activated', 'noticeRevision', 'manifestId', 'modelId', 'maxRequestMicro']) || typeof p.activated !== 'boolean'
       || !(p.noticeRevision === null || revision(p.noticeRevision)) || typeof p.manifestId !== 'string'
-      || !(p.modelId === null || typeof p.modelId === 'string') || !micro(p.maxRequestMicro) || !micro(p.stylistAllowanceMicro)
-      || !micro(p.totalAllowanceMicro) || typeof p.maxRequestsPerHour !== 'number' || !Number.isSafeInteger(p.maxRequestsPerHour)
-      || p.maxRequestsPerHour < 1) return null;
+      || !(p.modelId === null || typeof p.modelId === 'string') || !micro(p.maxRequestMicro)) return null;
     policy = { activated: p.activated, noticeRevision: p.noticeRevision, manifestId: p.manifestId, modelId: p.modelId,
-      maxRequestMicro: p.maxRequestMicro, stylistAllowanceMicro: p.stylistAllowanceMicro, totalAllowanceMicro: p.totalAllowanceMicro,
-      maxRequestsPerHour: p.maxRequestsPerHour };
+      maxRequestMicro: p.maxRequestMicro };
   }
   if ((code === 'OK' || code === 'INACTIVE' || code === 'CONSENT_REQUIRED') !== (policy !== null)) return null;
+  if (budget.budget === null && code !== 'UNCONFIGURED') return null;
   return { code, serverTimeMs: value.serverTimeMs, consent: { enabled: c.enabled, noticeRevision: c.noticeRevision }, policy,
-    usage: { stylistMicro: u.stylistMicro, totalMicro: u.totalMicro, stylistLastHour: u.stylistLastHour } };
+    budget: budget.budget };
 }
 
 /** The policy this app version has a notice for: the reviewed manifest, model and notice revision, before review expiry. */
@@ -106,25 +103,21 @@ export function stylistView(read: StylistRead, known: boolean, unresolved: boole
 }
 export const shownStylistView = (view: StylistView) => view.kind !== 'hidden' && view.kind !== 'loadFailed' && view.kind !== 'unresolved';
 
-export type StylistLimits = { own: boolean; shared: boolean; ownWarning: boolean; sharedWarning: boolean };
+export type StylistLimits = { reached: boolean; warning: boolean };
 /**
- * Each limit from its own counters, as the claim checks them: a message is refused when its reservation would pass the
- * stylist limit or the shared monthly limit. A warning is shown from 80%, for the limit it concerns.
+ * The one monthly AI budget as the claim checks it: a message is refused when its reservation would pass the budget.
+ * A warning is shown from 80%.
  */
 export function stylistLimits(status: StylistStatus): StylistLimits {
-  const p = status.policy, u = status.usage;
-  if (!p || !u) return { own: false, shared: false, ownWarning: false, sharedWarning: false };
-  const request = BigInt(p.maxRequestMicro), own = BigInt(u.stylistMicro), total = BigInt(u.totalMicro);
-  const ownLimit = BigInt(p.stylistAllowanceMicro), totalLimit = BigInt(p.totalAllowanceMicro);
-  const ownReached = own + request > ownLimit, sharedReached = total + request > totalLimit;
-  return { own: ownReached, shared: sharedReached, ownWarning: !ownReached && own * 10n >= ownLimit * 8n,
-    sharedWarning: !sharedReached && total * 10n >= totalLimit * 8n };
+  const p = status.policy, b = status.budget;
+  if (!p || !b) return { reached: false, warning: false };
+  const reached = budgetExhausted(b, p.maxRequestMicro);
+  return { reached, warning: !reached && b.warning };
 }
-/** What a refused message says after status is read again. Only a limit the counters show as reached is named. */
+/** What a refused message says after status is read again. Only a budget the counters show as reached is named. */
 export function allowanceKey(status: StylistStatus | null): MessageKey {
   if (!status) return 'stylist.limitReached';
-  const limits = stylistLimits(status);
-  return limits.own ? 'stylist.limitOwn' : limits.shared ? 'stylist.limitShared' : 'stylist.failed';
+  return stylistLimits(status).reached ? 'stylist.limitShared' : 'stylist.failed';
 }
 
 /** Typed text as it is sent: newlines kept, other control characters and lone surrogates replaced, then trimmed. */
@@ -193,7 +186,7 @@ export function stylistWeather(context: { setting?: 'indoors' | 'outdoors'; temp
 }
 
 export const stylistReplyCodes = ['INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'TERMINAL', 'TOO_LARGE',
-  'UNSUPPORTED_MEDIA', 'FILTERED', 'RATE_LIMIT', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'BUSY', 'TIMEOUT'] as const;
+  'UNSUPPORTED_MEDIA', 'FILTERED', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'BUSY', 'TIMEOUT'] as const;
 export type StylistReplyCode = (typeof stylistReplyCodes)[number];
 export type StylistIdea = { itemIds: string[]; note: string };
 export type StylistAnswer = { code: 'OK'; reply: string; outfits: StylistIdea[] } | { code: StylistReplyCode };
@@ -223,7 +216,6 @@ export type SendFailure = { key: MessageKey; retry: boolean };
 /** Fixed words for each refused or failed message. ALLOWANCE is worded after status is read again (`allowanceKey`). */
 export function sendFailure(code: StylistReplyCode | 'OFFLINE'): SendFailure {
   switch (code) {
-    case 'RATE_LIMIT': return { key: 'stylist.rate', retry: false };
     case 'TIMEOUT': return { key: 'stylist.timeout', retry: true };
     case 'FILTERED': return { key: 'stylist.filtered', retry: false };
     case 'BUSY': return { key: 'stylist.busy', retry: true };

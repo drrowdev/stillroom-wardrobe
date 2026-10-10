@@ -3,6 +3,7 @@
 // job, and the server's checks stay authoritative.
 import type { OwnerScope } from '../auth/session';
 import { parseEnhanceStatus, type EnhanceStatus } from '../domain/enhance-controls';
+import { aiBudgetHeaders } from '../domain/ai-budget';
 import { CLEANUP_NOTICE_REVISION, ENHANCE_LIMITS } from '../domain/enhancement';
 import { isUuid } from '../domain/wardrobe';
 import type { CleanupSource } from '../images/process-jpeg';
@@ -11,7 +12,7 @@ import { readConfiguration, type PublicConfig } from './config';
 import { sessionOwner } from '../auth/auth-storage';
 
 export const enhanceCodes = ['OK', 'INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'TERMINAL', 'TOO_LARGE',
-  'UNSUPPORTED_MEDIA', 'FILTERED', 'OUTPUT_REJECTED', 'RATE_LIMIT', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE',
+  'UNSUPPORTED_MEDIA', 'FILTERED', 'OUTPUT_REJECTED', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE',
   'CONFIG_CHANGED', 'BUSY', 'TIMEOUT'] as const;
 export type EnhanceCode = (typeof enhanceCodes)[number];
 export class EnhanceError extends Error {
@@ -85,7 +86,7 @@ export class EnhancementClient {
     return session.access_token;
   }
   private headers(token: string, extra: Record<string, string>) {
-    return { apikey: this.config.publishableKey, Authorization: `Bearer ${token}`, ...extra };
+    return { apikey: this.config.publishableKey, Authorization: `Bearer ${token}`, ...    aiBudgetHeaders, ...extra };
   }
   private async readBody(response: Response, limit: number, wait: Wait): Promise<Uint8Array<ArrayBuffer>> {
     if (!response.body) throw new EnhanceError('FAILED');

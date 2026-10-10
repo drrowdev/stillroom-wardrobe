@@ -5,12 +5,12 @@ import path from 'node:path';
 import { languages, locales, messages, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { azureAiReviewExpires } from '../../src/domain/ai-controls';
 import { aiFixture, editItem } from './ai-photo-first-support';
-import { owners } from './mock-backend';
+import { budgetReply, owners } from './mock-backend';
 import { utcPeriod } from '../../src/features/settings/ai-features-model';
 import { expectIdentity, isNarrow, openAccountMenu } from './shell-support';
 
 type StatusPatch = { code?: string; consent?: { enabled?: boolean; noticeRevision?: number | null };
-  policy?: Record<string, unknown>; usage?: { accountedMicro?: string; warning?: boolean }; serverTimeMs?: number;
+  policy?: Record<string, unknown>; budget?: { monthlyAllowanceMicro?: string; usedMicro?: string }; serverTimeMs?: number;
   fail?: number; hold?: Promise<void> };
 const text = (key: MessageKey, language: Language = 'en') => messages[key][language];
 const card = (page: Page) => page.locator('section[aria-labelledby="ai-consent-title"]');
@@ -64,9 +64,8 @@ async function start(page: Page, language: Language = 'en', enabled = false) {
       consent: { enabled: enabledNow, noticeRevision: revision, consentedAt: enabledNow ? '2026-09-12T00:00:00Z' : null,
         profileVersion: String(api.profiles[owners.a]!.version) },
       policy: { activated: true, noticeRevision: 2, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1,
-        executionManifestId: 'azure-eu-terra-devtest-v1', maxRequestMicro: '4097351', monthlyAllowanceMicro: allowance,
-        maxRequestsPerHour: 200, resultTtlSeconds: 3600, ...current.policy },
-      usage: { accountedMicro: '0', requestsLastHour: 0, warning: false, ...current.usage } }) });
+        executionManifestId: 'azure-eu-terra-devtest-v1', maxRequestMicro: '4097351', resultTtlSeconds: 3600, ...current.policy },
+      budget: budgetReply(current.budget?.monthlyAllowanceMicro ?? allowance, current.budget?.usedMicro ?? '0') }) });
   });
   const log: Array<{ method: string; path: string; body: unknown }> = [];
   page.on('request', (request) => {
@@ -188,15 +187,15 @@ test('L2a usage rounds up to cents, the limit follows the configured allowance, 
   const { api, setStatus } = await start(page, 'en', true);
   await openSettings(page);
   await expect(spent(page)).toHaveText(usage('en', 0));
-  setStatus({ usage: { accountedMicro: '7000' } });
+  setStatus({ budget: { usedMicro: '7000' } });
   await reread(page, () => expect(spent(page)).toHaveText(usage('en', 1), { timeout: 1000 }));
-  setStatus({ usage: { accountedMicro: '10001' } });
+  setStatus({ budget: { usedMicro: '10001' } });
   await reread(page, () => expect(spent(page)).toHaveText(usage('en', 2), { timeout: 1000 }));
   await expect(page.locator('.ai-spend').getByText(text('aiC.warning'), { exact: true })).toHaveCount(0);
-  setStatus({ usage: { accountedMicro: '16000000' } });
+  setStatus({ budget: { usedMicro: '16000000' } });
   await reread(page, () => expect(spent(page)).toHaveText(usage('en', 1600), { timeout: 1000 }));
   await expect(page.locator('.ai-spend').getByText(text('aiC.warning'), { exact: true })).toBeVisible();
-  setStatus({ policy: { monthlyAllowanceMicro: '20015000' } });
+  setStatus({ budget: { monthlyAllowanceMicro: '20015000' } });
   await reread(page, () => expect(spent(page)).toHaveText(usage('en', 0, money('en', 2001)), { timeout: 1000 }));
   expect(api.calls.filter((call) => call.route.endsWith('/ai_set_consent'))).toHaveLength(0);
 });
@@ -260,7 +259,7 @@ test('L2a an allowance change while On keeps it on with the new limit and no wri
   await openSettings(page);
   await expect(state(page, true)).toBeVisible();
   api.policy({ monthlyAllowanceMicro: '30000000' });
-  setStatus({ policy: { monthlyAllowanceMicro: '30000000' } });
+  setStatus({ budget: { monthlyAllowanceMicro: '30000000' } });
   await reread(page, () => expect(spent(page)).toHaveText(usage('en', 0, money('en', 3000, true)), { timeout: 1000 }));
   await expect(state(page, true)).toBeVisible();
   expect(traffic.consent()).toHaveLength(0);

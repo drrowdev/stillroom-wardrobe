@@ -33,7 +33,7 @@ const UUID_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 export const ALLOWED_PATTERNS = Object.freeze([
   new RegExp(`^GET /storage/v1/object/wardrobe/${UUID_SEGMENT}/${UUID_SEGMENT}/${UUID_SEGMENT}/main\\.jpg$`),
 ]);
-export const FORWARDED_HEADERS = Object.freeze(['authorization', 'apikey', 'content-type', 'content-length']);
+export const FORWARDED_HEADERS = Object.freeze(['authorization', 'apikey', 'content-type', 'content-length', 'x-stillroom-ai-budget-contract']);
 /** The only requests the host-side gate may send in, towards the fixture runtime. */
 export const INGRESS_ROUTES = Object.freeze(['POST /functions/v1/analyze-clothing', 'POST /functions/v1/stylist-chat',
   'POST /functions/v1/enhance-photo', 'POST /functions/v1/try-on']);

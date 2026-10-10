@@ -61,24 +61,47 @@ describe('BulkQueue analysis bound', () => {
     expect(queue.analysisSlots().occupied).toBe(0);
   });
 
-  it('halts automatic analysis on rate or allowance outcomes but still admits a manual retry', async () => {
+  it('halts automatic analysis on an allowance outcome but still admits a manual retry', async () => {
+    const queue = new BulkQueue();
+    const a = ticketOf(await queue.analysis.admit(signal(), false));
+    expect(a.send()).toBeNull(); a.resolved('ALLOWANCE');
+    expect(queue.snapshot().halted.analysis).toBe('allowance');
+    expect(await queue.analysis.admit(signal(), false)).toBe('allowance');
+    expect(typeof await queue.analysis.admit(signal(), true)).toBe('object');
+  });
+
+  it('has no hourly outcome: an unknown refusal code frees the slot and halts nothing', async () => {
     const queue = new BulkQueue();
     const a = ticketOf(await queue.analysis.admit(signal(), false));
     expect(a.send()).toBeNull(); a.resolved('RATE_LIMIT');
-    expect(queue.snapshot().halted.analysis).toBe('rate');
-    expect(await queue.analysis.admit(signal(), false)).toBe('rate');
-    expect(typeof await queue.analysis.admit(signal(), true)).toBe('object');
-    const other = new BulkQueue();
-    ticketOf(await other.analysis.admit(signal(), false)).resolved('ALLOWANCE');
-    expect(await other.analysis.admit(signal(), false)).toBe('allowance');
+    expect(queue.snapshot().halted.analysis).toBeNull();
+    expect(queue.analysisSlots().occupied).toBe(0);
   });
 
+  it('drains a 50-photo batch through the two-slot bound with no hourly halt and no pacing delay', async () => {
+    const queue = new BulkQueue();
+    let sent = 0;
+    const analyse = async () => {
+      const ticket = ticketOf(await queue.analysis.admit(signal(), false));
+      expect(ticket.send()).toBeNull();
+      sent += 1;
+      ticket.resolved('OK');
+    };
+    const started = Date.now();
+    await Promise.all(Array.from({ length: BATCH_LIMIT }, analyse));
+    expect(sent).toBe(BATCH_LIMIT);
+    expect(queue.snapshot().halted.analysis).toBeNull();
+    expect(queue.snapshot().paused).toBe(false);
+    expect(queue.analysisSlots()).toEqual({ occupied: 0, uncertain: 0 });
+    // Synthetic and immediate: nothing here waits on the 20, 40 or 80 second clean-up backoff.
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
   it('checks the send boundary: a ticket admitted before Stop or a halt sends nothing and frees its slot', async () => {
     for (const end of ['stop', 'halt'] as const) {
       const queue = new BulkQueue();
       const a = ticketOf(await queue.analysis.admit(signal(), false));
-      if (end === 'stop') queue.stop(); else queue.halt('analysis', 'rate');
-      expect(a.send()).toBe(end === 'stop' ? 'stopped' : 'rate');
+      if (end === 'stop') queue.stop(); else queue.halt('analysis', 'allowance');
+      expect(a.send()).toBe(end === 'stop' ? 'stopped' : 'allowance');
       expect(queue.analysisSlots().occupied).toBe(0);
       a.abandon();
       expect(queue.analysisSlots()).toEqual({ occupied: 0, uncertain: 0 });
@@ -236,8 +259,8 @@ describe('BulkQueue stages', () => {
     expect(result).toBe(busy);
   });
 
-  it('halts automatic clean-up on rate and allowance, without retrying', async () => {
-    for (const reason of ['rate', 'allowance'] as const) {
+  it('halts automatic clean-up on the allowance, without retrying', async () => {
+    for (const reason of ['allowance'] as const) {
       const queue = new BulkQueue(false, [1], async () => undefined);
       let runs = 0;
       const result = { kind: 'skipped', line: 'generic', requestId: null, reason } as StageResult;

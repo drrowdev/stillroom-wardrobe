@@ -373,6 +373,12 @@ describe('privileged controller', () => {
   it('accepts only the closed operations for the fixed owners', () => {
     expect(controller.validOperation({ type: 'op', id: 1, op: 'freeze', owner: 'A' })).toBe(true);
     expect(controller.validOperation({ type: 'op', id: 2, op: 'count' })).toBe(true);
+    for (const op of ['budget-low', 'budget-restore']) {
+      expect(controller.validOperation({ type: 'op', id: 2, op, owner: 'B' })).toBe(true);
+      expect(controller.validOperation({ type: 'op', id: 2, op })).toBe(false);
+      expect(controller.validOperation({ type: 'op', id: 2, op, owner: 'C' })).toBe(false);
+      expect(controller.validOperation({ type: 'op', id: 2, op, owner: 'A', micro: 1 })).toBe(false);
+    }
     expect(controller.validOperation({ type: 'op', id: 3, op: 'freeze', owner: 'C' })).toBe(false);
     expect(controller.validOperation({ type: 'op', id: 4, op: 'freeze', owner: 'A', sql: 'select 1' })).toBe(false);
     expect(controller.validOperation({ type: 'op', id: 5, op: 'count', owner: 'A' })).toBe(false);

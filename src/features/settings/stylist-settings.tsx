@@ -29,15 +29,15 @@ export function StylistSettings({ store, busy, online, language, t }: Props) {
   const sheet = useConsentSheet(view.turnOn, state.writing);
   if (!view.card) return null;
   const policy = status?.policy ?? null;
+  const budget = status?.budget ?? null;
   const limits = status ? stylistLimits(status) : null;
-  const stylistLimit = policy ? usdCents(policy.stylistAllowanceMicro, language, 'limit') : '';
-  const limit = policy ? usdCents(policy.totalAllowanceMicro, language, 'limit') : '';
+  const limit = budget ? usdCents(budget.monthlyAllowanceMicro, language, 'limit') : '';
+  const stylistLimit = limit;
   const disabled = !online || busy || state.writing;
   const details = view.kind === 'off' || view.kind === 'renew' || view.kind === 'on' || view.kind === 'paused';
   const control = featureSwitch(view.turnOn, view.turnOff);
   const change = (enabled: boolean, button: HTMLElement | null) => { pressed.current = button; return writeConsent(store, enabled); };
-  const value = view.kind === 'on' && status?.usage && policy ? t('aiC.usage', { used: usdCents(status.usage.stylistMicro, language, 'used'), limit: stylistLimit })
-    : (view.kind === 'off' || view.kind === 'renew') && policy ? t('aiF.upTo', { limit: stylistLimit }) : null;
+  const value = (view.kind === 'off' || view.kind === 'renew') && budget ? t('aiF.upTo', { limit }) : null;
   const noticeList = <dl className="ai-notice fine">
     <dt>{t('stylistC.fieldsTitle')}</dt>
     <dd>{t('stylistC.fields')}</dd>
@@ -50,8 +50,8 @@ export function StylistSettings({ store, busy, online, language, t }: Props) {
   </dl>;
   const line = view.kind === 'loadFailed' ? 'stylistC.loadFailed' : view.kind === 'unresolved' ? 'stylist.unresolved'
     : view.kind === 'unavailable' ? 'stylist.unavailable' : view.kind === 'paused' ? 'stylist.paused' : view.kind === 'renew' ? 'stylistC.changed' : null;
-  const limitLine = view.kind !== 'on' || !status?.usage || !policy ? null : limits?.own ? 'stylist.limitOwn' : limits?.shared ? 'stylist.limitShared'
-    : limits?.ownWarning ? 'stylist.warning' : limits?.sharedWarning ? 'stylist.sharedWarning' : null;
+  const limitLine = view.kind !== 'on' || !budget || !policy ? null : limits?.reached ? 'stylist.limitShared'
+    : limits?.warning ? 'stylist.sharedWarning' : null;
   return <FeatureRow id="stylist-heading" headingRef={heading} switchRef={switchButton} title={t('stylistC.settings')}
     description={t('stylistC.description')} value={value} busy={state.writing} control={control} switchDisabled={disabled}
     onSwitch={() => { if (control.checked) void change(false, switchButton.current); else sheet.show(); }}

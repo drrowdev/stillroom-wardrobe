@@ -93,7 +93,7 @@ export async function analyzedBaseline(env) {
       await h.call('cancel_analyzed_item_save', h.finalizeArgs(value, row)).then((r) => requireEvidence(r.ok));
       denied(await h.call('reserve_analyzed_item_save', value));
       const after = await client.rpc(owner, 'ai_status', {});
-      eq(after.usage, before.usage); eq(after.policy, before.policy); eq(after.consent, before.consent);
+      eq(after.budget, before.budget); eq(after.policy, before.policy); eq(after.consent, before.consent);
     } finally { await h.cleanup(); }
   }
 }
@@ -202,7 +202,7 @@ async function full(env, phase) {
       } })).ok);
       eq(await client.rpc(owner, 'item_attribution_history', { p_item_id: edited.p_item.id }), editedHistory);
       const after = await client.rpc(owner, 'ai_status', {});
-      eq(after.usage.accountedMicro, before.usage.accountedMicro);
+      eq(after.budget.usedMicro, before.budget.usedMicro);
     } else if (phase === 'withdraw') {
       const [value, row] = await use(22);
       const profile = (await client.rows(owner, 'profiles'))[0];

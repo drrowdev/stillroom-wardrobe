@@ -189,6 +189,9 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'admin_limits_v2(private.ai_controls)', 'admin_limits_shape_fields(jsonb, text[])',
   'admin_set_limits(smallint, text, jsonb, jsonb, text, boolean)',
   'admin_account_v2(private.approved_accounts, timestamp with time zone, text[])',
+  'ai_budget_contract()', 'ai_budget_used(uuid, timestamp with time zone)', 'ai_budget_json(bigint, numeric)',
+  'admin_account_v3(private.approved_accounts, timestamp with time zone, text[])', 'admin_budget_shape(jsonb)',
+  'admin_set_budget(smallint, text, jsonb, jsonb, text)',
 ]);
 
 // Supabase-provided GraphQL entrypoint; its privileges are provider-managed and recorded, not asserted.

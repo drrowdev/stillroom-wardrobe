@@ -75,7 +75,7 @@ async function main() {
         method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(30_000),
         headers: { ...(token === null ? {} : { Authorization: `Bearer ${token}` }), apikey: env.SUPABASE_PUBLISHABLE_KEY,
           'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': requestId, 'X-Stillroom-Draft-Id': draftId,
-          'X-Stillroom-Generation': '1' },
+          'X-Stillroom-Generation': '1', 'X-Stillroom-AI-Budget-Contract': '2' },
         body,
       });
       const text = await response.text();
@@ -294,7 +294,7 @@ async function main() {
         const response = await fetch(`${ingress}/functions/v1/stylist-chat`, {
           method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(60_000),
           headers: { ...(token === null ? {} : { Authorization: 'Bearer '.concat(token) }), apikey: env.SUPABASE_PUBLISHABLE_KEY,
-            'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            'Content-Type': 'application/json', 'X-Stillroom-AI-Budget-Contract': '2' }, body: JSON.stringify(body) });
         let data = null;
         try { data = JSON.parse(await response.text()); } catch { /* compared as null */ }
         return { status: response.status, data, noStore: response.headers.get('cache-control') === 'no-store' };
@@ -307,7 +307,7 @@ async function main() {
         return new Set(r.data.map((row) => row.id));
       };
       const outfitRows = async (owner) => (await client.request(owner.token, '/rest/v1/outfits?select=id,version&order=id')).data;
-      const stylistUsage = async (owner) => (await client.rpc(owner, 'stylist_status', {}))?.usage?.stylistLastHour;
+      const stylistUsage = async (owner) => (await client.rpc(owner, 'stylist_status', {}))?.budget?.usedMicro;
       for (const owner of [A, B]) {
         const status = await client.rpc(owner, 'stylist_status', {});
         const consented = await client.rpc(owner, 'stylist_set_consent', { p_enabled: true, p_notice_revision: status?.policy?.noticeRevision ?? null });
@@ -389,9 +389,9 @@ async function main() {
       const noConsent = await stylist(B.token, ask(10, B));
       check(PROVIDER, 'stylist-consent-required', revoked?.code === 'CONSENT_REQUIRED' && noConsent.status === 403
         && isDeepStrictEqual(noConsent.data, { code: 'CONSENT_REQUIRED' }), summary(noConsent));
-      const microBefore = (await client.rpc(A, 'stylist_status', {}))?.usage?.stylistMicro;
+      const microBefore = (await client.rpc(A, 'stylist_status', {}))?.budget?.usedMicro;
       const overrun = await stylist(A.token, ask(11, A, 'Stylist fixture overrun'));
-      const microAfter = (await client.rpc(A, 'stylist_status', {}))?.usage?.stylistMicro;
+      const microAfter = (await client.rpc(A, 'stylist_status', {}))?.budget?.usedMicro;
       const afterOverrun = await stylist(A.token, ask(12, A));
       const disabled = await client.rpc(A, 'stylist_status', {});
       check(PROVIDER, 'stylist-overrun-disables', overrun.status === 502 && isDeepStrictEqual(overrun.data, { code: 'FAILED' })
@@ -428,7 +428,7 @@ async function main() {
         const response = await fetch(`${ingress}/functions/v1/try-on`, {
           method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(90_000),
           headers: { ...(token === null ? {} : { Authorization: 'Bearer '.concat(token) }), apikey: env.SUPABASE_PUBLISHABLE_KEY,
-            'Content-Type': encoded.headers.get('content-type') }, body });
+            'Content-Type': encoded.headers.get('content-type'), 'X-Stillroom-AI-Budget-Contract': '2' }, body });
         const bytes = new Uint8Array(await response.arrayBuffer());
         const jpeg = response.headers.get('content-type') === 'image/jpeg';
         let data = null;
@@ -467,7 +467,9 @@ async function main() {
       };
       const wardrobeA = await wardrobe(A, ['top', 'bottom', 'footwear']), wardrobeB = await wardrobe(B, ['top']);
       const outfitA = wardrobeA.outfitId, outfitB = wardrobeB.outfitId;
-      const hourly = async (owner) => (await tryonStatus(owner))?.usage?.tryOnLastHour;
+      // BUDGET1: one account budget; the amount used is the only per-account measure (no hourly count).
+      const used = async (owner) => BigInt((await tryonStatus(owner))?.budget?.usedMicro ?? 'NaN');
+      const usedBefore = { A: await used(A), B: await used(B) };
       const before = await count();
 
       stage = 'tryon-owned';
@@ -497,7 +499,7 @@ async function main() {
       // A foreign outfit, chain or result is answered exactly like a missing one, and A's state is untouched. Stop replies
       // CANCELLED for both (VTO-3a): it records only B's own marker, which the fixture teardown removes by its gate prefix.
       const stateA = async () => ({ results: await client.rpc(A, 'tryon_results_v1', {}),
-        chain: await client.rpc(A, 'tryon_chain_status', { p_chain_id: chainA }), hour: await hourly(A) });
+        chain: await client.rpc(A, 'tryon_chain_status', { p_chain_id: chainA }), used: await used(A) });
       const aBefore = await stateA();
       const foreignOutfit = await tryOn(B.token, fields(id(B, 31), 1, id(B, 2), outfitA), person());
       const missingOutfit = await tryOn(B.token, fields(id(B, 32), 1, id(B, 3), randomUUID()), person());
@@ -517,8 +519,9 @@ async function main() {
       { B: listedB?.code });
 
       stage = 'tryon-negatives';
-      const hourA = await hourly(A), hourB = await hourly(B);
-      check(PROVIDER, 'tryon-usage-own-rows-only', hourA === 3 && hourB === 1, { hourA, hourB });
+      const usedAfter = { A: await used(A), B: await used(B) };
+      const spentA = usedAfter.A - usedBefore.A, spentB = usedAfter.B - usedBefore.B;
+      check(PROVIDER, 'tryon-budget-own-rows-only', spentB > 0n && spentA > spentB, { spentA: String(spentA), spentB: String(spentB) });
       const anonymous = await tryOn(null, fields(id(A, 31), 1, id(A, 4), outfitA), person());
       const manifest = await tryOn(A.token, fields(id(A, 32), 1, id(A, 5), outfitA, 'azure-global-image25-sunburst-enhance-v1'), person());
       const square = await tryOn(A.token, fields(id(A, 33), 1, id(A, 6), outfitA), person(1024));
@@ -535,7 +538,7 @@ async function main() {
       check(PROVIDER, 'tryon-consent-required', revoked?.code === 'CONSENT_REQUIRED' && refused(noConsent, 403, 'CONSENT_REQUIRED')
         && reconsented?.code === 'OK', { revoked: revoked?.code, call: summary(noConsent) });
       counted = await count();
-      check(PROVIDER, 'tryon-negatives-no-dispatch', counted.served === before.served + 4 && await hourly(A) === 3 && await hourly(B) === 1,
+      check(PROVIDER, 'tryon-negatives-no-dispatch', counted.served === before.served + 4 && await used(A) === usedAfter.A && await used(B) === usedAfter.B,
         counted.served);
 
       stage = 'tryon-filtered';
@@ -547,9 +550,11 @@ async function main() {
       const afterFilter = await client.rpc(A, 'tryon_results_v1', {});
       check(PROVIDER, 'tryon-filtered-no-result', isDeepStrictEqual(stopped, { code: 'CANCELLED' }) && afterFilter?.code === 'OK'
         && isDeepStrictEqual(afterFilter.results.map((r) => r.id), aBefore.results.results.map((r) => r.id)), { stopped });
-      // Four of A's six per hour are used; a new three-step chain is refused before any claim.
+      // With one micro-USD of A's one monthly budget left, a new three-step chain is refused before any claim.
+      requireEvidence((await op('budget-low', 'A')).ok === true);
       const limited = await tryOn(A.token, fields(id(A, 36), 1, id(A, 9), outfitA), person());
-      check(PROVIDER, 'tryon-hourly-rate-limit', refused(limited, 429, 'RATE_LIMIT'), summary(limited));
+      requireEvidence((await op('budget-restore', 'A')).ok === true);
+      check(PROVIDER, 'tryon-budget-exhausted', refused(limited, 429, 'ALLOWANCE'), summary(limited));
       counted = await count();
       check(PROVIDER, 'tryon-double-totals', counted.served === before.served + 5 && counted.refused === 0 && counted.rejected === 0
         && isDeepStrictEqual(counted.modes, { ...before.modes, 'tryon-ok': 4, 'tryon-filtered': 1 }), counted);
@@ -571,14 +576,14 @@ async function main() {
 
     stage = 'enhance';
     // BG2b-1: the production enhance-photo handler with the images edit double, on ordinary A/B sessions. The fixture
-    // opens sixteen shared dispatches (try-on used five) and six per owner per hour. A's six dispatches cover success, stripping and every
-    // rejection, then A is rate-limited; B's missing-usage anomaly turns the shared switch off for both owners.
+    // opens sixteen shared dispatches (try-on used five). A's six dispatches cover success, stripping and every
+    // rejection, then A's one monthly budget is exhausted; B's missing-usage anomaly turns the shared switch off for both owners.
     {
       const enhance = async (token, requestId, width) => {
         const response = await fetch(`${ingress}/functions/v1/enhance-photo`, {
           method: 'POST', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(60_000),
           headers: { ...(token === null ? {} : { Authorization: 'Bearer '.concat(token) }), apikey: env.SUPABASE_PUBLISHABLE_KEY,
-            'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': requestId }, body: flatBaselineJpeg(width, 1000) });
+            'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': requestId, 'X-Stillroom-AI-Budget-Contract': '2' }, body: flatBaselineJpeg(width, 1000) });
         const bytes = new Uint8Array(await response.arrayBuffer());
         const jpeg = response.headers.get('content-type') === 'image/jpeg';
         let data = null;
@@ -620,12 +625,15 @@ async function main() {
       check(PROVIDER, 'enhance-dispatch-count', counted.served === before.served + 7 && counted.refused === 0 && counted.rejected === 0, counted);
 
       stage = 'enhance-negatives';
-      const usageA = (await enhanceStatus(A))?.usage?.enhanceLastHour, usageB = (await enhanceStatus(B))?.usage?.enhanceLastHour;
-      check(PROVIDER, 'enhance-usage-own-rows-only', usageA === 6 && usageB === 1, { usageA, usageB });
-      const hourly = await enhance(A.token, id(A, 7), 800);
+      const budgetA = (await enhanceStatus(A))?.budget, budgetB = (await enhanceStatus(B))?.budget;
+      check(PROVIDER, 'enhance-budget-own-account-only', typeof budgetA?.usedMicro === 'string' && typeof budgetB?.usedMicro === 'string'
+        && BigInt(budgetA.usedMicro) > BigInt(budgetB.usedMicro), { budgetA, budgetB });
+      requireEvidence((await op('budget-low', 'A')).ok === true);
+      const exhausted = await enhance(A.token, id(A, 7), 800);
+      requireEvidence((await op('budget-restore', 'A')).ok === true);
       const replay = await enhance(A.token, id(A, 1), 800);
       const anonymous = await enhance(null, id(A, 8), 800);
-      check(PROVIDER, 'enhance-hourly-rate-limit', refused(hourly, 429, 'RATE_LIMIT'), summary(hourly));
+      check(PROVIDER, 'enhance-budget-exhausted', refused(exhausted, 429, 'ALLOWANCE'), summary(exhausted));
       check(PROVIDER, 'enhance-replay-terminal', refused(replay, 409, 'TERMINAL'), summary(replay));
       check(PROVIDER, 'enhance-anonymous', anonymous.status === 401 && !anonymous.jpeg, summary(anonymous));
       const frozenEnhance = await frozenCall(B, () => enhance(B.token, id(B, 2), 800))();
@@ -717,8 +725,8 @@ async function main() {
         && statusB.policy?.providerAvailable === false && statusA?.code === 'OK' && statusA.policy?.providerAvailable === false
         && refused(afterB, 503, 'INACTIVE') && refused(afterA, 403, 'UNAVAILABLE'),
       { A: statusA?.code, B: statusB?.code, afterA: summary(afterA), afterB: summary(afterB) });
-      check(PROVIDER, 'enhance-anomaly-no-foreign-data', !JSON.stringify(statusA).includes(B.uid) && statusA?.usage?.enhanceLastHour === 6,
-        statusA?.usage);
+      check(PROVIDER, 'enhance-anomaly-no-foreign-data', !JSON.stringify(statusA).includes(B.uid) && typeof statusA?.budget?.usedMicro === 'string',
+        statusA?.budget);
       counted = await count();
       // Eight enhancement dispatches plus the one analysis of H2 for the real analysed Save.
       check(PROVIDER, 'enhance-double-totals', counted.served === before.served + 9 && counted.rejected === 0 && counted.refused === 0

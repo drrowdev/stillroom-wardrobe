@@ -302,14 +302,16 @@ describe('stylist handler (mocked Auth, RPC and provider)', () => {
   const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service',
     azure: { apiKey: 'fictional-azure' } };
   const status = { code: 'OK', consent: { enabled: true, noticeRevision: 1 }, policy: { activated: true, noticeRevision: 1,
-    manifestId: STYLIST_MANIFEST, modelId: STYLIST_MODEL, maxRequestMicro: '200000' } };
+    manifestId: STYLIST_MANIFEST, modelId: STYLIST_MODEL, maxRequestMicro: '200000' },
+  budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false } };
   const accounting = { basis: 'confirmed', amountMicro: '5000', currency: 'USD' };
-  type Call = { url: string; body: Record<string, unknown> | null; auth: string | null };
+  type Call = { url: string; body: Record<string, unknown> | null; auth: string | null; contract: string | null };
   function backend(options: { status?: unknown; claim?: Record<string, unknown>; finish?: Record<string, unknown> } = {}) {
     const calls: Call[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const parsed = typeof init.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null;
-      calls.push({ url, body: parsed, auth: new Headers(init.headers).get('Authorization') });
+      calls.push({ url, body: parsed, auth: new Headers(init.headers).get('Authorization'),
+        contract: new Headers(init.headers).get('X-Stillroom-AI-Budget-Contract') });
       if (url.endsWith('/auth/v1/user')) return Response.json({ id: OWNER, role: 'authenticated', is_anonymous: false });
       if (url.endsWith('/rpc/stylist_status')) return Response.json(options.status ?? status);
       if (url.endsWith('/rpc/stylist_claim')) return Response.json(options.claim ?? { code: 'OK', claimed: true,
@@ -327,8 +329,8 @@ describe('stylist handler (mocked Auth, RPC and provider)', () => {
     });
     return { transport, sent };
   };
-  const post = (value: unknown) => new Request('http://127.0.0.1:54321/functions/v1/stylist-chat', { method: 'POST',
-    headers: { Authorization: 'Bearer fictional.jwt.token', 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+  const post = (value: unknown, contract: string | null = '2') => new Request('http://127.0.0.1:54321/functions/v1/stylist-chat', { method: 'POST',
+    headers: { Authorization: 'Bearer fictional.jwt.token',     ...(contract === null ? {} : { 'X-Stillroom-AI-Budget-Contract': contract }), 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
   const replyContent = (refs: string[], reply = 'Here is one.') => JSON.stringify({ reply, outfits: [{ refs, note: 'Smart' }] });
 
   it('uses only the three stylist RPCs', () => { expect(STYLIST_RPCS).toEqual(['stylist_status', 'stylist_claim', 'stylist_finish']); });
@@ -340,6 +342,38 @@ describe('stylist handler (mocked Auth, RPC and provider)', () => {
     expect(response.status).toBe(400);
     expect(calls).toHaveLength(0);
     expect(transport).not.toHaveBeenCalled();
+  });
+
+  it('refuses a request without the budget contract before any network call, and CORS names exactly that header', async () => {
+    for (const contract of [null, '1', '3', '']) {
+      const calls = backend();
+      const { transport } = provider({ content: '{}' });
+      const response = await createStylistHandler(config, transport)(post(body(), contract));
+      expect([response.status, await response.json()]).toEqual([403, { code: 'UNAVAILABLE' }]);
+      expect(calls).toHaveLength(0);
+      expect(transport).not.toHaveBeenCalled();
+    }
+    const preflight = await createStylistHandler(config, vi.fn())(new Request('http://127.0.0.1:54321/functions/v1/stylist-chat', {
+      method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization, content-type, x-stillroom-ai-budget-contract' } }));
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get('Access-Control-Allow-Headers')).toContain('x-stillroom-ai-budget-contract');
+  });
+
+  it('forwards the contract on every RPC and refuses a status in the old shape before any claim', async () => {
+    const calls = backend();
+    const { transport } = provider({ content: replyContent(['i1', 'i2']), refusal: null });
+    await createStylistHandler(config, transport)(post(body()));
+    expect(calls.filter((call) => !call.url.endsWith('/auth/v1/user')).map((call) => call.contract)).toEqual(['2', '2', '2']);
+    const old = Object.fromEntries(Object.entries(status).filter(([key]) => key !== 'budget'));
+    for (const legacy of [old, { ...old, usage: { stylistMicro: '0', totalMicro: '0' } }, { ...status, budget: null }]) {
+      const refused = backend({ status: legacy });
+      const other = provider({ content: '{}' });
+      const response = await createStylistHandler(config, other.transport)(post(body()));
+      expect([response.status, await response.json()]).toEqual([403, { code: 'UNAVAILABLE' }]);
+      expect(refused.map((call) => call.url.split('/').pop())).toEqual(['user', 'stylist_status']);
+      expect(other.transport).not.toHaveBeenCalled();
+    }
   });
 
   it('claims for the verified user only and returns owner item IDs', async () => {

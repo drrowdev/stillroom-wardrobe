@@ -921,3 +921,14 @@ markers, and `deletion_owner_rows_absent` checks them. Admin v2:
 jsonb, jsonb, text)` add `tryOn` to the AD1a contract with the same rules;
 v1 is unchanged except the `CONFLICT` above. No try-on table or stop marker is
 exported or restored.
+
+Budget contract (BUDGET1, ADR29): the status, consent, claim, probe, bootstrap
+and admin functions keep their names and signatures. The request header
+`X-Stillroom-AI-Budget-Contract: 2` selects the one-monthly-budget replies:
+`budget {monthlyAllowanceMicro, usedMicro, remainingMicro, warning}` replaces the
+usage and allowance fields, and `admin_set_ai_limits_v2` sets one amount
+(positive, at most USD 50). Without the header the status functions answer
+`UNAVAILABLE`, enabling consent and admin writes refuse before any change,
+withdrawal still works, and `admin_ai_spending` / `admin_set_ai_limits` (v1)
+always answer `UNAVAILABLE`. The Edge functions require the header and a
+closed `budget` reply before any claim.

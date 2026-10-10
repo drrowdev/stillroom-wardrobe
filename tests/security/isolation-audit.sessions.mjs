@@ -54,7 +54,9 @@ async function raw(token, route, { method = 'GET', body, binary = false, headers
   try {
     response = await fetch(url, {
       method, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(20_000),
+      // BUDGET1: current-head owner RPCs select the shared-budget contract; its absence is covered by the contract suite.
       headers: { apikey: key, ...(token ? { Authorization: 'Bearer ' + token } : {}),
+        ...(route.startsWith('/rest/v1/rpc/') ? { 'X-Stillroom-AI-Budget-Contract': '2' } : {}),
         ...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers },
       ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
     });
@@ -690,14 +692,13 @@ async function foreignMatrix(attacker, victim) {
     describe(enhanceConsent))) tag('enhance_set_consent', `${d}:owner-only`);
   // AD1: neither fixture is the operator-designated admin, so every admin RPC is exactly UNAVAILABLE, whichever
   // admission (own, peer or unknown) the call names; nothing about the target is looked up or disclosed.
-  const adminLimits = { monthlyAllowanceMicro: '1000000', maxRequestMicro: '100000', maxRequestsPerHour: 10 };
-  const adminBody = { shared: adminLimits, stylist: adminLimits, enhancement: adminLimits };
+  const adminBody = { monthlyAllowanceMicro: '1000000' };
   const adminCalls = [['admin_status', {}], ['admin_ai_spending', { p_months: 6 }], ['admin_ai_spending', { p_months: 99 }],
     ...[1, 2, 3].map((no) => ['admin_set_ai_limits', { p_admission_no: no, p_account_version: randomBytes(32).toString('hex'),
       p_expected: adminBody, p_limits: adminBody, p_reason_code: 'LOWER' }]),
     ['admin_ai_spending_v2', { p_months: 6 }], ['admin_ai_spending_v2', { p_months: 99 }],
     ...[1, 2, 3].map((no) => ['admin_set_ai_limits_v2', { p_admission_no: no, p_account_version: randomBytes(32).toString('hex'),
-      p_expected: { ...adminBody, tryOn: adminLimits }, p_limits: { ...adminBody, tryOn: adminLimits }, p_reason_code: 'LOWER' }])];
+      p_expected: adminBody, p_limits: adminBody, p_reason_code: 'LOWER' }])];
   const adminOk = new Map();
   for (const [name, body] of adminCalls) {
     const denied = expectMatch(`${stage} ${name}`, UNAVAILABLE, await probeRpc(attacker, victim, name, body));

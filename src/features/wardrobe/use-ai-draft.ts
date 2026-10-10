@@ -25,8 +25,6 @@ export function phaseForCode(code: AiCode): 'failed' | 'off' | 'limit' {
   switch (code) {
     case 'CONSENT_REQUIRED': case 'UNCONFIGURED': case 'INACTIVE': case 'CONFIG_CHANGED': return 'off';
     case 'ALLOWANCE': return 'limit';
-    // A rate limit is short-lived: it uses the neutral failure line, never the monthly-limit line.
-    case 'RATE_LIMIT':
     case 'OK': case 'UNAVAILABLE': case 'UNAUTHENTICATED': case 'INVALID_INPUT': case 'CONFLICT': case 'ACTIVE_DRAFT':
     case 'TERMINAL': case 'TOO_LARGE': case 'UNSUPPORTED_MEDIA': case 'ANALYSIS_FAILED': case 'TIMEOUT': return 'failed';
     default: return unreachable(code);
@@ -112,9 +110,9 @@ const reasonOf = (value: string | undefined): TerminalReason | null => terminalR
 export const ambiguousCodes: readonly AiCode[] = ['TIMEOUT', 'UNAVAILABLE'];
 const implicitPhases: readonly AiPhase[] = ['off', 'stillWorking', 'failed', 'unclear', 'limit'];
 /** Codes the server returns without holding a reservation: they prove the request's accounting is settled. */
-export const refusalCodes: readonly AiCode[] = ['RATE_LIMIT', 'ALLOWANCE', 'CONSENT_REQUIRED', 'UNCONFIGURED', 'INACTIVE',
+export const refusalCodes: readonly AiCode[] = ['ALLOWANCE', 'CONSENT_REQUIRED', 'UNCONFIGURED', 'INACTIVE',
   'CONFIG_CHANGED', 'ACTIVE_DRAFT'];
-const gateCodes = { rate: 'RATE_LIMIT', allowance: 'ALLOWANCE', stopped: 'UNAVAILABLE', paused: 'UNAVAILABLE' } as const;
+const gateCodes = { allowance: 'ALLOWANCE', stopped: 'UNAVAILABLE', paused: 'UNAVAILABLE' } as const;
 /**
  * BULK2b "Fill in again" after an expired clean-up: `sent` once the request goes out, `refused` when nothing was sent,
  * `settled` when the attempt is over either way (editing stays locked until then).

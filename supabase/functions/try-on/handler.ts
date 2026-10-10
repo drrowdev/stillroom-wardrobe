@@ -3,6 +3,7 @@ import {
   tryOnSlots, type TryOnSlot,
 } from '../../../src/domain/tryon.ts';
 import { refusalFinishArgs } from '../../../src/domain/provider-refusal.ts';
+import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
 import { isPhotoInputJpeg } from '../../../src/images/restore-jpeg.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
 import { UUID, exact, object, ProtocolError, readBounded, readJson, sha256, validAccounting, type JsonObject } from '../analyze-clothing/protocol.ts';
@@ -13,7 +14,7 @@ export const TRYON_RPCS = ['tryon_status', 'tryon_claim', 'tryon_dispatch', 'try
 const statusCodes: Record<string, number> = {
   INVALID_INPUT: 400, UNAUTHENTICATED: 401, UNAVAILABLE: 403, CONSENT_REQUIRED: 403, NOT_FOUND: 404, TERMINAL: 409,
   CONFLICT: 409, CHAIN_MISMATCH: 409, WITHDRAWN: 409, CANCELLED: 409, EXPIRED: 409, RESULTS_FULL: 409, TOO_LARGE: 413,
-  UNSUPPORTED_MEDIA: 415, NO_GARMENTS: 422, FILTERED: 422, OUTPUT_REJECTED: 422, RATE_LIMIT: 429, ALLOWANCE: 429,
+  UNSUPPORTED_MEDIA: 415, NO_GARMENTS: 422, FILTERED: 422, OUTPUT_REJECTED: 422, ALLOWANCE: 429,
   FAILED: 502, UNCONFIGURED: 503, INACTIVE: 503, CONFIG_CHANGED: 503, BUSY: 503, TIMEOUT: 504,
 };
 // Claim codes pass through; the dispatch mark and finish codes that are internal to the server map to the closed set.
@@ -25,7 +26,7 @@ const finishCodes: Record<string, string> = {
   USAGE_ANOMALY: 'FAILED', USAGE_CONFLICT: 'FAILED', PROBE_LIMIT: 'UNAVAILABLE', BUSY: 'FAILED',
 };
 const claimCodes: Record<string, string> = { PROBE_LIMIT: 'UNAVAILABLE' };
-const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info'];
+const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info', AI_BUDGET_CONTRACT_HEADER.toLowerCase()];
 const exposedHeaders = ['x-stillroom-tryon-sha256'];
 const FIELDS = ['chainId', 'step', 'requestId', 'manifestId', 'person'];
 function closedCode(value: unknown, map: Record<string, string> = {}): string {
@@ -132,6 +133,7 @@ export function createTryOnHandler(config: TryOnConfig, registrar: TryOnRegistra
       const bearer = request.headers.get('Authorization') ?? '';
       if (!bearer.startsWith('Bearer ') || !/^[A-Za-z0-9._~+/-]{1,8192}={0,2}$/.test(bearer.slice(7))) return error('UNAUTHENTICATED');
       if (!serverConfig(config)) return error('UNCONFIGURED');
+      if (request.headers.get(AI_BUDGET_CONTRACT_HEADER) !== AI_BUDGET_CONTRACT) return error('UNAVAILABLE');
       const probe = await probeGate(request, origin, config.probeToken ?? null);
       if (probe.refused) return error(probe.refused);
       const ingress = await readIngress(request, signal);
@@ -150,6 +152,8 @@ export function createTryOnHandler(config: TryOnConfig, registrar: TryOnRegistra
 
       const preflight = await rpc('tryon_status', {}, false, signal);
       if (preflight.code !== 'OK' && !(probe.id !== null && preflight.code === 'INACTIVE')) return error(String(preflight.code), claimCodes);
+      // A database that ignored the contract header answers in the old shape: refused before any claim.
+      if (parseAiBudget(preflight.budget) === null) return error('UNAVAILABLE');
       const policy = preflight.policy, consent = preflight.consent;
       if (probe.id !== null) {
         // The probe runs only while the owner's ordinary try-on is switched off; SQL judges its own consent and limits.
@@ -236,7 +240,8 @@ function rpcClient(config: TryOnConfig, bearer: string, timers: ReturnType<typeo
     const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
       method: 'POST', redirect: 'error', cache: 'no-store', signal: dbSignal,
       headers: { Authorization: service ? 'Bearer '.concat(config.serviceKey) : bearer,
-        apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json' },
+        apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json',
+        [AI_BUDGET_CONTRACT_HEADER]: AI_BUDGET_CONTRACT },
       body: JSON.stringify(body),
     });
     // An oversized or unreadable RPC reply is FAILED, never TOO_LARGE: TOO_LARGE is only the ingress refusal, and a reply

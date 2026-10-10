@@ -18,10 +18,11 @@ const env = (over: Record<string, string | undefined> = {}) => ({
   PROBE_ACCESS_TOKEN: JWT, TRYON_PROBE_TOKEN: TOKEN, PROBE_PUBLISHABLE_KEY: KEY, PROBE_PERSON: '/in/person.jpg', PROBE_OUTPUT: '/out',
   PROBE_OUTFIT_P1: OUTFITS.P1, PROBE_OUTFIT_P3: OUTFITS.P3, PROBE_OUTFIT_P2: OUTFITS.P2, ...over,
 });
-const statusBody = (over: Record<string, unknown> = {}, usage: Record<string, unknown> = {}) => ({ code: 'INACTIVE',
+const budget = (used: string) => ({ monthlyAllowanceMicro: '20000000', usedMicro: used, remainingMicro: String(20_000_000n - BigInt(used)), warning: false });
+const statusBody = (over: Record<string, unknown> = {}, used = '0') => ({ code: 'INACTIVE',
   policy: { activated: false, manifestId: 'azure-global-image25-sunburst-tryon-v1', modelId: 'gpt-image-2.5-sunburst', providerAvailable: true,
-    maxRequestMicro: '360000', tryOnAllowanceMicro: '5000000', totalAllowanceMicro: '20000000', ...over },
-  usage: { tryOnMicro: '0', totalMicro: '0', tryOnLastHour: 0, ...usage } });
+    maxRequestMicro: '360000', ...over },
+  budget: budget(used) });
 
 type Step = { chainId: string; requestId: string; step: number; outfitId: string | null; personSha: string; headers: Headers; signal: AbortSignal };
 type Options = {
@@ -147,6 +148,7 @@ describe('try-on probe script', () => {
     for (const s of h.steps) {
       expect(s.headers.get('X-Stillroom-Probe-Authorisation')).toBe('11111111-1111-4111-8111-111111111111');
       expect(s.headers.get('X-Stillroom-Probe-Token')).toBe(TOKEN);
+      expect(s.headers.get('X-Stillroom-AI-Budget-Contract')).toBe('2');
       expect(s.headers.has('Origin')).toBe(false);
     }
     // Only the P3 call is cut at 20 s; dispatch starts are at least 65 s apart.
@@ -197,7 +199,10 @@ describe('try-on probe script', () => {
     for (const [status, code] of [
       [json({ ...statusBody({ activated: true }), code: 'OK' }), 'activated'],
       [json(statusBody({ providerAvailable: false })), 'policy'],
-      [json(statusBody({}, { tryOnMicro: '4800000' })), 'allowance'],
+      [json(statusBody({}, '19800000')), 'allowance'],
+      // The retired usage/allowance shape, or an extra budget key, is never accepted as a fallback.
+      [json({ ...statusBody(), budget: undefined, usage: { tryOnMicro: '0', totalMicro: '0', tryOnLastHour: 0 } }), 'statusUnreadable'],
+      [json({ ...statusBody(), budget: { ...budget('0'), extra: 1 } }), 'statusUnreadable'],
       [json({ code: 'OK' }), 'statusUnreadable'],
     ] as const) {
       const h = harness({ status: () => status.clone() });
@@ -209,15 +214,15 @@ describe('try-on probe script', () => {
   });
 
   it('stops before call 5 when the probe allowance is used up after the disconnect', async () => {
-    const h = harness({ status: (index) => json(index >= 4 ? statusBody({}, { tryOnMicro: '4700000' }) : statusBody()) });
+    const h = harness({ status: (index) => json(index >= 4 ? statusBody({}, '19700000') : statusBody()) });
     const { calls, lines } = await runProbe(env(), h.deps);
     expect(calls.map((c) => c.code)).toEqual(['OK', 'OK', 'OK', 'DISCONNECTED']);
     expect(lines.join('\n')).toContain('Stopped before P2 step 1: allowance.');
   });
 
-  it('retries only a pre-claim RATE_LIMIT or BUSY, 65 s after the last actual start, with a fresh preflight each time', async () => {
+  it('retries only a pre-claim BUSY, 65 s after the last actual start, with a fresh preflight each time', async () => {
     let refusals = 0;
-    const h = harness({ step: (call) => call.step === 1 && call.outfitId === OUTFITS.P1 && refusals++ < 2 ? json({ code: 'RATE_LIMIT' }, 429) : defaultStep(call) });
+    const h = harness({ step: (call) => call.step === 1 && call.outfitId === OUTFITS.P1 && refusals++ < 2 ? json({ code: 'BUSY' }, 503) : defaultStep(call) });
     const { calls, lines, complete } = await runProbe(env(), h.deps);
     expect(complete).toBe(true);
     expect(calls.map((c) => c.code)).toEqual(['OK', 'OK', 'OK', 'DISCONNECTED', 'FILTERED']);
@@ -488,7 +493,7 @@ describe('try-on probe script', () => {
 
     it('retries only an unpaid pre-claim refusal, and still claims at most once', async () => {
       let refusals = 0;
-      const h = harness({ step: () => refusals++ < 2 ? json({ code: 'RATE_LIMIT' }, 429) : json({ code: 'FILTERED' }, 422) });
+      const h = harness({ step: () => refusals++ < 2 ? json({ code: 'BUSY' }, 503) : json({ code: 'FILTERED' }, 422) });
       const { calls, lines, complete } = await runProbe(p2Env(), h.deps);
       expect(complete).toBe(true);
       expect(h.steps).toHaveLength(3);
@@ -532,8 +537,8 @@ describe('try-on probe script', () => {
     });
 
     it('sends nothing once the Helsinki date passes 7 October, even mid-retry or during the preflight', async () => {
-      // A RATE_LIMIT at 23:59:30; the retry waits 65 s, which ends after midnight, so it is never sent.
-      const retry = harness({ wallNow: HELSINKI_MIDNIGHT - 30_000, step: () => json({ code: 'RATE_LIMIT' }, 429) });
+      // A BUSY at 23:59:30; the retry waits 65 s, which ends after midnight, so it is never sent.
+      const retry = harness({ wallNow: HELSINKI_MIDNIGHT - 30_000, step: () => json({ code: 'BUSY' }, 503) });
       const late = await runProbe(p2Env(), retry.deps);
       expect(retry.steps).toHaveLength(1);
       expect(late.calls).toHaveLength(0);

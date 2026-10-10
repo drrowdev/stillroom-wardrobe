@@ -8,7 +8,9 @@ import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
 
 export const AI_POLICY = Object.freeze({
   model: 'fictional:controls/v1', prompt: 1, notice: 1, maximum: '5000', ttl: 3600,
-  A: { allowance: '15000', rate: 20 }, B: { allowance: '100000', rate: 3 },
+  // BUDGET1: the one monthly budget is the only limit; B's allowance admits the same three 5000 reservations the retired
+  // hourly count of 3 did. `rate` only fills the retired, inert max_requests_per_hour column.
+  A: { allowance: '15000', rate: 20 }, B: { allowance: '15000', rate: 3 },
 });
 const fixed = (n) => `a129e000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 export const AI_IDS = Object.freeze({
@@ -171,8 +173,8 @@ async function race(client, owner, expected) {
   const replies = await Promise.all(AI_IDS[owner.label].race.map((id) => client.rpc(owner, 'ai_begin_request', beginArgs(id, owner.label))));
   eq(replies.map((r) => r.code).sort(), ['OK', expected].sort());
   const after = await aiStatus(client, owner);
-  requireEvidence(before.period === after.period && after.usage.requestsLastHour === before.usage.requestsLastHour + 1);
-  requireEvidence(BigInt(after.usage.accountedMicro) === BigInt(before.usage.accountedMicro) + 5000n);
+  requireEvidence(before.period === after.period);
+  requireEvidence(BigInt(after.budget.usedMicro) === BigInt(before.budget.usedMicro) + 5000n);
   for (const [index, id] of AI_IDS[owner.label].race.entries()) {
     const result = await aiControl(client, owner, id);
     requireEvidence(replies[index].code === 'OK' ? result.status === 'reserved' : result.code === 'UNAVAILABLE');
@@ -188,9 +190,9 @@ export async function requireReady(client, owners) {
       && status.policy.modelId === AI_POLICY.model && status.policy.promptVersion === AI_POLICY.prompt
       && status.policy.noticeRevision === AI_POLICY.notice && status.policy.activated === true);
     eq(status.policy, { activated: true, noticeRevision: AI_POLICY.notice, modelId: AI_POLICY.model,
-      promptVersion: AI_POLICY.prompt, maxRequestMicro: AI_POLICY.maximum,
-      monthlyAllowanceMicro: AI_POLICY[owner.label].allowance, maxRequestsPerHour: AI_POLICY[owner.label].rate,
-      resultTtlSeconds: AI_POLICY.ttl });
+      promptVersion: AI_POLICY.prompt, maxRequestMicro: AI_POLICY.maximum, resultTtlSeconds: AI_POLICY.ttl });
+    eq(Object.keys(status.budget).sort(), ['monthlyAllowanceMicro', 'remainingMicro', 'usedMicro', 'warning']);
+    eq(status.budget.monthlyAllowanceMicro, AI_POLICY[owner.label].allowance);
     const ready = await aiControl(client, owner, AI_IDS[owner.label].ready);
     requireEvidence(ready.code === 'OK' && ready.status === 'ready');
     const result = ready.result;
@@ -216,8 +218,8 @@ async function full(client, owners) {
     const own = AI_IDS[owner.label].ready, foreign = AI_IDS[owners[1 - index].label].ready;
     const before = await aiStatus(client, owner);
     requireEvidence(owner.label === 'A'
-      ? before.usage.accountedMicro === '16001' && before.usage.warning === true && before.usage.requestsLastHour < AI_POLICY.A.rate
-      : before.usage.accountedMicro === '0' && before.usage.requestsLastHour === AI_POLICY.B.rate);
+      ? before.budget.usedMicro === '16001' && before.budget.warning === true && before.budget.remainingMicro === '0'
+      : before.budget.usedMicro === '0' && before.budget.warning === false && before.budget.remainingMicro === AI_POLICY.B.allowance);
     eq(await client.rpc(owner, 'ai_begin_request', beginArgs(own, owner.label)), { code: 'OK', status: 'ready', replayed: true });
     for (const change of [{ p_draft_id: AI_IDS.missing }, { p_generation: 2 }, { p_image_sha256: 'c'.repeat(64) }]) {
       eq(await client.rpc(owner, 'ai_begin_request', { ...beginArgs(own, owner.label), ...change }), { code: 'CONFLICT' });
@@ -234,9 +236,9 @@ async function full(client, owners) {
     eq((await client.rows(owner, 'profiles'))[0], profile);
     const after = await aiStatus(client, owner);
     requireEvidence(before.period === after.period);
-    eq(after.usage, before.usage);
-    eq(await client.rpc(owner, 'ai_begin_request', beginArgs(AI_IDS.missing, owner.label)),
-      { code: owner.label === 'A' ? 'ALLOWANCE' : 'RATE_LIMIT' });
+    eq(after.budget, before.budget);
+    // Only A is over its budget here; B's used amount is back to zero, so a new request would be admitted.
+    if (owner.label === 'A') eq(await client.rpc(owner, 'ai_begin_request', beginArgs(AI_IDS.missing, owner.label)), { code: 'ALLOWANCE' });
     for (const args of [
       { ...beginArgs(own, owner.label), p_generation: 0 },
       { ...beginArgs(own, owner.label), p_image_sha256: 'invalid' },
@@ -271,7 +273,7 @@ export async function runAiPhase(phase, client, owners) {
       requireEvidence(before.ai_enabled === false && before.ai_notice_revision === null && before.ai_consented_at === null);
       const status = await aiStatus(client, owner);
       requireEvidence(status.code === 'UNCONFIGURED' && status.policy === null);
-      eq(status.usage, { accountedMicro: '0', requestsLastHour: 0, warning: false });
+      eq(status.budget, null);
       eq(await client.rpc(owner, 'ai_set_consent', {
         p_enabled: true, p_notice_revision: 1, p_expected_version: before.version,
       }), { code: 'UNCONFIGURED' });
@@ -305,11 +307,11 @@ export async function runAiPhase(phase, client, owners) {
         eq(await client.rpc(owner, 'ai_begin_request', { ...beginArgs(id, owner.label), ...change }), { code: 'CONFLICT' });
       }
       eq(await client.rpc(owner, 'ai_begin_request', { ...beginArgs(id, owner.label), p_request_id: AI_IDS.missing }), { code: 'ACTIVE_DRAFT' });
-      eq((await aiStatus(client, owner)).usage, before.usage);
+      eq((await aiStatus(client, owner)).budget, before.budget);
       eq(await aiControl(client, owner, AI_IDS.missing), { code: 'UNAVAILABLE' });
     }
     await race(client, a, 'ALLOWANCE');
-    await race(client, b, 'RATE_LIMIT');
+    await race(client, b, 'ALLOWANCE');
     for (const [index, owner] of owners.entries()) eq(await client.rows(owner, 'profiles'), profileBaselines[index]);
   } else if (phase === 'S4-release-races') {
     for (const owner of owners) {
@@ -320,8 +322,8 @@ export async function runAiPhase(phase, client, owners) {
         else eq(result, { code: 'UNAVAILABLE' });
       }
       const after = await aiStatus(client, owner);
-      requireEvidence(after.period === before.period && after.usage.requestsLastHour === before.usage.requestsLastHour
-        && BigInt(after.usage.accountedMicro) === BigInt(before.usage.accountedMicro) - 5000n);
+      requireEvidence(after.period === before.period
+        && BigInt(after.budget.usedMicro) === BigInt(before.budget.usedMicro) - 5000n);
     }
     eq(await aiControl(client, b, AI_IDS.B.spare, 'discard'), { code: 'TERMINAL', reason: 'DISCARDED' });
   } else if (phase === 'S4-withdraw') {

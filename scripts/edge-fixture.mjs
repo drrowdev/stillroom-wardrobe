@@ -50,7 +50,7 @@ export function reviewGate(now, expires = AZURE_REVIEW_EXPIRES) {
 export function validOperation(message) {
   if (!message || typeof message !== 'object' || message.type !== 'op' || !Number.isSafeInteger(message.id)) return false;
   const keys = Object.keys(message).sort().join(',');
-  if (['freeze', 'restore'].includes(message.op)) return keys === 'id,op,owner,type' && ['A', 'B'].includes(message.owner);
+  if (['freeze', 'restore', 'budget-low', 'budget-restore'].includes(message.op)) return keys === 'id,op,owner,type' && ['A', 'B'].includes(message.owner);
   if (['fence', 'unfence'].includes(message.op)) return keys === 'id,item,op,type' && typeof message.item === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(message.item);
   return OPERATIONS.includes(message.op) && keys === 'id,op,type';
@@ -443,6 +443,13 @@ async function main() {
           } else if (message.op === 'restore') {
             ok = await db(restoreSql(message.owner)) === 'I17_RESTORE_OK';
             if (ok) frozen.delete(message.owner);
+          } else if (message.op === 'budget-low') {
+            // Fixture-only: leave exactly one micro-USD of the one monthly budget, so the next claim is refused ALLOWANCE.
+            ok = await db(`update private.ai_controls set monthly_allowance_micro=(private.ai_budget_used(owner_id,clock_timestamp())+1)::bigint,
+              updated_at=clock_timestamp() where owner_id=${literal(ids[message.owner])} returning 'BUDGET_LOW';`) === 'BUDGET_LOW';
+          } else if (message.op === 'budget-restore') {
+            ok = await db(`update private.ai_controls set monthly_allowance_micro=100000000,updated_at=clock_timestamp()
+              where owner_id=${literal(ids[message.owner])} returning 'BUDGET_RESTORED';`) === 'BUDGET_RESTORED';
           } else if (message.op === 'fence') {
             // Fixture-only fence on A's live item, so the claim's fence predicate is observed apart from Trash.
             ok = await db(`insert into private.item_deletion_operations(owner_id,request_id,item_id,phase)

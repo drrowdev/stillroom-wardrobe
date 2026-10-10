@@ -16,18 +16,20 @@ const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')
 const NOW = STYLIST_REVIEW_EXPIRES - 86_400_000;
 
 type RawOptions = { code?: string; enabled?: boolean; revision?: number | null; policy?: Record<string, unknown> | null;
-  stylist?: string; total?: string; serverTimeMs?: number };
+  used?: string; allowance?: string; warning?: boolean; budget?: unknown; serverTimeMs?: number };
 function raw(options: RawOptions = {}) {
   const enabled = options.enabled ?? false;
   const revision = options.revision === undefined ? (enabled ? 1 : null) : options.revision;
   const policy = options.policy === undefined ? {
     activated: true, noticeRevision: 1, manifestId: STYLIST_MANIFEST, modelId: STYLIST_MODEL, maxRequestMicro: '129360',
-    stylistAllowanceMicro: '5000000', totalAllowanceMicro: '17940000', maxRequestsPerHour: 20,
   } : options.policy;
+  const allowance = BigInt(options.allowance ?? '17940000'), used = BigInt(options.used ?? '0');
   return {
     code: options.code ?? 'OK', period: '2026-10', serverTimeMs: options.serverTimeMs ?? NOW,
     consent: { enabled, noticeRevision: revision, consentedAt: revision === null ? null : '2026-10-01T00:00:00Z' },
-    policy, usage: { stylistMicro: options.stylist ?? '0', totalMicro: options.total ?? '0', stylistLastHour: 0, warning: false },
+    policy, budget: options.budget !== undefined ? options.budget : {
+      monthlyAllowanceMicro: allowance.toString(), usedMicro: used.toString(),
+      remainingMicro: (allowance > used ? allowance - used : 0n).toString(), warning: options.warning ?? used * 5n >= allowance * 4n },
   };
 }
 const status = (options: RawOptions = {}) => {
@@ -45,9 +47,14 @@ describe('ST1b stylist status', () => {
     const bad: unknown[] = [
       null, [], { ...raw(), extra: 1 }, { ...raw(), code: 'UNAVAILABLE' }, raw({ code: 'OK', policy: null }),
       raw({ code: 'UNCONFIGURED' }), { ...raw(), period: '2026-13' }, { ...raw(), serverTimeMs: -1 },
-      { ...raw(), usage: { ...raw().usage, stylistMicro: '01' } }, { ...raw(), usage: { ...raw().usage, totalMicro: 5 } },
+      { ...raw(), budget: { ...raw().budget as object, usedMicro: '01' } }, { ...raw(), budget: { ...raw().budget as object, usedMicro: 5 } },
+      { ...raw(), budget: { ...raw().budget as object, remainingMicro: '1' } }, { ...raw(), budget: null },
       { ...raw(), consent: { enabled: true, noticeRevision: null, consentedAt: null } },
-      { ...raw(), policy: { ...raw().policy, maxRequestsPerHour: 0 } }, { ...raw(), policy: { ...raw().policy, extra: true } },
+      { ...raw(), policy: { ...raw().policy, extra: true } },
+      // The retired quota shape is never read: a database that ignored the contract header cannot pass as the new one.
+      { ...raw(), policy: { ...raw().policy, stylistAllowanceMicro: '1', totalAllowanceMicro: '2', maxRequestsPerHour: 20 } },
+      { code: 'OK', period: '2026-10', serverTimeMs: NOW, consent: raw().consent, policy: raw().policy,
+        usage: { stylistMicro: '0', totalMicro: '0', stylistLastHour: 0, warning: false } },
     ];
     for (const value of bad) expect(parseStylistStatus(value)).toBeNull();
   });
@@ -79,32 +86,28 @@ describe('ST1b stylist status', () => {
     expect(v({ kind: 'missing' }, false, true)).toMatchObject({ kind: 'unresolved', entry: false, card: true });
   });
 
-  it('works out each limit from its own counters (M5)', () => {
-    // Nothing used by the stylist, but the shared limit nearly used by photo analysis.
-    expect(stylistLimits(status({ stylist: '0', total: '17900000' }))).toEqual({ own: false, shared: true, ownWarning: false, sharedWarning: false });
-    expect(stylistLimits(status({ stylist: '0', total: '15000000' }))).toEqual({ own: false, shared: false, ownWarning: false, sharedWarning: true });
-    expect(stylistLimits(status({ stylist: '0', total: '14351999' })).sharedWarning).toBe(false);
-    expect(stylistLimits(status({ stylist: '0', total: '14352000' })).sharedWarning).toBe(true);
-    expect(stylistLimits(status({ stylist: '4000000', total: '4000000' }))).toEqual({ own: false, shared: false, ownWarning: true, sharedWarning: false });
-    expect(stylistLimits(status({ stylist: '3999999', total: '3999999' })).ownWarning).toBe(false);
+  it('works out the one budget from its own counters (BUDGET1)', () => {
+    // Photo analysis or any other feature may have used the budget: it is one shared sum.
+    expect(stylistLimits(status({ used: '17900000' }))).toEqual({ reached: true, warning: false });
+    expect(stylistLimits(status({ used: '15000000' }))).toEqual({ reached: false, warning: true });
+    expect(stylistLimits(status({ used: '14351999' })).warning).toBe(false);
+    expect(stylistLimits(status({ used: '14352000' })).warning).toBe(true);
     // Exactly affordable, then one micro-dollar over.
-    expect(stylistLimits(status({ stylist: '4870640', total: '4870640' })).own).toBe(false);
-    expect(stylistLimits(status({ stylist: '4870641', total: '4870641' }))).toMatchObject({ own: true, ownWarning: false });
-    expect(stylistLimits(status({ stylist: '0', total: '17810640' })).shared).toBe(false);
-    expect(stylistLimits(status({ stylist: '0', total: '17810641' })).shared).toBe(true);
-    expect(stylistLimits(status({ code: 'UNCONFIGURED', policy: null }))).toEqual({ own: false, shared: false, ownWarning: false, sharedWarning: false });
+    expect(stylistLimits(status({ used: '17810640' })).reached).toBe(false);
+    expect(stylistLimits(status({ used: '17810641' }))).toEqual({ reached: true, warning: false });
+    // Above the budget (an edit below current use): everything new is refused.
+    expect(stylistLimits(status({ used: '20000000' })).reached).toBe(true);
+    expect(stylistLimits(status({ code: 'UNCONFIGURED', policy: null, budget: null }))).toEqual({ reached: false, warning: false });
   });
 
-  it('names only a limit the fresh counters show as reached (M5)', () => {
-    expect(allowanceKey(status({ stylist: '4900000', total: '4900000' }))).toBe('stylist.limitOwn');
-    expect(allowanceKey(status({ stylist: '0', total: '17900000' }))).toBe('stylist.limitShared');
-    // The allowance was raised, or a hold was released, between the refusal and the reread.
-    expect(allowanceKey(status({ stylist: '100', total: '100' }))).toBe('stylist.failed');
+  it('names the budget only when the fresh counters show it as reached', () => {
+    expect(allowanceKey(status({ used: '17900000' }))).toBe('stylist.limitShared');
+    // The budget was raised, or a hold was released, between the refusal and the reread.
+    expect(allowanceKey(status({ used: '100' }))).toBe('stylist.failed');
     expect(allowanceKey(null)).toBe('stylist.limitReached');
-    for (const key of ['stylist.limitOwn', 'stylist.limitShared', 'stylist.limitReached', 'stylist.rate'] as const) {
-      expect(messages[key].en).not.toMatch(/anomal|paused/i);
+    for (const key of ['stylist.limitShared', 'stylist.limitReached'] as const) {
+      expect(messages[key].en).not.toMatch(/anomal|paused|hour/i);
     }
-    expect(messages['stylist.rate'].en).not.toMatch(/limit/i);
   });
 });
 
@@ -205,7 +208,6 @@ describe('ST1b stylist replies', () => {
   });
 
   it('words each failure and offers Try again only when it can help', () => {
-    expect(sendFailure('RATE_LIMIT')).toEqual({ key: 'stylist.rate', retry: false });
     expect(sendFailure('TIMEOUT')).toEqual({ key: 'stylist.timeout', retry: true });
     expect(sendFailure('BUSY').retry).toBe(true);
     expect(sendFailure('TOO_LARGE').key).toBe('stylist.notSent');
