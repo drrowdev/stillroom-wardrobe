@@ -128,8 +128,9 @@ async function main() {
     stage = 'S4-ready';
     for (const [label, id] of [['A', AI_IDS.A.ready], ['A', AI_IDS.A.expiring], ['B', AI_IDS.B.ready]]) {
       await claimed(label, id);
-      const result = await settle(label, id, AI_FACTS[label], 0, 'SUCCESS');
-      requireEvidence(result.code === 'READY' && result.stored && result.accountedMicro === '0');
+      const bill = id === AI_IDS.B.ready ? AI_POLICY.B.readyBill : AI_POLICY[label].readyBill;
+      const result = await settle(label, id, AI_FACTS[label], Number(bill), 'SUCCESS');
+      requireEvidence(result.code === 'READY' && result.stored && result.accountedMicro === bill);
     }
     await child('S4-release-races');
     await child('S4-withdraw');
@@ -217,7 +218,7 @@ async function main() {
       'expiry',(select jsonb_build_object('reason',closed_reason,'amount',accounted_micro::text,'full',
         exists(select 1 from private.ai_requests r where r.owner_id=u.owner_id and r.request_id=u.request_id))
         from private.ai_usage u where owner_id='${owners.A}' and request_id='${AI_IDS.A.expiring}'));`));
-    eq(final, { requests: 2, ready: 2, unexplained: 0, held: 0, ledger: 14, accounted: '16001',
+    eq(final, { requests: 2, ready: 2, unexplained: 0, held: 0, ledger: 14, accounted: '28001',
       expiry: { reason: 'EXPIRED', amount: '0', full: false } });
     console.log('PASS: AI controls S6; structural retention and accounting, not owner access');
     stage = 'S7-purge-schedule';

@@ -4,9 +4,8 @@ import { ADMIN_REASONS, readAdminSpending, readAdminStatus, writeAdminLimits, ty
 import type { AppClient } from '../../data/client';
 import { isAborted } from '../../data/errors';
 import {
-  EDITABLE_KEYS, LIMIT_FEATURES, SPEND_PURPOSES, draftOf, formatUsd, formatUsdCents, limitChanges, limitsFromDraft, monthTotals, sameLimits, visibleErrors,
-  type AdminAccount, type AdminSpending, type FieldErrors, type LimitChange, type LimitDraft, type LimitFeature, type LimitField,
-  type LimitKey, type LimitReason, type Limits, type MonthSpend, type SpendPurpose,
+  SPEND_PURPOSES, belowUse, draftOf, formatUsd, formatUsdCents, limitsFromDraft, monthTotals, sameLimits,
+  type AdminAccount, type AdminSpending, type FieldErrors, type LimitReason, type Limits, type MonthSpend, type SpendPurpose,
 } from '../../domain/admin-limits';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import { monthSplit, usageShare } from './usage-share';
@@ -16,13 +15,9 @@ type Props = { client: AppClient; scope: OwnerScope; online: boolean; language: 
 type Load = { kind: 'checking' } | { kind: 'denied' } | { kind: 'failed' } | { kind: 'ready'; spending: AdminSpending; failed: boolean; read: number };
 
 const purposeKey: Record<SpendPurpose, MessageKey> = { analysis: 'admin.tagging', stylist: 'admin.stylist', enhancement: 'admin.enhancement', tryOn: 'admin.tryOn' };
-const featureKey: Record<LimitFeature, MessageKey> = { shared: 'admin.allFeatures', stylist: 'admin.stylist', enhancement: 'admin.enhancement', tryOn: 'admin.tryOn' };
 const reasonKey: Record<AdminReason, MessageKey> = { RAISE: 'admin.reasonRaise', LOWER: 'admin.reasonLower', PAUSE: 'admin.reasonPause',
   RESTORE: 'admin.reasonRestore', CORRECTION: 'admin.reasonCorrection' };
-const errorKey: Record<LimitReason, MessageKey> = { FORMAT: 'admin.errFormat', REQUIRED: 'admin.errFormat', NOT_POSITIVE: 'admin.errPositive',
-  RANGE: 'admin.errHour', APP_LIMIT: 'admin.overAppLimit', ABOVE_MONTHLY: 'admin.belowMinimum', ABOVE_SHARED: 'admin.aboveShared',
-  BELOW_RESERVATION: 'admin.belowMinimum' };
-const keyLabel = (key: LimitKey): MessageKey => key === 'maxRequestsPerHour' ? 'admin.perHour' : 'admin.monthly';
+const errorKey: Record<LimitReason, MessageKey> = { FORMAT: 'admin.errFormat', NOT_POSITIVE: 'admin.errPositive', APP_LIMIT: 'admin.overAppLimit' };
 const whole = (value: number, language: Language) => new Intl.NumberFormat(locales[language]).format(value);
 const monthName = (month: string, language: Language) => new Intl.DateTimeFormat(locales[language], { month: 'long', year: 'numeric', timeZone: 'UTC' })
   .format(new Date(`${month}-15T12:00:00.000Z`));
@@ -97,9 +92,9 @@ function SpendRow({ label, spend, language, t, total }: { label: string; spend: 
 }
 
 type Message = { key: MessageKey; tone: 'status' | 'alert'; belowUse?: boolean };
-const formMessages = new Set<MessageKey>(['admin.invalid', 'admin.setupFix']);
-type Edit = { base: Limits; version: string; initial: LimitDraft; draft: LimitDraft; errors: FieldErrors };
-type Confirm = { limits: Limits; changes: LimitChange[] };
+const formMessages = new Set<MessageKey>(['admin.invalid']);
+type Edit = { base: Limits; version: string; initial: string; draft: string; errors: FieldErrors };
+type Confirm = { limits: Limits };
 
 function AccountCard({ account, month, client, scope, online, language, t, read, readFailed, onReload }: {
   account: AdminAccount; month: string; client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate;
@@ -144,13 +139,12 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
   const close = (focus: 'edit' | 'message') => { setEdit(null); setConfirm(null); focusNext.current = focus; };
   const review = () => {
     if (!edit) return;
-    const { limits: next, errors } = limitsFromDraft(edit.draft, edit.initial, edit.base, language);
-    const shown = visibleErrors(errors);
-    setEdit({ ...edit, errors: shown.errors });
-    if (!next) { setMessage({ key: shown.setup ? 'admin.setupFix' : 'admin.invalid', tone: 'alert' }); focusNext.current = 'summary'; return; }
+    const { limits: next, errors } = limitsFromDraft(edit.draft, language);
+    setEdit({ ...edit, errors });
+    if (!next) { setMessage({ key: 'admin.invalid', tone: 'alert' }); focusNext.current = 'summary'; return; }
     if (sameLimits(next, edit.base)) { setMessage({ key: 'admin.unchanged', tone: 'status' }); focusNext.current = 'message'; return; }
     setMessage(null);
-    setConfirm({ limits: next, changes: limitChanges(edit.base, next) });
+    setConfirm({ limits: next });
   };
   const save = async (reason: AdminReason | null) => {
     if (!edit || !confirm || saving) return;
@@ -163,9 +157,8 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
       if (controller.signal.aborted) return;
       if (result.code === 'INVALID_LIMITS') {
         setConfirm(null);
-        const shown = visibleErrors({ [result.field]: result.reason });
-        setEdit({ ...edit, errors: shown.errors });
-        setMessage({ key: shown.setup ? 'admin.setupFix' : 'admin.invalid', tone: 'alert' });
+        setEdit({ ...edit, errors: { [result.field]: result.reason } });
+        setMessage({ key: 'admin.invalid', tone: 'alert' });
         focusNext.current = 'summary';
         return;
       }
@@ -195,16 +188,17 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
     </dl>
     <h3>{t('admin.currentUse')}</h3>
     <dl className="admin-use">
-      <div><dt>{t('admin.allFeatures')}</dt><dd>{usedOf(account.current.shared.usedMicro, limits?.shared.monthlyAllowanceMicro ?? null)}
-        <span className="stats-note">{t('admin.lastHour', { count: whole(account.current.shared.lastHour, language) })}</span></dd></div>
+      <div><dt>{t('admin.allFeatures')}</dt><dd>{usedOf(account.current.shared.usedMicro, limits?.monthlyAllowanceMicro ?? null)}
+        {limits && belowUse(limits, account.current.shared.usedMicro) && <span className="stats-note">{t('admin.belowUse')}</span>}</dd></div>
       <div><dt>{t('admin.tagging')}</dt><dd>{formatUsdCents(account.current.analysis.usedMicro, language)}</dd></div>
       {(['stylist', 'enhancement', 'tryOn'] as const).map((feature) => <div key={feature}><dt>{t(purposeKey[feature])}</dt>
-        <dd>{usedOf(account.current[feature].usedMicro, account.features[feature].configured ? limits?.[feature].monthlyAllowanceMicro ?? null : null)}
+        <dd>{formatUsdCents(account.current[feature].usedMicro, language)}
           {!account.features[feature].configured && <span className="stats-note">{t('admin.notSetUp')}</span>}</dd></div>)}
     </dl>
     <p className="stats-note">{t('admin.currentNote')}</p>
     <h3>{t('admin.limits')}</h3>
     {!limits ? <p>{t('admin.notSetUp')}</p> : !edit ? <>
+      <p>{formatUsd(limits.monthlyAllowanceMicro, language)}</p>
       {canEdit && <button ref={editButton} type="button" className="button button-secondary" disabled={!online || reconciling} onClick={open}>{t('admin.edit')}</button>}
     </> : <LimitsForm id={id} edit={edit} t={t} online={online} saving={saving} firstField={firstField} reviewButton={reviewButton}
       onChange={(draft) => setEdit({ ...edit, draft })} onReview={review} onCancel={() => { setMessage(null); close('edit'); }}
@@ -225,11 +219,10 @@ function AccountCard({ account, month, client, scope, online, language, t, read,
           <SpendRow label={t('admin.total')} spend={monthTotals(history)} language={language} t={t} total />
         </tbody>
       </table>
-      {limits && <><h4>{t('admin.limits')}</h4><LimitsTable limits={limits} language={language} t={t} /></>}
       {account.probe.count > 0 && <p className="stats-note">{t('admin.probe', { feature: t('admin.enhancement'), amount: formatUsd(account.probe.allocationMicro, language) })}</p>}
       {account.tryOnProbe.count > 0 && <p className="stats-note">{t('admin.probe', { feature: t('admin.tryOn'), amount: formatUsd(account.tryOnProbe.allocationMicro, language) })}</p>}
     </details>
-    {edit && confirm && <ConfirmDialog number={account.admissionNo} changes={confirm.changes} saving={saving} language={language} t={t}
+    {edit && confirm && <ConfirmDialog number={account.admissionNo} from={edit.base} to={confirm.limits} saving={saving} language={language} t={t}
       onCancel={() => { setConfirm(null); requestAnimationFrame(() => reviewButton.current?.focus()); }} onConfirm={(reason) => { void save(reason); }} />}
   </section>;
 }
@@ -240,43 +233,24 @@ function UsageBar({ used, limit }: { used: string; limit: string | null }) {
   return <span className="usage-bar" aria-hidden="true"><span style={{ width: `${Math.round(share * 1000) / 10}%` }} /></span>;
 }
 
-const valueText = (key: LimitKey, value: string | number | null, language: Language) => value === null ? '–'
-  : key === 'maxRequestsPerHour' ? whole(Number(value), language) : formatUsd(String(value), language);
-function LimitsTable({ limits, language, t }: { limits: Limits; language: Language; t: Translate }) {
-  return <table className="stats-table admin-table">
-    <caption className="sr-only">{t('admin.limits')}</caption>
-    <thead><tr><th scope="col">{t('admin.feature')}</th><th scope="col">{t('admin.monthly')}</th><th scope="col">{t('admin.perHour')}</th></tr></thead>
-    <tbody>{LIMIT_FEATURES.map((feature) => <tr key={feature}><th scope="row">{t(featureKey[feature])}</th>
-      {EDITABLE_KEYS.map((key) => <td key={key} data-label={t(keyLabel(key))}>{valueText(key, limits[feature][key], language)}</td>)}</tr>)}</tbody>
-  </table>;
-}
-
 function LimitsForm({ id, edit, t, online, saving, firstField, reviewButton, summary, onChange, onReview, onCancel }: {
   id: string; edit: Edit; t: Translate; online: boolean; saving: boolean;
   firstField: RefObject<HTMLInputElement | null>; reviewButton: RefObject<HTMLButtonElement | null>; summary: ReactNode;
-  onChange: (draft: LimitDraft) => void; onReview: () => void; onCancel: () => void;
+  onChange: (draft: string) => void; onReview: () => void; onCancel: () => void;
 }) {
   const hint = useId();
-  const changed = LIMIT_FEATURES.some((feature) => EDITABLE_KEYS.some((key) => edit.draft[feature][key] !== edit.initial[feature][key]));
-  let first = true;
+  const changed = edit.draft !== edit.initial;
+  const input = `${id}-monthly`, error = edit.errors.monthlyAllowanceMicro;
   return <form className="admin-form" noValidate aria-describedby={hint} onSubmit={(event) => { event.preventDefault(); onReview(); }}>
     <p id={hint} className="muted">{t('admin.usdHint')}</p>
     {summary}
-    {LIMIT_FEATURES.filter((feature) => EDITABLE_KEYS.some((key) => edit.base[feature][key] !== null))
-      .map((feature) => <fieldset key={feature} className="admin-fieldset"><legend>{t(featureKey[feature])}</legend>
-        {EDITABLE_KEYS.filter((key) => edit.base[feature][key] !== null).map((key) => {
-          const field: LimitField = `${feature}.${key}`, input = `${id}-${feature}-${key}`, error = edit.errors[field];
-          const ref = first ? firstField : undefined;
-          first = false;
-          return <div key={key} className="field">
-            <label htmlFor={input}>{t(keyLabel(key))}</label>
-            <input ref={ref} id={input} inputMode={key === 'maxRequestsPerHour' ? 'numeric' : 'decimal'} autoComplete="off" value={edit.draft[feature][key]}
-              aria-invalid={error ? true : undefined} aria-describedby={error ? `${input}-error` : undefined} disabled={saving}
-              onChange={(event) => onChange({ ...edit.draft, [feature]: { ...edit.draft[feature], [key]: event.target.value } })} />
-            {error && <p id={`${input}-error`} className="field-error">{t(key === 'maxRequestsPerHour' && error === 'FORMAT' ? 'admin.errHour' : errorKey[error])}</p>}
-          </div>;
-        })}
-      </fieldset>)}
+    <div className="field">
+      <label htmlFor={input}>{t('admin.monthly')}</label>
+      <input ref={firstField} id={input} inputMode="decimal" autoComplete="off" value={edit.draft}
+        aria-invalid={error ? true : undefined} aria-describedby={error ? `${input}-error` : undefined} disabled={saving}
+        onChange={(event) => onChange(event.target.value)} />
+      {error && <p id={`${input}-error`} className="field-error">{t(errorKey[error])}</p>}
+    </div>
     <div className="settings-actions">
       <button ref={reviewButton} type="submit" className="button button-primary" disabled={!online || saving || !changed}>{t('admin.review')}</button>
       <button type="button" className="text-button" disabled={saving} onClick={onCancel}>{t('common.cancel')}</button>
@@ -284,8 +258,8 @@ function LimitsForm({ id, edit, t, online, saving, firstField, reviewButton, sum
   </form>;
 }
 
-function ConfirmDialog({ number, changes, saving, language, t, onCancel, onConfirm }: {
-  number: number; changes: LimitChange[]; saving: boolean; language: Language; t: Translate; onCancel: () => void; onConfirm: (reason: AdminReason | null) => void;
+function ConfirmDialog({ number, from, to, saving, language, t, onCancel, onConfirm }: {
+  number: number; from: Limits; to: Limits; saving: boolean; language: Language; t: Translate; onCancel: () => void; onConfirm: (reason: AdminReason | null) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [reason, setReason] = useState<AdminReason | ''>('');
@@ -298,9 +272,8 @@ function ConfirmDialog({ number, changes, saving, language, t, onCancel, onConfi
   return <dialog ref={dialog} className="dialog" aria-labelledby={titleId} aria-busy={saving}
     onCancel={(event) => { event.preventDefault(); if (!saving) onCancel(); }}>
     <h2 id={titleId}>{t('admin.confirmTitle', { number })}</h2>
-    <ul className="admin-changes">{changes.map((change) => <li key={`${change.feature}.${change.key}`}>{t('admin.changeLine', {
-      label: `${t(featureKey[change.feature])}, ${t(keyLabel(change.key))}`,
-      from: valueText(change.key, change.from, language), to: valueText(change.key, change.to, language) })}</li>)}</ul>
+    <ul className="admin-changes"><li>{t('admin.changeLine', { label: t('admin.monthly'),
+      from: formatUsd(from.monthlyAllowanceMicro, language), to: formatUsd(to.monthlyAllowanceMicro, language) })}</li></ul>
     <div className="field"><label htmlFor={reasonId}>{t('admin.reason')}</label>
       <select id={reasonId} value={reason} disabled={saving} onChange={(event) => setReason(ADMIN_REASONS.find((entry) => entry === event.target.value) ?? '')}>
         <option value="">{t('admin.reasonNone')}</option>

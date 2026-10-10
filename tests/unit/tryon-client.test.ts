@@ -17,14 +17,14 @@ const OUTFIT = '10000000-0000-4000-8000-000000000001';
 const ID = (n: number) => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const policy = (over: Record<string, unknown> = {}) => ({
   activated: true, noticeRevision: TRYON_NOTICE_REVISION, manifestId: TRYON_MANIFEST, modelId: TRYON_MODEL,
-  maxRequestMicro: '400000', tryOnAllowanceMicro: '5000000', totalAllowanceMicro: '20000000', maxRequestsPerHour: 20,
+  maxRequestMicro: '400000',
   maxSteps: 3, maxResults: 20, resultDays: 7, providerAvailable: true, ...over,
 });
 const statusRaw = (over: Record<string, unknown> = {}, policyOver: Record<string, unknown> = {}) => ({
   code: 'OK', period: '2026-10', serverTimeMs: SERVER,
   consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION, consentedAt: '2026-10-01T00:00:00Z' },
   policy: policy(policyOver), results: 0,
-  usage: { tryOnMicro: '0', totalMicro: '0', tryOnLastHour: 0, warning: false }, ...over,
+  budget: { monthlyAllowanceMicro: '20000000', usedMicro: '0', remainingMicro: '20000000', warning: false }, ...over,
 });
 const off = { enabled: false, noticeRevision: null, consentedAt: null };
 
@@ -278,7 +278,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
   });
   it('maps each closed code to what the owner can do next', async () => {
     const cases: [string, number, string][] = [['FILTERED', 0, 'filtered'], ['FILTERED', 1, 'filtered'],
-      ['RATE_LIMIT', 0, 'busy'], ['BUSY', 0, 'busy'], ['ALLOWANCE', 0, 'allowance'], ['CHAIN_MISMATCH', 1, 'mismatch'], ['WITHDRAWN', 0, 'turnedOff'],
+      ['BUSY', 0, 'busy'], ['ALLOWANCE', 0, 'allowance'], ['CHAIN_MISMATCH', 1, 'mismatch'], ['WITHDRAWN', 0, 'turnedOff'],
       ['RESULTS_FULL', 2, 'resultsFull'], ['INACTIVE', 0, 'unavailable']];
     for (const [code, index, failure] of cases) {
       const h = new Harness();
@@ -499,6 +499,7 @@ describe('the try-on client transport', () => {
     const [url, init] = fetcher.mock.calls[2]!;
     expect(url).toBe(`${config.url}/rest/v1/rpc/tryon_status`);
     expect(init?.credentials).toBe('omit');
+    expect(new Headers(init?.headers).get('X-Stillroom-AI-Budget-Contract')).toBe('2');
     fetcher.mockResolvedValueOnce(Response.json(statusRaw()));
     await client.consent(true);
     expect(JSON.parse(String(fetcher.mock.calls[3]![1]?.body))).toEqual({ p_enabled: true, p_notice_revision: TRYON_NOTICE_REVISION });

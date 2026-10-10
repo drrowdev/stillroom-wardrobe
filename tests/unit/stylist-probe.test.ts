@@ -109,6 +109,13 @@ describe('ST-OP fixtures are valid production inputs', () => {
 describe('ST-OP allocation receipt', () => {
   it('accepts the D1 reply and read-back, and binds USD 0.26 to exactly two reservations', () => {
     expect(validateReceipt(receipt())).toBeTruthy();
+    // BUDGET1: a v2 receipt reads back the one monthly budget alone, so a historical stylist amount larger than the new total is
+    // irrelevant, and the same transition keeps the same allocation identity as its v1 form.
+    const v2 = receipt({ kind: 'stylist-probe-allocation-v2', allocationMicro: '260000', reply: { code: 'OK', previousTotalMicro: '6000000', newTotalMicro: '5740000' },
+      readBack: { monthlyAllowanceMicro: '5740000' } });
+    expect(validateReceipt(v2)).toBeTruthy();
+    expect(allocationId(validateReceipt(v2))).toBe(allocationId(validateReceipt(receipt({ kind: 'stylist-probe-allocation-v1',
+      reply: v2.reply, readBack: { monthlyAllowanceMicro: '5740000', stylistMonthlyAllowanceMicro: '5000000' } }))));
     expect(PROBE.minAllocationMicro).toBe(2 * Number(STYLIST_RESERVATION_MICRO));
     expect(validateReceipt(receipt({ allocationMicro: '258720', reply: { code: 'OK', previousTotalMicro: '20000000', newTotalMicro: '19741280' },
       readBack: { monthlyAllowanceMicro: '19741280', stylistMonthlyAllowanceMicro: '5000000' } }))).toBeTruthy();
@@ -117,6 +124,10 @@ describe('ST-OP allocation receipt', () => {
     ['arithmetic', { reply: { code: 'OK', previousTotalMicro: '20000000', newTotalMicro: '19700000' } }, 'RECEIPT_ARITHMETIC'],
     ['over USD 0.26', { allocationMicro: '260001', reply: { code: 'OK', previousTotalMicro: '20000001', newTotalMicro: '19740000' } }, 'RECEIPT_ARITHMETIC'],
     ['under two reservations', { allocationMicro: '258719', reply: { code: 'OK', previousTotalMicro: '19998719', newTotalMicro: '19740000' } }, 'RECEIPT_ARITHMETIC'],
+    ['v2 with a sub-limit key', { kind: 'stylist-probe-allocation-v2', readBack: { monthlyAllowanceMicro: '19740000', stylistMonthlyAllowanceMicro: '5000000' } }, 'RECEIPT_INVALID'],
+    ['v1 without its sub-limit', { readBack: { monthlyAllowanceMicro: '19740000' } }, 'RECEIPT_INVALID'],
+    ['unknown kind', { kind: 'stylist-probe-allocation-v3' }, 'RECEIPT_INVALID'],
+    ['v2 read-back mismatch', { kind: 'stylist-probe-allocation-v2', readBack: { monthlyAllowanceMicro: '20000000' } }, 'RECEIPT_ARITHMETIC'],
     ['read-back', { readBack: { monthlyAllowanceMicro: '20000000', stylistMonthlyAllowanceMicro: '5000000' } }, 'RECEIPT_ARITHMETIC'],
     ['DEFER', { reply: { code: 'DEFER', previousTotalMicro: '20000000', newTotalMicro: '19740000' } }, 'RECEIPT_INVALID'],
     ['raw owner', { ownerRef: '30000000-0000-4000-8000-000000000000' }, 'RECEIPT_INVALID'],

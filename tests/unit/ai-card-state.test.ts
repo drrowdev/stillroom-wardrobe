@@ -3,16 +3,18 @@ import { aiCardState, aiPolicyBinding, azureAiManifest, azureAiModel, azureAiRev
 
 const now = Date.parse('2026-09-24T12:00:00Z');
 const policy = { activated: true, noticeRevision: 2, modelId: azureAiModel, promptVersion: 2, maxRequestMicro: '4097351',
-  monthlyAllowanceMicro: '20000000', maxRequestsPerHour: 30, resultTtlSeconds: 3600, executionManifestId: azureAiManifest };
+  resultTtlSeconds: 3600, executionManifestId: azureAiManifest };
+const budgetOf = (allowance: string, used = '0'): AiStatus['budget'] => ({ monthlyAllowanceMicro: allowance, usedMicro: used,
+  remainingMicro: String(BigInt(allowance) > BigInt(used) ? BigInt(allowance) - BigInt(used) : 0n), warning: false });
 function status(overrides: { code?: AiStatus['code']; enabled?: boolean; revision?: number | null; policy?: Partial<typeof policy> | null;
-  serverTimeMs?: number } = {}): AiStatus {
+  serverTimeMs?: number; budget?: AiStatus['budget'] } = {}): AiStatus {
   const enabled = overrides.enabled ?? false;
   return {
     code: overrides.code ?? (enabled ? 'OK' : 'CONSENT_REQUIRED'), period: '2026-09', serverTimeMs: overrides.serverTimeMs ?? now,
     consent: { enabled, noticeRevision: overrides.revision !== undefined ? overrides.revision : enabled ? 2 : null,
       consentedAt: enabled ? '2026-09-01T00:00:00Z' : null, profileVersion: '3' },
     policy: overrides.policy === null ? null : { ...policy, ...overrides.policy },
-    usage: { accountedMicro: '0', requestsLastHour: 0, warning: false },
+    budget: overrides.budget !== undefined ? overrides.budget : budgetOf('20000000'),
   };
 }
 const card = (value: AiStatus | null, extra: { loadFailed?: boolean; unresolved?: boolean; now?: number } = {}) =>
@@ -53,11 +55,11 @@ describe('photo analysis card state', () => {
       .toBe('unavailable');
     expect(card(status(), { now: azureAiReviewExpires }).state).toBe('unavailable');
     expect(card(status({ serverTimeMs: azureAiReviewExpires })).state).toBe('unavailable');
-    expect(card(status({ policy: { monthlyAllowanceMicro: '0' } })).state).toBe('unavailable');
+    expect(card(status({ budget: null })).state).toBe('unavailable');
     expect(card(status({ policy: { activated: false } })).state).toBe('unavailable');
   });
-  it('keeps consent on when only the monthly allowance changes', () => {
-    expect(card(status({ enabled: true, policy: { monthlyAllowanceMicro: '30000000' } })).state).toBe('on');
+  it('keeps consent on when only the monthly budget changes', () => {
+    expect(card(status({ enabled: true, budget: budgetOf('30000000') })).state).toBe('on');
   });
 });
 
@@ -67,11 +69,14 @@ describe('policy binding', () => {
   it('is stable for the same owner, epoch and policy', () => {
     expect(base).not.toBeNull();
     expect(aiPolicyBinding({ ...scope }, status({ enabled: true, code: 'OK' }))).toBe(base);
-    expect(aiPolicyBinding(scope, { ...status(), usage: { accountedMicro: '5', requestsLastHour: 2, warning: true } })).toBe(base);
-    expect(aiPolicyBinding(scope, status({ policy: { maxRequestsPerHour: 5, resultTtlSeconds: 60 } }))).toBe(base);
+    expect(aiPolicyBinding(scope, status({ budget: budgetOf('20000000', '5') }))).toBe(base);
+    expect(aiPolicyBinding(scope, status({ policy: { resultTtlSeconds: 60 } }))).toBe(base);
+  });
+  it('changes with the monthly budget', () => {
+    expect(aiPolicyBinding(scope, status({ budget: budgetOf('30000000') }))).not.toBe(base);
   });
   it.each([
-    ['monthly allowance', { monthlyAllowanceMicro: '30000000' }], ['maximum request', { maxRequestMicro: '4097352' }],
+    ['maximum request', { maxRequestMicro: '4097352' }],
     ['revision', { noticeRevision: 3 }], ['model', { modelId: 'other-model' }], ['manifest', { executionManifestId: 'other-manifest' }],
     ['prompt version', { promptVersion: 1 }],
   ] as const)('changes with the %s', (_, change) => {

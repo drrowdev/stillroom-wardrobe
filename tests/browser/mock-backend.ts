@@ -36,7 +36,8 @@ const fixtureKey = 'sb_publishable_browser_fixture_only';
 const uploadHeaders = ['authorization', 'apikey', 'content-type', 'x-upsert', 'x-client-info'];
 const uploadLimit = 1024 * 1024;
 export const analysisPath = '/functions/v1/analyze-clothing';
-const analysisHeaders = ['authorization', 'apikey', 'content-type', 'x-stillroom-request-id', 'x-stillroom-draft-id', 'x-stillroom-generation'];
+const analysisHeaders = ['authorization', 'apikey', 'content-type', 'x-stillroom-request-id', 'x-stillroom-draft-id', 'x-stillroom-generation',
+  'x-stillroom-ai-budget-contract'];
 export type AnalysisInput = { owner: string; requestId: string; draftId: string; generation: number; bytes: Buffer };
 type AnalysisHandler = (input: AnalysisInput) => { body: JsonRow; status: number };
 type StatusProof = { owner: string | null; issuedBearer: boolean; emptyObject: boolean };
@@ -159,6 +160,7 @@ async function uploadReceiver(page: Page, items: JsonRow[], images: JsonRow[], f
       || headers['content-type'] !== 'image/jpeg'
       || typeof requestId !== 'string' || !id.test(requestId) || !requestId.startsWith(prefix)
       || typeof draftId !== 'string' || !id.test(draftId) || !draftId.startsWith(prefix)
+      || headers['x-stillroom-ai-budget-contract'] !== '2'
       || typeof generation !== 'string' || !/^[1-9][0-9]{0,9}$/.test(generation)
       || Number(generation) > 2147483647) return null;
     return { owner, requestId, draftId, generation: Number(generation) };
@@ -514,37 +516,40 @@ export function recoveryHash(owner = owners.a, seconds = 3600): string {
     expires_at: String(expires), expires_in: String(Math.max(1, seconds)), token_type: 'bearer', type: 'recovery', sb: '' });
 }
 export type StylistSetup = { configured: boolean; activated: boolean; noticeRevision: number; manifestId: string; modelId: string;
-  maxRequestMicro: string; stylistAllowanceMicro: string; totalAllowanceMicro: string; stylistMicro: string; totalMicro: string };
+  maxRequestMicro: string; totalAllowanceMicro: string; totalMicro: string };
 export type StylistReply = { status: number; body: unknown; hold?: Promise<void> }
   | ((body: unknown, owner: string) => { status: number; body: unknown; hold?: Promise<void> });
 const stylistDefaults: StylistSetup = { configured: false, activated: false, noticeRevision: 1, manifestId: STYLIST_MANIFEST, modelId: STYLIST_MODEL,
-  maxRequestMicro: '129360', stylistAllowanceMicro: '5000000', totalAllowanceMicro: '17940000', stylistMicro: '0', totalMicro: '0' };
-// The stylist_status reply as the ST1a function builds it.
+  maxRequestMicro: '129360', totalAllowanceMicro: '17940000', totalMicro: '0' };
+// The one monthly budget as the status functions report it: the amount, what is used, what is left and the 80% warning.
+export function budgetReply(allowance: string, used: string) {
+  const left = BigInt(allowance) - BigInt(used);
+  return { monthlyAllowanceMicro: allowance, usedMicro: used, remainingMicro: String(left > 0n ? left : 0n),
+    warning: BigInt(used) * 5n >= BigInt(allowance) * 4n };
+}
+// The stylist_status reply as the budget contract builds it.
 function stylistStatus(setup: StylistSetup, consent: number | null) {
   const code = !setup.configured ? 'UNCONFIGURED' : !setup.activated ? 'INACTIVE' : consent !== setup.noticeRevision ? 'CONSENT_REQUIRED' : 'OK';
   const policy = setup.configured ? { activated: setup.activated, noticeRevision: setup.noticeRevision, manifestId: setup.manifestId,
-    modelId: setup.modelId, maxRequestMicro: setup.maxRequestMicro, stylistAllowanceMicro: setup.stylistAllowanceMicro,
-    totalAllowanceMicro: setup.totalAllowanceMicro, maxRequestsPerHour: 20 } : null;
-  const warning = policy !== null && (BigInt(setup.stylistMicro) * 10n >= BigInt(setup.stylistAllowanceMicro) * 8n
-    || BigInt(setup.totalMicro) * 10n >= BigInt(setup.totalAllowanceMicro) * 8n);
+    modelId: setup.modelId, maxRequestMicro: setup.maxRequestMicro } : null;
   // Kept inside the reviewed period so the fixture doesn't expire with the app's notice review.
   const now = Math.min(Date.now(), STYLIST_REVIEW_EXPIRES - 86_400_000);
   return { code, period: new Date(now).toISOString().slice(0, 7), serverTimeMs: now,
     consent: { enabled: consent !== null, noticeRevision: consent, consentedAt: consent === null ? null : '2026-10-01T00:00:00Z' },
-    policy, usage: { stylistMicro: setup.stylistMicro, totalMicro: setup.totalMicro, stylistLastHour: 0, warning } };
+    policy, budget: setup.configured ? budgetReply(setup.totalAllowanceMicro, setup.totalMicro) : null };
 }
 
 // BG2b-2 photo enhancement (BG2c-2: the clean-up manifest and notice revision 2): per-owner setup (configured but not activated unless a spec says otherwise), consent,
 // scripted status/consent faults and scripted enhance-photo replies. `serverOffsetMs` skews the fixture server clock.
 export type EnhanceSetup = { configured: boolean; activated: boolean; providerAvailable: boolean; noticeRevision: number; manifestId: string;
-  modelId: string; maxRequestMicro: string; enhanceAllowanceMicro: string; totalAllowanceMicro: string; enhanceMicro: string; totalMicro: string;
+  modelId: string; maxRequestMicro: string; totalAllowanceMicro: string; totalMicro: string;
   serverOffsetMs: number };
 export type EnhanceReplyValue = { status: number; body?: unknown; image?: Buffer; usableUntilMs?: number; sha256?: string; hold?: Promise<void> };
 export type EnhanceReply = EnhanceReplyValue
   | ((bytes: Buffer, owner: string, requestId: string) => EnhanceReplyValue | Promise<EnhanceReplyValue>);
 const enhanceDefaults: EnhanceSetup = { configured: true, activated: false, providerAvailable: true, noticeRevision: CLEANUP_NOTICE_REVISION,
-  manifestId: CLEANUP_MANIFEST, modelId: ENHANCE_MODEL, maxRequestMicro: '300000', enhanceAllowanceMicro: '3000000',
-  totalAllowanceMicro: '20000000', enhanceMicro: '0', totalMicro: '0', serverOffsetMs: 0 };
+  manifestId: CLEANUP_MANIFEST, modelId: ENHANCE_MODEL, maxRequestMicro: '300000',
+  totalAllowanceMicro: '20000000', totalMicro: '0', serverOffsetMs: 0 };
 // The enhance_status reply as the BG2b-1 function builds it, kept inside the reviewed period.
 export function enhanceServerNow(setup: Pick<EnhanceSetup, 'serverOffsetMs'>) {
   return Math.min(Date.now(), ENHANCE_REVIEW_EXPIRES - 86_400_000) + setup.serverOffsetMs;
@@ -552,12 +557,11 @@ export function enhanceServerNow(setup: Pick<EnhanceSetup, 'serverOffsetMs'>) {
 function enhanceStatus(setup: EnhanceSetup, consent: number | null) {
   const code = !setup.configured ? 'UNCONFIGURED' : !setup.activated ? 'INACTIVE' : consent !== setup.noticeRevision ? 'CONSENT_REQUIRED' : 'OK';
   const policy = setup.configured ? { activated: setup.activated, noticeRevision: setup.noticeRevision, manifestId: setup.manifestId,
-    modelId: setup.modelId, maxRequestMicro: setup.maxRequestMicro, enhanceAllowanceMicro: setup.enhanceAllowanceMicro,
-    totalAllowanceMicro: setup.totalAllowanceMicro, maxRequestsPerHour: 10, providerAvailable: setup.providerAvailable } : null;
+    modelId: setup.modelId, maxRequestMicro: setup.maxRequestMicro, providerAvailable: setup.providerAvailable } : null;
   const now = enhanceServerNow(setup);
   return { code, period: new Date(now).toISOString().slice(0, 7), serverTimeMs: now,
     consent: { enabled: consent !== null, noticeRevision: consent, consentedAt: consent === null ? null : '2026-10-01T00:00:00Z' },
-    policy, usage: { enhanceMicro: setup.enhanceMicro, totalMicro: setup.totalMicro, enhanceLastHour: 0, warning: false } };
+    policy, budget: setup.configured ? budgetReply(setup.totalAllowanceMicro, setup.totalMicro) : null };
 }
 
 // AD1b admin fixture: the admin_ai_spending_v2 reply for two synthetic accounts, in the shape the VTO-1a function builds.
@@ -589,26 +593,19 @@ export function jpegSize(bytes: Buffer): { width: number; height: number } | nul
 function tryOnStatusReply(setup: TryOnSetup, consent: number | null, results: number) {
   const code = !setup.configured ? 'UNCONFIGURED' : !setup.activated ? 'INACTIVE' : consent !== setup.noticeRevision ? 'CONSENT_REQUIRED' : 'OK';
   const policy = setup.configured ? { activated: setup.activated, noticeRevision: setup.noticeRevision, manifestId: TRYON_MANIFEST,
-    modelId: TRYON_MODEL, maxRequestMicro: '360000', tryOnAllowanceMicro: '5000000', totalAllowanceMicro: '20000000',
-    maxRequestsPerHour: 6, maxSteps: 3, maxResults: 20, resultDays: 7, providerAvailable: setup.providerAvailable } : null;
+    modelId: TRYON_MODEL, maxRequestMicro: '360000', maxSteps: 3, maxResults: 20, resultDays: 7, providerAvailable: setup.providerAvailable } : null;
   const now = tryOnServerNow();
   return { code, period: new Date(now).toISOString().slice(0, 7), serverTimeMs: now,
     consent: { enabled: consent !== null, noticeRevision: consent, consentedAt: consent === null ? null : '2026-10-01T00:00:00Z' },
-    policy, results, usage: { tryOnMicro: '0', totalMicro: '0', tryOnLastHour: 0, warning: false } };
+    policy, results, budget: budgetReply('20000000', '0') };
 }
-export type AdminLimits = Record<'shared' | 'stylist' | 'enhancement' | 'tryOn', { monthlyAllowanceMicro: string | null; maxRequestMicro: string | null; maxRequestsPerHour: number | null }>;
+export type AdminLimits = { monthlyAllowanceMicro: string };
 export type AdminWriteReply = { status: number; body?: unknown } | 'lost' | 'appliedLost';
 // Usage recorded outside the current month's history, such as a hold kept from an earlier month.
 export type AdminExtraUsage = Partial<Record<1 | 2, Partial<Record<'stylist' | 'enhancement' | 'tryOn', number>>>>;
 export const adminStartLimits = (): Record<1 | 2, AdminLimits | null> => ({
-  1: { shared: { monthlyAllowanceMicro: '20000000', maxRequestMicro: '4097351', maxRequestsPerHour: 30 },
-    stylist: { monthlyAllowanceMicro: '5000000', maxRequestMicro: '129360', maxRequestsPerHour: 20 },
-    enhancement: { monthlyAllowanceMicro: '2000000', maxRequestMicro: '150000', maxRequestsPerHour: 10 },
-    tryOn: { monthlyAllowanceMicro: '8000000', maxRequestMicro: '360000', maxRequestsPerHour: 6 } },
-  2: { shared: { monthlyAllowanceMicro: '10000000', maxRequestMicro: '4097351', maxRequestsPerHour: 30 },
-    stylist: { monthlyAllowanceMicro: '2000000', maxRequestMicro: '129360', maxRequestsPerHour: 20 },
-    enhancement: { monthlyAllowanceMicro: null, maxRequestMicro: null, maxRequestsPerHour: null },
-    tryOn: { monthlyAllowanceMicro: null, maxRequestMicro: null, maxRequestsPerHour: null } },
+  1: { monthlyAllowanceMicro: '20000000' },
+  2: { monthlyAllowanceMicro: '10000000' },
 });
 const adminSpend = (confirmed: number, estimated: number, reserved: number, requests: number) => ({ confirmedMicro: String(confirmed),
   estimatedMicro: String(estimated), reservedMicro: String(reserved), totalMicro: String(confirmed + estimated + reserved), requests });
@@ -626,13 +623,13 @@ export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits |
     const used = (spend: { totalMicro: string }, feature?: 'stylist' | 'enhancement' | 'tryOn') => String(BigInt(spend.totalMicro) + BigInt(feature ? more[feature] ?? 0 : 0));
     return { admissionNo, enabled: true, accountVersion: (admissionNo === 1 ? 'a' : 'b').repeat(63) + String(version[admissionNo] % 10),
       features: { analysis: { configured: limits[admissionNo] !== null, activated: true },
-        stylist: { configured: limits[admissionNo]?.stylist.monthlyAllowanceMicro != null, activated: true },
-        enhancement: { configured: limits[admissionNo]?.enhancement.monthlyAllowanceMicro != null, activated: false },
-        tryOn: { configured: limits[admissionNo]?.tryOn.monthlyAllowanceMicro != null, activated: false } },
+        stylist: { configured: limits[admissionNo] !== null, activated: true },
+        enhancement: { configured: limits[admissionNo] !== null, activated: false },
+        tryOn: { configured: limits[admissionNo] !== null, activated: false } },
       limits: limits[admissionNo], history,
-      current: { period: months[0]!, shared: { usedMicro: String(BigInt(used(current.analysis)) + BigInt(used(current.stylist, 'stylist')) + BigInt(used(current.enhancement, 'enhancement')) + BigInt(used(current.tryOn, 'tryOn'))), lastHour: 3 },
-        analysis: { usedMicro: used(current.analysis), lastHour: 2 }, stylist: { usedMicro: used(current.stylist, 'stylist'), lastHour: 1 },
-        enhancement: { usedMicro: used(current.enhancement, 'enhancement'), lastHour: 0 }, tryOn: { usedMicro: used(current.tryOn, 'tryOn'), lastHour: admissionNo === 1 ? 1 : 0 } },
+      current: { period: months[0]!, shared: { usedMicro: String(BigInt(used(current.analysis)) + BigInt(used(current.stylist, 'stylist')) + BigInt(used(current.enhancement, 'enhancement')) + BigInt(used(current.tryOn, 'tryOn'))) },
+        analysis: { usedMicro: used(current.analysis) }, stylist: { usedMicro: used(current.stylist, 'stylist') },
+        enhancement: { usedMicro: used(current.enhancement, 'enhancement') }, tryOn: { usedMicro: used(current.tryOn, 'tryOn') } },
       openAllocations: { enhancementProbe: admissionNo === 1 ? { count: 1, allocationMicro: '260000', maxCalls: 2 } : { count: 0, allocationMicro: '0', maxCalls: 0 },
         tryOnProbe: admissionNo === 1 ? { count: 1, allocationMicro: '1800000', maxCalls: 5 } : { count: 0, allocationMicro: '0', maxCalls: 0 } } };
   };
@@ -826,6 +823,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     const statusProofs: StatusProof[] = [];
   // The unexpected-model notice window the Settings status read (version 2) reports; `omit` models a server that predates it.
   const photoModelNotice: { until: number | null; omit: boolean } = { until: null, omit: false };
+  // The database selects the budget contract by this request header; a request without it is answered fail-closed.
+  const budgetContract = (request: Request) => request.headers()['x-stillroom-ai-budget-contract'] === '2';
   const negotiatedStatus = (request: Request, body: JsonRow): JsonRow => {
     if (request.headers()['x-stillroom-ai-status-version'] !== '2' || photoModelNotice.omit) return body;
     const now = Number(body.serverTimeMs);
@@ -975,6 +974,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     if (url.pathname === '/rest/v1/rpc/stylist_status' || url.pathname === '/rest/v1/rpc/stylist_set_consent') {
       if (stylistControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
+      if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }); return; }
       const setup = { ...stylistDefaults, ...stylistControl.setup[owner] };
       if (url.pathname.endsWith('stylist_set_consent')) {
         const body = request.postDataJSON() as { p_enabled?: unknown; p_notice_revision?: unknown };
@@ -995,6 +995,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     if (url.pathname === '/rest/v1/rpc/enhance_status' || url.pathname === '/rest/v1/rpc/enhance_set_consent') {
       if (enhanceControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
+      if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }); return; }
       const setup = { ...enhanceDefaults, ...enhanceControl.setup[owner] };
       if (url.pathname.endsWith('enhance_set_consent')) {
         const body = request.postDataJSON() as { p_enabled?: unknown; p_notice_revision?: unknown };
@@ -1023,6 +1024,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const live = tryonControl.results.filter(row => row.owner === owner && row.expiresAtMs > now
         && outfits.some(outfit => outfit.owner_id === owner && outfit.id === row.outfitId && outfit.deleted_at === null));
       if (name === 'tryon_status' || name === 'tryon_set_consent') {
+        if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }); return; }
         if (name === 'tryon_set_consent') {
           tryonControl.consentWrites.push({ owner, body });
           if (typeof body.p_enabled !== 'boolean') { await json({ code: 'INVALID_INPUT' }); return; }
@@ -1069,6 +1071,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       }
     }
     if (url.pathname === '/functions/v1/try-on') {
+      if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }, 403); return; }
       const buffer = request.postDataBuffer() ?? Buffer.alloc(0);
       const form = await new Response(new Uint8Array(buffer), { headers: { 'content-type': request.headers()['content-type'] ?? '' } }).formData().catch(() => null);
       const person = form?.get('person');
@@ -1129,6 +1132,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       return;
     }
     if (url.pathname === '/functions/v1/enhance-photo') {
+      if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }, 403); return; }
       const bytes = request.postDataBuffer() ?? Buffer.alloc(0);
       const requestId = request.headers()['x-stillroom-request-id'] ?? '';
       if (request.headers()['x-stillroom-probe-token'] !== undefined || request.headers()['x-stillroom-probe-authorisation'] !== undefined) {
@@ -1154,6 +1158,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       return;
     }
     if (url.pathname === '/functions/v1/stylist-chat') {
+      if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }, 403); return; }
       const body: unknown = request.postDataJSON();
       stylistControl.chats.push({ owner, body });
       const next = stylistControl.replies.shift() ?? { status: 200, body: { code: 'OK', reply: 'Here is an idea.', outfits: [] } };
@@ -1164,9 +1169,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     if (url.pathname === '/rest/v1/rpc/ai_status') {
       if (!admitAiStatus(request)) { await json({ code: 'UNAUTHENTICATED' }, 401); return; }
+      if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE', policy: null }); return; }
       await json(negotiatedStatus(request, { code: 'UNCONFIGURED', period: new Date().toISOString().slice(0, 7), serverTimeMs: Date.now(),
         consent: { enabled: false, noticeRevision: null, consentedAt: null, profileVersion: String(profiles[owner]!.version) },
-        policy: null, usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } })); return;
+        policy: null, budget: null })); return;
     }
     if (['image_change_status', 'image_change_requests', 'image_recovery_versions', 'cancel_image_change'].some(name => url.pathname === `/rest/v1/rpc/${name}`)) {
       const body: unknown = request.postDataJSON();
@@ -2153,6 +2159,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         await json({ code: isAdmin ? 'OK' : 'UNAVAILABLE' }); return;
       }
       const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      if (!url.pathname.endsWith('admin_status') && !budgetContract(request)) { await json({ code: 'UNAVAILABLE' }); return; }
       if (url.pathname.endsWith('admin_ai_spending_v2')) {
         adminControl.spendingReads.push({ owner, months: body.p_months });
         if (!isAdmin) { await json({ code: 'UNAVAILABLE' }); return; }

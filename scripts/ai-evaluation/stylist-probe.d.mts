@@ -19,12 +19,15 @@ export function fixture(slot: Slot): Fixture;
 export function bodyDigest(slot: Slot): string;
 export function settingsDigest(): string;
 export function controlsDigest(): string;
-export type Receipt = {
-  kind: 'stylist-probe-allocation-v1'; ownerRef: string; allocationMicro: string;
+type ReceiptBase = {
+  ownerRef: string; allocationMicro: string;
   reply: { code: 'OK'; previousTotalMicro: string; newTotalMicro: string };
-  readBack: { monthlyAllowanceMicro: string; stylistMonthlyAllowanceMicro: string };
   allocatedAt: string; approvalRef: string;
 };
+export type Receipt =
+  | (ReceiptBase & { kind: 'stylist-probe-allocation-v1'; readBack: { monthlyAllowanceMicro: string; stylistMonthlyAllowanceMicro: string } })
+  | (ReceiptBase & { kind: 'stylist-probe-allocation-v2'; readBack: { monthlyAllowanceMicro: string } });
+export const RECEIPT_KINDS: Readonly<Record<Receipt['kind'], readonly string[]>>;
 export function validateReceipt(value: unknown): Receipt;
 export function allocationId(receipt: Receipt): string;
 export function operatorRoot(): string;

@@ -111,7 +111,7 @@ export function AiSettings({ ai, controller, scope, profile, busy, unresolved, o
   }
   const policy = status?.policy ?? null;
   const notice = aiNoticeProfile(policy);
-  const limit = policy ? usdCents(policy.monthlyAllowanceMicro, language, 'limit') : '';
+  const limit = status?.budget ? usdCents(status.budget.monthlyAllowanceMicro, language, 'limit') : '';
   const disabled = !online || busy || pending !== null;
   // The sheet shows this notice for this policy; any change to either closes it without writing.
   const sheet = useConsentSheet(card.turnOn, pending === 'on', status ? `${notice}|${aiPolicyBinding(scope, status)}` : null);

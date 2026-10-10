@@ -27,12 +27,13 @@ const IMAGE_CHANGE_VERSION = '20260922020000';
 const COLOUR_VERSION = '20260924100000';
 const TRYON_STOP_VERSION = '20261004090000';
 const SAVE1_PRIOR_VERSION = '20261007090000';
+const BUDGET1_PRIOR_VERSION = '20261009090000';
 // Exact applied prefix per labelled stage; 'target' is the full source inventory.
 const STAGE_VERSIONS = Object.freeze({ base: '20260905000000', 'hosted-source': HOSTED_SOURCE_VERSION,
   'prior-main': PRIOR_MAIN_VERSION, 'azure-target': AZURE_TARGET_VERSION, 'image-change': IMAGE_CHANGE_VERSION,
-  colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, 'save1-prior': SAVE1_PRIOR_VERSION, target: null });
+  colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, 'save1-prior': SAVE1_PRIOR_VERSION, 'budget1-prior': BUDGET1_PRIOR_VERSION, target: null });
 const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], 'image-change': ['azure-target', 'hosted-source'],
-  colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], target: ['save1-prior'] });
+  colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], 'budget1-prior': ['save1-prior'], target: ['budget1-prior'] });
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -67,6 +68,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261007090000_outfit_lifecycle.sql', version: '20261007090000', time: '2026-10-07 09:00:00', bytes: 3754, sha256: '243c41376a2c3d708e2cd78739a3352e5461c441a41eb5b50b3e535a14e432ef' },
   { name: '20261008080000_analysis_model_identity.sql', version: '20261008080000', time: '2026-10-08 08:00:00', bytes: 11083, sha256: '1a3b8c3d1723378f0734dd1828bddf235a68af5e6fe1c7711ff7fa2a4a952e19' },
   { name: '20261009090000_stylist_weather_outerwear.sql', version: '20261009090000', time: '2026-10-09 09:00:00', bytes: 7237, sha256: '72f11f973476ac8d92f73cdca826871d41350e6161655c1f4f23eb97de691e56' },
+  { name: '20261010090000_shared_ai_budget.sql', version: '20261010090000', time: '2026-10-10 09:00:00', bytes: 63172, sha256: '8c813bd31aebfc4fdf515b9f34fc9571f6be841878b64a220e9c73e2df1bb79e' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1316,10 +1318,10 @@ async function main() {
       // Real v1 stylist claims are made at the prior inventory, before the forward v2 manifest migration is applied.
       const { stylistUpgradeSeed, stylistUpgradeVerify } = await import('../tests/integration/stylist-ledger.sessions.mjs');
       const rainSeed = await stylistUpgradeSeed(colourSnapshot, privilegedLocalSql);
-      stage = 'SAVE1-prior-to-target';
-      await migrateToStage(run, 'save1-prior', 'target');
+      stage = 'SAVE1-prior-to-budget1-prior';
+      await migrateToStage(run, 'save1-prior', 'budget1-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
-      await history('target'); await verifyCiStorageGuard();
+      await history('budget1-prior'); await verifyCiStorageGuard();
       stage = 'RAIN1-manifest-verify';
       await verifyStylistV2Stage(colourSnapshot, privilegedLocalSql);
       stage = 'RAIN1-verify';
@@ -1351,8 +1353,18 @@ async function main() {
       const { tryonProbes } = await import('../tests/integration/tryon.sessions.mjs');
       await tryonProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `VTO1-tryon-${label}`; }, localService);
       colourFinalizer.assertRunning();
+      // BUDGET1: every frozen historical check above ran at the exact prior inventory; the budget migration is applied now.
+      stage = 'BUDGET1-prior-to-target';
+      await migrateToStage(run, 'budget1-prior', 'target');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('target'); await verifyCiStorageGuard();
+      stage = 'BUDGET1-shared-budget';
+      const { sharedBudgetProbes } = await import('../tests/integration/shared-ai-budget.sessions.mjs');
+      await sharedBudgetProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BUDGET1-${label}`; }, localService);
+      colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
     console.log('PASS: FILT1 upgrade; try-on and enhancement rows settled by the old finishes keep their digest, origin, anomaly and amount after the provider_refusal migration, the new columns are null, replays with the refusal arguments omitted or null match and write nothing; seeded rows removed before the compare; no provider calls');
+    console.log('PASS: BUDGET1 shared monthly budget; frozen upgrade checks ran at the exact prior inventory, then the budget migration was applied and the new contract (one shared sum across analysis, Stylist, cleanup and try-on, no hourly request limit, header-selected and fail-closed without the header, withdrawal effective, probe authorisation not double-subtracted) was probed; no provider calls');
     console.log('PASS: COL1 populated11/twelve/fifteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after fifteen; no provider calls');
     console.log('PASS: P6d tag history; v2 equals legacy for recorded history, recorded history re-imported through the RPC and a second generation imported, concurrent and completion races settle serially; no provider calls');
     console.log('PASS: RAIN1 stylist upgrade; real v1 claims (settled, held, provisionally expired) made before the v2 manifest migration keep their ledger, controls and function properties, v1 and v2 are admitted separately with cross pairs and unknown manifests writing nothing, held and expired v1 requests settle across the controls cutover, owner isolation; seeded rows removed and controls restored; no provider calls');

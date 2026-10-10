@@ -147,9 +147,8 @@ describe('historical receipt reading versus Azure-only new dispatch', () => {
     const status = parseAiStatus({ code: 'OK', period: '2026-09', serverTimeMs: Date.parse('2026-09-21'),
       consent: { enabled: true, noticeRevision: 2, consentedAt: '2026-09-21T00:00:00Z', profileVersion: '1' },
       policy: { activated: true, modelId: AZURE_MODEL, promptVersion: 2, noticeRevision: 2,
-        executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351', monthlyAllowanceMicro: '50000000',
-        maxRequestsPerHour: 100, resultTtlSeconds: 3600 },
-      usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } })!;
+        executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351', resultTtlSeconds: 3600 },
+      budget: { monthlyAllowanceMicro: '50000000', usedMicro: '0', remainingMicro: '50000000', warning: false } })!;
     expect(supportedAiPolicy(status, Date.parse('2026-09-21'))).toBe(true);
     expect(supportedAiPolicy(status, Date.parse('2026-10-21'))).toBe(false);
     expect(aiNoticeProfile(status.policy)).toBe('azure');

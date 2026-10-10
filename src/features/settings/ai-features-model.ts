@@ -19,15 +19,15 @@ function validFigures(figures: SpendFigures | null): figures is SpendFigures {
   return figures !== null && isMicro(figures.usedMicro) && isMicro(figures.limitMicro) && BigInt(figures.limitMicro) > 0n
     && Number.isSafeInteger(figures.serverTimeMs) && figures.serverTimeMs >= 0;
 }
-/** Analysis: the shared total and allowance, with the period its parser keeps. None without a policy. */
+/** Analysis: the account's one budget, with the period its parser keeps. None without a budget. */
 export function analysisFigures(status: AiStatus): SpendFigures | null {
-  return status.policy ? { usedMicro: status.usage.accountedMicro, limitMicro: status.policy.monthlyAllowanceMicro,
+  return status.budget ? { usedMicro: status.budget.usedMicro, limitMicro: status.budget.monthlyAllowanceMicro,
     serverTimeMs: status.serverTimeMs, period: status.period } : null;
 }
-/** Stylist, clean-up and try-on: the shared total and allowance. None without policy, usage or server time. */
+/** Stylist, clean-up and try-on: the same one budget. None without a budget or server time. */
 export function sharedFigures(status: EnhanceStatus | StylistStatus | TryOnStatus): SpendFigures | null {
-  return status.policy && status.usage && status.serverTimeMs !== null
-    ? { usedMicro: status.usage.totalMicro, limitMicro: status.policy.totalAllowanceMicro, serverTimeMs: status.serverTimeMs } : null;
+  return status.budget && status.serverTimeMs !== null
+    ? { usedMicro: status.budget.usedMicro, limitMicro: status.budget.monthlyAllowanceMicro, serverTimeMs: status.serverTimeMs } : null;
 }
 /** The UTC `YYYY-MM` of a time. */
 export function utcPeriod(ms: number): string {

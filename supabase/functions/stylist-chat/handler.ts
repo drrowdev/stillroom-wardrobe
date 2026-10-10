@@ -4,6 +4,7 @@ import {
   validateStylistReply, type StylistItem,
 } from '../../../src/domain/stylist.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
+import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
 import { UUID, exact, object, ProtocolError, readBounded, readJson, validAccounting, type JsonObject } from '../analyze-clothing/protocol.ts';
 import { callStylist, type StylistOutcome } from './azure.ts';
 
@@ -11,13 +12,13 @@ export type StylistConfig = { supabaseUrl: string; publicKey: string; serviceKey
 export const STYLIST_RPCS = ['stylist_status', 'stylist_claim', 'stylist_finish'] as const;
 const statusCodes: Record<string, number> = {
   INVALID_INPUT: 400, UNAUTHENTICATED: 401, UNAVAILABLE: 403, CONSENT_REQUIRED: 403, TERMINAL: 409, TOO_LARGE: 413,
-  UNSUPPORTED_MEDIA: 415, FILTERED: 422, RATE_LIMIT: 429, ALLOWANCE: 429, FAILED: 502, UNCONFIGURED: 503, INACTIVE: 503,
+  UNSUPPORTED_MEDIA: 415, FILTERED: 422, ALLOWANCE: 429, FAILED: 502, UNCONFIGURED: 503, INACTIVE: 503,
   CONFIG_CHANGED: 503, BUSY: 503, TIMEOUT: 504,
 };
 const finishCodes: Record<string, string> = {
   EXPIRED: 'TIMEOUT', NOT_DISPATCHED: 'FAILED', INVALID_USAGE: 'FAILED', USAGE_ANOMALY: 'FAILED', USAGE_CONFLICT: 'FAILED',
 };
-const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info'];
+const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info', AI_BUDGET_CONTRACT_HEADER.toLowerCase()];
 const HANDLER_MS = 45000;
 function stageSignal(signal: AbortSignal, ms: number) { return AbortSignal.any([signal, AbortSignal.timeout(ms)]); }
 function closedCode(value: unknown): string {
@@ -67,6 +68,7 @@ export function createStylistHandler(config: StylistConfig, azureTransport: Azur
       const bearer = request.headers.get('Authorization') ?? '';
       if (!bearer.startsWith('Bearer ') || !/^[A-Za-z0-9._~+/-]{1,8192}={0,2}$/.test(bearer.slice(7))) return error('UNAUTHENTICATED');
       if (!serverConfig(config)) return error('UNCONFIGURED');
+      if (request.headers.get(AI_BUDGET_CONTRACT_HEADER) !== AI_BUDGET_CONTRACT) return error('UNAVAILABLE');
       if (request.headers.get('Content-Type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json'
         || request.headers.has('Content-Encoding')) return error('UNSUPPORTED_MEDIA');
       const length = request.headers.get('Content-Length');
@@ -91,7 +93,8 @@ export function createStylistHandler(config: StylistConfig, azureTransport: Azur
         const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
           method: 'POST', redirect: 'error', cache: 'no-store', signal: dbSignal,
           headers: { Authorization: service ? 'Bearer '.concat(config.serviceKey) : bearer,
-            apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json' },
+            apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json',
+            [AI_BUDGET_CONTRACT_HEADER]: AI_BUDGET_CONTRACT },
           body: JSON.stringify(body),
         });
         const result = await readJson(response, limit, dbSignal);
@@ -101,6 +104,8 @@ export function createStylistHandler(config: StylistConfig, azureTransport: Azur
 
       const preflight = await rpc('stylist_status', {});
       if (preflight.code !== 'OK') return error(closedCode(preflight.code));
+      // A database that ignored the contract header answers in the old shape: refused before any claim.
+      if (parseAiBudget(preflight.budget) === null) return error('UNAVAILABLE');
       const policy = preflight.policy, consent = preflight.consent;
       if (!object(policy) || policy.activated !== true) return error('INACTIVE');
       if (!object(consent) || consent.enabled !== true || consent.noticeRevision !== policy.noticeRevision) return error('CONSENT_REQUIRED');

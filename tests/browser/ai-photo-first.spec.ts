@@ -212,7 +212,7 @@ function emitRawAnalysis(evidence: RawAnalysisEvidence, testInfo: TestInfo) {
   catch { evidence.captureError = true; }
 }
 const fixtureKey = 'sb_publishable_browser_fixture_only';
-const analysisHeaderNames = 'authorization, apikey, content-type, x-stillroom-request-id, x-stillroom-draft-id, x-stillroom-generation';
+const analysisHeaderNames = 'authorization, apikey, content-type, x-stillroom-request-id, x-stillroom-draft-id, x-stillroom-generation, x-stillroom-ai-budget-contract';
 function analysisIds(account: 'a' | 'b' = 'a') {
   const id = () => `c329${account}000-${randomUUID().slice(9)}`;
   return { requestId: id(), draftId: id(), generation: '1' };
@@ -244,7 +244,7 @@ async function sendBrowserAnalysis(page: Page, api: AiFixture, kind: BrowserAnal
       'x-stillroom-request-id': kind === 'request-id' ? 'invalid' : kind === 'wrong-owner'
         ? ids.requestId.replace('c329a000', 'c329b000') : ids.requestId,
       'x-stillroom-draft-id': kind === 'draft-id' ? 'invalid' : ids.draftId,
-      'x-stillroom-generation': kind === 'generation' ? '0' : ids.generation };
+      'x-stillroom-generation': kind === 'generation' ? '0' : ids.generation, 'x-stillroom-ai-budget-contract': '2' };
     // A typed array, not a Blob: WebKit route interception may forward a Blob body as Content-Length 0.
     const body = kind === 'empty' ? new Uint8Array() : kind === 'oversized' ? new Uint8Array(512001) : new Uint8Array(bytes);
     const constructedBytes = body.byteLength;
@@ -331,6 +331,7 @@ async function sendDirectAnalysis(page: Page, api: AiFixture, kind: DirectAnalys
       ? ids.requestId.replace('c329a000', 'c329b000') : ids.requestId,
     'x-stillroom-draft-id': kind === 'draft-owner' ? ids.draftId.replace('c329a000', 'c329b000') : ids.draftId,
     'x-stillroom-generation': kind === 'generation' ? '2147483648' : ids.generation,
+    'x-stillroom-ai-budget-contract': '2',
   };
   if (kind === 'cookie' || kind === 'preflight-cookie') headers.cookie = 'synthetic=1';
   if (kind === 'empty-cookie') headers.cookie = '';
@@ -572,7 +573,7 @@ for (const mode of ['parser-error', 'truncated', 'stalled'] as const) {
           const headers = `POST ${analysisPath} HTTP/1.1\r\nHost: ${target.host}\r\nOrigin: ${origin}\r\n` +
             `Authorization: ${api.issuedWireAuthorization('a')}\r\nApikey: ${fixtureKey}\r\nContent-Type: image/jpeg\r\n` +
             `X-Stillroom-Request-Id: ${ids.requestId}\r\nX-Stillroom-Draft-Id: ${ids.draftId}\r\n` +
-            `X-Stillroom-Generation: 1\r\nContent-Length: 100\r\n\r\n`;
+            `X-Stillroom-Generation: 1\r\nX-Stillroom-AI-Budget-Contract: 2\r\nContent-Length: 100\r\n\r\n`;
           if (mode === 'truncated') socket.end(headers + 'partial');
           else socket.write(headers);
         });

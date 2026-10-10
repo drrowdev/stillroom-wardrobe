@@ -1,6 +1,7 @@
 // AD1b: the three admin RPCs (ADR27); spending and limits use the v2 functions, which add try-on (VTO-2b). Each call is bound to the owner scope that made it, so a sign-out or account
 // change drops its reply. Anyone who isn't the app's admin gets the same fixed UNAVAILABLE, shown as "Not available".
 import type { OwnerScope } from '../auth/session';
+import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER } from '../domain/ai-budget';
 import { parseSpending, parseWriteResult, type AdminSpending, type Limits, type WriteResult } from '../domain/admin-limits';
 import type { AppClient } from './client';
 import { AppError, throwIfAborted } from './errors';
@@ -32,7 +33,8 @@ export type SpendingRead = { kind: 'ok'; spending: AdminSpending } | { kind: 'un
 export async function readAdminSpending(client: AppClient, scope: OwnerScope, months: 6 | 12, signal: AbortSignal): Promise<SpendingRead> {
   const call = lifetime(scope, signal);
   call.check();
-  const { data, error } = await client.rpc('admin_ai_spending_v2', { p_months: months }).abortSignal(call.signal);
+  const { data, error } = await client.rpc('admin_ai_spending_v2', { p_months: months })
+    .setHeader(AI_BUDGET_CONTRACT_HEADER, AI_BUDGET_CONTRACT).abortSignal(call.signal);
   call.check();
   if (error) { if (missing(error)) return { kind: 'unavailable' }; throw new AppError('error.unavailable'); }
   if (unavailable(data)) return { kind: 'unavailable' };
@@ -49,7 +51,7 @@ export async function writeAdminLimits(client: AppClient, scope: OwnerScope, wri
   const { data, error } = await client.rpc('admin_set_ai_limits_v2', {
     p_admission_no: write.admissionNo, p_account_version: write.accountVersion, p_expected: write.expected, p_limits: write.limits,
     ...write.reason ? { p_reason_code: write.reason } : {},
-  }).abortSignal(call.signal);
+  }).setHeader(AI_BUDGET_CONTRACT_HEADER, AI_BUDGET_CONTRACT).abortSignal(call.signal);
   call.check();
   if (error) throw new AppError('error.unavailable');
   const result = parseWriteResult(data);

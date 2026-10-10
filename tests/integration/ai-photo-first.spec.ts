@@ -6,6 +6,7 @@ import type { Database } from '../../src/data/database.types';
 import { isRecord, isUuid } from '../../src/domain/wardrobe';
 import { parseProfile } from '../../src/data/profile';
 import { parseAiStatus } from '../../src/domain/ai-controls';
+import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER } from '../../src/domain/ai-budget';
 import { isLanguage, messages } from '../../src/i18n/all';
 import { assertSanitizedJpeg, readJpegHeader } from '../../src/images/jpeg';
 import { deleteWardrobeObject } from '../../src/data/storage-delete.ts';
@@ -64,7 +65,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
       const initializationWrites = originalProfile.ui_language === null ? 1 : 0;
       const expectedConsentProfile = { ...originalProfile, ui_language: originalProfile.ui_language ?? 'en',
         version: originalProfile.version + initializationWrites + 2 };
-      const entryStatus = await client.rpc('ai_status');
+      const entryStatus = await client.rpc('ai_status').setHeader(AI_BUDGET_CONTRACT_HEADER, AI_BUDGET_CONTRACT);
       const entry = parseAiStatus(entryStatus.data);
       check(!entryStatus.error && entry?.consent.enabled);
       const itemsBefore = await client.from('items').select('id').eq('owner_id', ownerId).order('id');
@@ -151,7 +152,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
         const afterConsent = await client.from('profiles').select('owner_id,display_name,ui_language,timezone,currency,version').eq('owner_id', ownerId).single();
         check(!afterConsent.error);
         check(JSON.stringify(parseProfile(afterConsent.data, ownerId)) === JSON.stringify({ ...profile, version: profile.version + 2 }));
-        const consentReply = await client.rpc('ai_status'), consent = parseAiStatus(consentReply.data);
+        const consentReply = await client.rpc('ai_status').setHeader(AI_BUDGET_CONTRACT_HEADER, AI_BUDGET_CONTRACT), consent = parseAiStatus(consentReply.data);
         check(!consentReply.error && consent?.consent.enabled && consent.consent.noticeRevision === 2
           && consent.consent.profileVersion === String(profile.version + 2) && consent.consent.consentedAt !== null);
         consentedAt = consent.consent.consentedAt;
@@ -296,7 +297,7 @@ test('C: two real owner UI journeys, prepared JPEG binding, explicit Save and ex
       const expectedVersion = originalProfile.version + 2 + initializationWrites * 2;
       check(!restoredReply.error && JSON.stringify(parseProfile(restoredReply.data, ownerId))
         === JSON.stringify({ ...originalProfile, version: expectedVersion }));
-      const finalStatusReply = await client.rpc('ai_status'), finalStatus = parseAiStatus(finalStatusReply.data);
+      const finalStatusReply = await client.rpc('ai_status').setHeader(AI_BUDGET_CONTRACT_HEADER, AI_BUDGET_CONTRACT), finalStatus = parseAiStatus(finalStatusReply.data);
       check(!finalStatusReply.error && finalStatus?.consent.enabled && finalStatus.consent.noticeRevision === 2
         && finalStatus.consent.consentedAt === consentedAt && consentedAt !== null
         && finalStatus.consent.profileVersion === String(expectedVersion));

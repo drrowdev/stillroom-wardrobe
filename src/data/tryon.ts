@@ -4,6 +4,7 @@
 // server's checks stay authoritative, and nothing here decides eligibility on its own.
 import type { OwnerScope } from '../auth/session';
 import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_REVIEW_EXPIRES_AT, tryOnSlots, type TryOnSlot } from '../domain/tryon';
+import { aiBudgetHeaders, parseOptionalAiBudget, type AiBudget } from '../domain/ai-budget';
 import { isUuid } from '../domain/wardrobe';
 import type { AppClient } from './client';
 import { readConfiguration, type PublicConfig } from './config';
@@ -11,7 +12,7 @@ import { sessionOwner } from '../auth/auth-storage';
 
 export const tryOnCodes = ['OK', 'INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'NOT_FOUND', 'TERMINAL',
   'CONFLICT', 'CHAIN_MISMATCH', 'WITHDRAWN', 'CANCELLED', 'EXPIRED', 'RESULTS_FULL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA',
-  'NO_GARMENTS', 'FILTERED', 'OUTPUT_REJECTED', 'RATE_LIMIT', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE',
+  'NO_GARMENTS', 'FILTERED', 'OUTPUT_REJECTED', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE',
   'CONFIG_CHANGED', 'BUSY', 'TIMEOUT'] as const;
 export type TryOnCode = (typeof tryOnCodes)[number];
 export class TryOnError extends Error {
@@ -31,14 +32,13 @@ export const tryOnStatusCodes = ['OK', 'UNAVAILABLE', 'UNCONFIGURED', 'INACTIVE'
 export type TryOnStatusCode = (typeof tryOnStatusCodes)[number];
 export type TryOnPolicy = {
   activated: boolean; noticeRevision: number | null; manifestId: string; modelId: string | null; maxRequestMicro: string | null;
-  tryOnAllowanceMicro: string | null; totalAllowanceMicro: string; maxRequestsPerHour: number | null; maxSteps: number;
-  maxResults: number; resultDays: number; providerAvailable: boolean;
+  maxSteps: number; maxResults: number; resultDays: number; providerAvailable: boolean;
 };
 export type TryOnStatus = {
   code: TryOnStatusCode; serverTimeMs: number | null;
   consent: { enabled: boolean; noticeRevision: number | null } | null;
   policy: TryOnPolicy | null; results: number;
-  usage: { tryOnMicro: string; totalMicro: string; tryOnLastHour: number; warning: boolean } | null;
+  budget: AiBudget | null;
 };
 
 const nullableMicro = (value: unknown): value is string | null => value === null || micro(value);
@@ -47,36 +47,34 @@ const nullableMicro = (value: unknown): value is string | null => value === null
 export function parseTryOnStatus(value: unknown): TryOnStatus | null {
   if (exactKeys(value, ['code'])) {
     return value.code === 'UNAVAILABLE'
-      ? { code: 'UNAVAILABLE', serverTimeMs: null, consent: null, policy: null, results: 0, usage: null } : null;
+      ? { code: 'UNAVAILABLE', serverTimeMs: null, consent: null, policy: null, results: 0, budget: null } : null;
   }
-  if (!exactKeys(value, ['code', 'period', 'serverTimeMs', 'consent', 'policy', 'results', 'usage'])) return null;
+  if (!exactKeys(value, ['code', 'period', 'serverTimeMs', 'consent', 'policy', 'results', 'budget'])) return null;
   const code = tryOnStatusCodes.find((entry) => entry === value.code);
   if (!code || code === 'UNAVAILABLE' || typeof value.period !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value.period)
     || !count(value.serverTimeMs) || !count(value.results)) return null;
-  const c = value.consent, p = value.policy, u = value.usage;
+  const c = value.consent, p = value.policy;
+  const budget = parseOptionalAiBudget(value.budget);
   if (!exactKeys(c, ['enabled', 'noticeRevision', 'consentedAt']) || typeof c.enabled !== 'boolean'
     || !(c.noticeRevision === null || revision(c.noticeRevision)) || c.enabled !== (c.noticeRevision !== null)
     || !(c.consentedAt === null || typeof c.consentedAt === 'string') || (c.consentedAt === null) !== (c.noticeRevision === null)) return null;
-  if (!exactKeys(u, ['tryOnMicro', 'totalMicro', 'tryOnLastHour', 'warning']) || !micro(u.tryOnMicro) || !micro(u.totalMicro)
-    || !count(u.tryOnLastHour) || typeof u.warning !== 'boolean') return null;
+  if (!budget.ok) return null;
   let policy: TryOnPolicy | null = null;
   if (p !== null) {
-    if (!exactKeys(p, ['activated', 'noticeRevision', 'manifestId', 'modelId', 'maxRequestMicro', 'tryOnAllowanceMicro',
-      'totalAllowanceMicro', 'maxRequestsPerHour', 'maxSteps', 'maxResults', 'resultDays', 'providerAvailable'])
+    if (!exactKeys(p, ['activated', 'noticeRevision', 'manifestId', 'modelId', 'maxRequestMicro',
+      'maxSteps', 'maxResults', 'resultDays', 'providerAvailable'])
       || typeof p.activated !== 'boolean' || !(p.noticeRevision === null || revision(p.noticeRevision))
       || typeof p.manifestId !== 'string' || !(p.modelId === null || typeof p.modelId === 'string')
-      || !nullableMicro(p.maxRequestMicro) || !nullableMicro(p.tryOnAllowanceMicro) || !micro(p.totalAllowanceMicro)
-      || !(p.maxRequestsPerHour === null || count(p.maxRequestsPerHour)) || p.maxSteps !== 3 || p.maxResults !== 20
+      || !nullableMicro(p.maxRequestMicro) || p.maxSteps !== 3 || p.maxResults !== 20
       || p.resultDays !== TRYON_LIMITS.resultDays || typeof p.providerAvailable !== 'boolean') return null;
     policy = { activated: p.activated, noticeRevision: p.noticeRevision, manifestId: p.manifestId, modelId: p.modelId,
-      maxRequestMicro: p.maxRequestMicro, tryOnAllowanceMicro: p.tryOnAllowanceMicro, totalAllowanceMicro: p.totalAllowanceMicro,
-      maxRequestsPerHour: p.maxRequestsPerHour, maxSteps: p.maxSteps, maxResults: p.maxResults, resultDays: p.resultDays,
+      maxRequestMicro: p.maxRequestMicro, maxSteps: p.maxSteps, maxResults: p.maxResults, resultDays: p.resultDays,
       providerAvailable: p.providerAvailable };
   }
   if ((code === 'OK' || code === 'INACTIVE' || code === 'CONSENT_REQUIRED') && policy === null) return null;
+  if (budget.budget === null && code !== 'UNCONFIGURED') return null;
   return { code, serverTimeMs: value.serverTimeMs, consent: { enabled: c.enabled, noticeRevision: c.noticeRevision }, policy,
-    results: value.results,
-    usage: { tryOnMicro: u.tryOnMicro, totalMicro: u.totalMicro, tryOnLastHour: u.tryOnLastHour, warning: u.warning } };
+    results: value.results, budget: budget.budget };
 }
 
 /** The policy this app version has a notice for: the reviewed manifest, model and notice revision, before review expiry. */
@@ -254,7 +252,7 @@ export class TryOnClient {
     return session.access_token;
   }
   private headers(token: string, extra: Record<string, string>) {
-    return { apikey: this.config.publishableKey, Authorization: `Bearer ${token}`, ...extra };
+    return { apikey: this.config.publishableKey, Authorization: `Bearer ${token}`, ...    aiBudgetHeaders, ...extra };
   }
   private async readBody(response: Response, limit: number, wait: Wait): Promise<Uint8Array<ArrayBuffer>> {
     if (!response.body) throw new TryOnError('FAILED');

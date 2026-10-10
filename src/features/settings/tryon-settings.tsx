@@ -43,14 +43,12 @@ function Card({ store, busy, online, language, t }: Props & { store: TryOnStore 
   const sheet = useConsentSheet(view.turnOn, state.writing);
   if (view.kind === 'hidden') return null;
   const status = state.read.kind === 'ready' ? state.read.status : null;
-  const policy = status?.policy ?? null;
   const disabled = !online || busy || state.writing;
   const details = view.kind === 'off' || view.kind === 'renew' || view.kind === 'on' || view.kind === 'paused';
   const control = featureSwitch(view.turnOn, view.turnOff);
   const change = (enabled: boolean, button: HTMLElement | null) => { pressed.current = button; return writeTryOnConsent(store, enabled); };
-  const allowance = policy?.tryOnAllowanceMicro ?? null;
-  const value = view.kind === 'on' && status?.usage && allowance ? t('aiC.usage', { used: usdCents(status.usage.tryOnMicro, language, 'used'), limit: usdCents(allowance, language, 'limit') })
-    : (view.kind === 'off' || view.kind === 'renew') && allowance ? t('aiF.upTo', { limit: usdCents(allowance, language, 'limit') }) : null;
+  const budget = status?.budget ?? null;
+  const value = (view.kind === 'off' || view.kind === 'renew') && budget ? t('aiF.upTo', { limit: usdCents(budget.monthlyAllowanceMicro, language, 'limit') }) : null;
   const noticeList = <div className="ai-notice fine">{TRYON_NOTICE_KEYS.map((key) => <p key={key}>{t(key)}</p>)}</div>;
   const line = view.kind === 'loadFailed' ? 'tryonC.loadFailed' : view.kind === 'unresolved' ? 'stylist.unresolved'
     : view.kind === 'paused' ? 'tryonC.pausedText' : view.kind === 'renew' ? 'tryonC.changed' : null;

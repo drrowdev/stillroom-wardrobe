@@ -4,7 +4,7 @@ import { assertLoopbackUrl, createServedDiagnostics, servedCode } from '../../sc
 import { isMain } from '../../scripts/quality/files.mjs';
 import { readJson, readBounded } from '../../supabase/functions/analyze-clothing/protocol.ts';
 import { jpegHeaderFixture, joinBytes, exifSegment } from '../fixtures/jpeg-helpers.ts';
-import { aiClients, aiStatus, aiControl, requireReady, AI_IDS, beginArgs } from './ai-controls.sessions.mjs';
+import { aiClients, aiStatus, aiControl, requireReady, AI_IDS, AI_POLICY, beginArgs } from './ai-controls.sessions.mjs';
 import { requireEvidence } from './preservation.sessions.mjs';
 
 export const analysisId = (label, n) => {
@@ -39,7 +39,7 @@ export async function analysisRequest(origin, env, owner, n, options = {}) {
       method: options.method ?? 'POST', redirect: 'error', cache: 'no-store', signal,
       headers: { Authorization: 'Bearer '.concat(owner.token), apikey: env.SUPABASE_PUBLISHABLE_KEY,
         'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': id, 'X-Stillroom-Draft-Id': id,
-        'X-Stillroom-Generation': '1', ...options.headers },
+        'X-Stillroom-Generation': '1', 'X-Stillroom-AI-Budget-Contract': '2', ...options.headers },
       ...(['GET', 'OPTIONS'].includes(options.method) ? {} : { body: options.body ?? jpegHeaderFixture() }),
     });
     observedResponse(record, response);
@@ -84,8 +84,8 @@ export async function baseline(client, owners) {
   for (const owner of owners) {
     equal(await analysisStatus(client, owner, AI_IDS[owner.label].ready), { code: 'UNAVAILABLE' });
     const status = await aiStatus(client, owner);
-    requireEvidence(status.usage.accountedMicro === (owner.label === 'A' ? '16001' : '0'));
-    requireEvidence(owner.label === 'A' ? status.usage.warning === true : status.usage.requestsLastHour === 3);
+    requireEvidence(status.budget.usedMicro === (owner.label === 'A' ? '16001' : AI_POLICY.B.readyBill));
+    requireEvidence(status.budget.warning === true);
   }
   return ready;
 }

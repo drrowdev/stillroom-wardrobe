@@ -350,7 +350,8 @@ describe('stylist handler across the manifest cutover (RAIN1)', () => {
   const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service',
     azure: { apiKey: 'fictional-azure' } };
   const policy = (manifestId: string) => ({ code: 'OK', consent: { enabled: true, noticeRevision: 1 }, policy: { activated: true,
-    noticeRevision: 1, manifestId, modelId: STYLIST_MODEL, maxRequestMicro: '200000' } });
+    noticeRevision: 1, manifestId, modelId: STYLIST_MODEL, maxRequestMicro: '200000' },
+  budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false } });
   function backend(manifestId: string, items: StylistItem[]) {
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -364,7 +365,7 @@ describe('stylist handler across the manifest cutover (RAIN1)', () => {
     return calls;
   }
   const post = (value: unknown) => new Request('http://127.0.0.1:54321/functions/v1/stylist-chat', { method: 'POST',
-    headers: { Authorization: 'Bearer fictional.jwt.token', 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
+    headers: { Authorization: 'Bearer fictional.jwt.token'    , 'X-Stillroom-AI-Budget-Contract': '2', 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
   const message = { requestId: REQUEST, message: 'Something for the office', history: [], occasion: 'business', season: 'autumn',
     weather: rainy };
   const transportFor = () => {

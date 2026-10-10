@@ -321,7 +321,9 @@ export function normalClient(env, phaseSignal) {
     const response = await fetch(base + route, {
       method, cache: 'no-store', redirect: 'error',
       signal: phaseSignal ? AbortSignal.any([phaseSignal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
+      // BUDGET1: ordinary-session RPCs select the shared-budget contract; a database without it ignores the header.
       headers: { apikey: key, ...(token ? { Authorization: 'Bearer ' + token } : {}),
+        ...(route.startsWith('/rest/v1/rpc/') ? { 'X-Stillroom-AI-Budget-Contract': '2' } : {}),
         ...(body === undefined ? {} : { 'Content-Type': binary ? 'image/jpeg' : 'application/json' }), ...headers },
       ...(body === undefined ? {} : { body: binary ? body : JSON.stringify(body) }),
     });

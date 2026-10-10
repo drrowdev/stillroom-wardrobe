@@ -58,8 +58,7 @@ export function StylistScreen({ store, images, online, t, timeZone, weather, wea
   const usable = useMemo(() => wardrobe.items ? [...wardrobe.items.keys()].some((id) => checkIdea([id], wardrobe.items!, ownerId, null) === 'ok') : true,
     [wardrobe.items, ownerId]);
   const limits = status ? stylistLimits(status) : null;
-  const limitLine = limits?.own ? 'stylist.limitOwn' : limits?.shared ? 'stylist.limitShared' : limits?.ownWarning ? 'stylist.warning'
-    : limits?.sharedWarning ? 'stylist.sharedWarning' : null;
+  const limitLine = limits?.reached ? 'stylist.limitShared' : limits?.warning ? 'stylist.sharedWarning' : null;
   // A refusal that the limit line already explains isn't repeated.
   const error = state.error && state.error.key !== limitLine ? state.error : null;
   const pending = state.pending !== null;

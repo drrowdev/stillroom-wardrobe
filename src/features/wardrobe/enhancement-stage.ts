@@ -120,12 +120,12 @@ export type StageDeps = {
 };
 /**
  * Why a sent request ended without a cleaned-up photo, for callers that schedule requests (BULK2). Separate from `line`,
- * which is the visible copy. Present only when a request was sent: `busy` is a taken provider slot (retryable), `rate`
- * and `allowance` are the hourly and monthly limits, `ambiguous` may have reached the provider (never resent
+ * which is the visible copy. Present only when a request was sent: `busy` is a taken provider slot refused before any
+ * claim (retryable), `allowance` is the monthly budget, `ambiguous` may have reached the provider (never resent
  * automatically), `skipped` is the user's Skip and `failed` covers every other definite failure. `deferred` is the one
  * reason without a sent request: the page was hidden at the send boundary, so the caller may run again once visible.
  */
-export type StageReason = 'busy' | 'rate' | 'allowance' | 'ambiguous' | 'filtered' | 'skipped' | 'failed' | 'deferred';
+export type StageReason = 'busy' | 'allowance' | 'ambiguous' | 'filtered' | 'skipped' | 'failed' | 'deferred';
 export type StageResult =
   | { kind: 'enhanced'; photo: PreparedPhoto; requestId: string; expireAt: number; metrics: CleanupMetrics }
   | { kind: 'available' }
@@ -134,7 +134,6 @@ export type StageResult =
 function reasonForCode(code: Exclude<EnhanceCode, 'OK'>): StageReason {
   switch (code) {
     case 'BUSY': return 'busy';
-    case 'RATE_LIMIT': return 'rate';
     case 'ALLOWANCE': return 'allowance';
     case 'TIMEOUT': return 'ambiguous';
     case 'FILTERED': return 'filtered';

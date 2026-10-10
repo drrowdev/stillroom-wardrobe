@@ -22,9 +22,8 @@ const raw = (over: Record<string, unknown> = {}, policy: Record<string, unknown>
   code: 'OK', period: '2026-10', serverTimeMs: SERVER,
   consent: { enabled: true, noticeRevision: CLEANUP_NOTICE_REVISION, consentedAt: '2026-09-30T00:00:00Z' },
   policy: { activated: true, noticeRevision: CLEANUP_NOTICE_REVISION, manifestId: CLEANUP_MANIFEST, modelId: ENHANCE_MODEL,
-    maxRequestMicro: '300000', enhanceAllowanceMicro: '5000000', totalAllowanceMicro: '20000000', maxRequestsPerHour: 20,
-    providerAvailable: true, ...policy },
-  usage: { enhanceMicro: '0', totalMicro: '0', enhanceLastHour: 0, warning: false }, ...over,
+    maxRequestMicro: '300000', providerAvailable: true, ...policy },
+  budget: { monthlyAllowanceMicro: '20000000', usedMicro: '0', remainingMicro: '20000000', warning: false }, ...over,
 });
 const status = (over?: Record<string, unknown>, policy?: Record<string, unknown>): EnhanceStatus => {
   const parsed = parseEnhanceStatus(raw(over, policy));
@@ -376,7 +375,6 @@ describe('the stage core', () => {
 describe('stage outcome reasons', () => {
   const codes: [EnhanceResponse & { kind: 'code' }, string, string][] = [
     [{ kind: 'code', code: 'BUSY' }, 'generic', 'busy'],
-    [{ kind: 'code', code: 'RATE_LIMIT' }, 'generic', 'rate'],
     [{ kind: 'code', code: 'ALLOWANCE' }, 'allowance', 'allowance'],
     [{ kind: 'code', code: 'TIMEOUT' }, 'generic', 'ambiguous'],
     [{ kind: 'code', code: 'FILTERED' }, 'generic', 'filtered'],
@@ -455,6 +453,35 @@ describe('the clean-up transport send boundary', () => {
       await expect(sending).rejects.toBeInstanceOf(EnhanceNotSentError);
       expect(checks).toEqual(['refused']);
       expect(fetcher).not.toHaveBeenCalled();
+    } finally { vi.restoreAllMocks(); vi.unstubAllGlobals(); }
+  });
+  it('sends the budget contract on the status read, consent write and photo POST, and refuses the old quota shape', async () => {
+    const owner = '10000000-0000-4000-8000-000000000001';
+    const scope = { ownerId: owner, epoch: 1, signal: new AbortController().signal };
+    const client = createClient<Database>('http://127.0.0.1:54321', 'sb_publishable_test_only', {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+    const session: Session = { access_token: testAccessToken(owner), refresh_token: 'fictional-unit-refresh',
+      token_type: 'bearer', expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: owner, aud: 'authenticated', app_metadata: {}, user_metadata: {}, created_at: '2026-09-12T00:00:00Z' } };
+    vi.spyOn(client.auth, 'getSession').mockResolvedValue({ data: { session }, error: null });
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    try {
+      const enhancer = new EnhancementClient(client, { url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_test_only', version: 'test' }, scope);
+      fetcher.mockResolvedValueOnce(Response.json(raw()));
+      await enhancer.status();
+      fetcher.mockResolvedValueOnce(Response.json(raw()));
+      await enhancer.consent(true);
+      fetcher.mockResolvedValueOnce(Response.json({ code: 'FAILED' }, { status: 502 }));
+      await enhancer.enhance({ main: new Blob(['synthetic'], { type: 'image/jpeg' }) }, '11111111-1111-4111-8111-111111111111',
+        new AbortController().signal);
+      expect(fetcher.mock.calls.map(([, init]) => new Headers(init?.headers).get('X-Stillroom-AI-Budget-Contract'))).toEqual(['2', '2', '2']);
+      const legacy = { ...raw(), usage: { enhanceMicro: '0', totalMicro: '0', enhanceLastHour: 0, warning: false } } as Record<string, unknown>;
+      delete legacy.budget;
+      expect(parseEnhanceStatus(legacy)).toBeNull();
+      expect(parseEnhanceStatus({ ...raw(), policy: { ...(raw().policy), enhanceAllowanceMicro: '1', totalAllowanceMicro: '2', maxRequestsPerHour: 3 } })).toBeNull();
+      expect(parseEnhanceStatus({ ...raw(), budget: { ...raw().budget, remainingMicro: '1' } })).toBeNull();
     } finally { vi.restoreAllMocks(); vi.unstubAllGlobals(); }
   });
 });

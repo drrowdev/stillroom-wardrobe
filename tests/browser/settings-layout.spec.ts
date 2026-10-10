@@ -39,7 +39,7 @@ function sheetTexts(feature: Feature, language: Language): string[] {
       'stylistC.trainingNotice', 'stylistC.retention', 'aiC.chargesTitle', 'stylistC.chargeNotice', 'stylistC.usageNotice', 'stylistC.optOut'],
   };
   const summary = feature === 'analysis' ? [text('aiC.offSummary', language, { limit: usdCents('100000000', language, 'limit') })]
-    : feature === 'stylist' ? [text('stylistC.offSummary', language, { stylistLimit: usdCents('5000000', language, 'limit'), limit: usdCents('17940000', language, 'limit') })]
+    : feature === 'stylist' ? [text('stylistC.offSummary', language, { stylistLimit: usdCents('17940000', language, 'limit'), limit: usdCents('17940000', language, 'limit') })]
       : [];
   return [...summary, ...keys[feature].map((key) => text(key, language))];
 }

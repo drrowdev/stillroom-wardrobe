@@ -10,7 +10,7 @@ export const BUSY_DELAYS_MS = [20_000, 40_000, 80_000] as const;
 export const PHOTO_ESTIMATE_MICRO = 40_000n;
 const notSent: StageResult = Object.freeze({ kind: 'skipped', line: 'none', requestId: null });
 
-export type Halt = 'rate' | 'allowance';
+export type Halt = 'allowance';
 export type Refusal = 'stopped' | 'paused' | Halt;
 export type QueueSnapshot = Readonly<{
   stopped: boolean; paused: boolean; hidden: boolean;
@@ -93,7 +93,8 @@ export class BulkQueue {
   }
   /**
    * The clean-up slot around one stage run. A refused run sends nothing and keeps the cut-out. `busy` keeps the slot
-   * and the same input through the bounded backoff; `rate` and `allowance` stop automatic clean-ups for the batch.
+   * and the same input through the bounded backoff, and only for a refusal before any claim; `allowance` stops automatic
+   * clean-ups for the batch.
    * `run` checks `dispatchable` right before it sends. Hiding the page cancels a waiting backoff; once visible, the
    * same input is sent again only if the run is still eligible.
    */
@@ -113,7 +114,7 @@ export class BulkQueue {
         if (result.kind !== 'skipped' || !result.reason) return result;
         try {
           if (result.reason === 'deferred') { if (await resume()) continue; return notSent; }
-          if (result.reason === 'rate' || result.reason === 'allowance') { this.halt('cleanup', result.reason); return result; }
+          if (result.reason === 'allowance') { this.halt('cleanup', result.reason); return result; }
           const delay = this.delays[attempt++];
           if (result.reason !== 'busy' || delay === undefined) return result;
           try { await this.sleep(delay, AbortSignal.any([waited, this.hideController.signal])); }
@@ -195,8 +196,7 @@ export class BulkQueue {
         return blocked;
       },
       resolved: (code?: string) => {
-        if (code === 'RATE_LIMIT') this.halt('analysis', 'rate');
-        else if (code === 'ALLOWANCE') this.halt('analysis', 'allowance');
+        if (code === 'ALLOWANCE') this.halt('analysis', 'allowance');
         if (ticket.state !== 'done') free();
       },
       abandon: () => {

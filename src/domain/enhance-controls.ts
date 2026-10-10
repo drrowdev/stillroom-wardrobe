@@ -1,6 +1,7 @@
 // BG2b-2: the owner's photo-enhancement status as the client sees it. Pure parsing and typing only: nothing here
 // authorises a request, and the server's enhance_status/enhance_claim checks stay authoritative.
 import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_MODEL, ENHANCE_REVIEW_EXPIRES } from './enhancement';
+import { parseOptionalAiBudget, type AiBudget } from './ai-budget';
 
 type JsonObject = Record<string, unknown>;
 const record = (value: unknown): value is JsonObject => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -15,45 +16,44 @@ export const enhanceStatusCodes = ['OK', 'UNAVAILABLE', 'UNCONFIGURED', 'INACTIV
 export type EnhanceStatusCode = (typeof enhanceStatusCodes)[number];
 export type EnhancePolicy = {
   activated: boolean; noticeRevision: number | null; manifestId: string; modelId: string | null; maxRequestMicro: string;
-  enhanceAllowanceMicro: string; totalAllowanceMicro: string; maxRequestsPerHour: number | null; providerAvailable: boolean;
+  providerAvailable: boolean;
 };
 export type EnhanceStatus = {
   code: EnhanceStatusCode; serverTimeMs: number | null;
   consent: { enabled: boolean; noticeRevision: number | null } | null;
   policy: EnhancePolicy | null;
-  usage: { enhanceMicro: string; totalMicro: string; enhanceLastHour: number; warning: boolean } | null;
+  budget: AiBudget | null;
 };
 
 /** Parses the closed `enhance_status` reply; null for anything else. UNAVAILABLE carries only its code. */
 export function parseEnhanceStatus(value: unknown): EnhanceStatus | null {
   if (exactKeys(value, ['code'])) {
-    return value.code === 'UNAVAILABLE' ? { code: 'UNAVAILABLE', serverTimeMs: null, consent: null, policy: null, usage: null } : null;
+    return value.code === 'UNAVAILABLE' ? { code: 'UNAVAILABLE', serverTimeMs: null, consent: null, policy: null, budget: null } : null;
   }
-  if (!exactKeys(value, ['code', 'period', 'serverTimeMs', 'consent', 'policy', 'usage'])) return null;
+  if (!exactKeys(value, ['code', 'period', 'serverTimeMs', 'consent', 'policy', 'budget'])) return null;
   const code = enhanceStatusCodes.find((entry) => entry === value.code);
   if (!code || code === 'UNAVAILABLE' || typeof value.period !== 'string' || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value.period)
     || !count(value.serverTimeMs)) return null;
-  const c = value.consent, p = value.policy, u = value.usage;
+  const c = value.consent, p = value.policy;
+  const budget = parseOptionalAiBudget(value.budget);
   if (!exactKeys(c, ['enabled', 'noticeRevision', 'consentedAt']) || typeof c.enabled !== 'boolean'
     || !(c.noticeRevision === null || revision(c.noticeRevision)) || c.enabled !== (c.noticeRevision !== null)
     || !(c.consentedAt === null || typeof c.consentedAt === 'string') || (c.consentedAt === null) !== (c.noticeRevision === null)) return null;
-  if (!exactKeys(u, ['enhanceMicro', 'totalMicro', 'enhanceLastHour', 'warning']) || !micro(u.enhanceMicro) || !micro(u.totalMicro)
-    || !count(u.enhanceLastHour) || typeof u.warning !== 'boolean') return null;
+  if (!budget.ok) return null;
   let policy: EnhancePolicy | null = null;
   if (p !== null) {
-    if (!exactKeys(p, ['activated', 'noticeRevision', 'manifestId', 'modelId', 'maxRequestMicro', 'enhanceAllowanceMicro',
-      'totalAllowanceMicro', 'maxRequestsPerHour', 'providerAvailable']) || typeof p.activated !== 'boolean'
+    if (!exactKeys(p, ['activated', 'noticeRevision', 'manifestId', 'modelId', 'maxRequestMicro', 'providerAvailable'])
+      || typeof p.activated !== 'boolean'
       || !(p.noticeRevision === null || revision(p.noticeRevision)) || typeof p.manifestId !== 'string'
-      || !(p.modelId === null || typeof p.modelId === 'string') || !micro(p.maxRequestMicro) || !micro(p.enhanceAllowanceMicro)
-      || !micro(p.totalAllowanceMicro) || !(p.maxRequestsPerHour === null || count(p.maxRequestsPerHour))
+      || !(p.modelId === null || typeof p.modelId === 'string') || !micro(p.maxRequestMicro)
       || typeof p.providerAvailable !== 'boolean') return null;
     policy = { activated: p.activated, noticeRevision: p.noticeRevision, manifestId: p.manifestId, modelId: p.modelId,
-      maxRequestMicro: p.maxRequestMicro, enhanceAllowanceMicro: p.enhanceAllowanceMicro, totalAllowanceMicro: p.totalAllowanceMicro,
-      maxRequestsPerHour: p.maxRequestsPerHour, providerAvailable: p.providerAvailable };
+      maxRequestMicro: p.maxRequestMicro, providerAvailable: p.providerAvailable };
   }
   if ((code === 'OK' || code === 'INACTIVE' || code === 'CONSENT_REQUIRED') && policy === null) return null;
+  if (budget.budget === null && code !== 'UNCONFIGURED') return null;
   return { code, serverTimeMs: value.serverTimeMs, consent: { enabled: c.enabled, noticeRevision: c.noticeRevision }, policy,
-    usage: { enhanceMicro: u.enhanceMicro, totalMicro: u.totalMicro, enhanceLastHour: u.enhanceLastHour, warning: u.warning } };
+    budget: budget.budget };
 }
 
 /**

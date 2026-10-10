@@ -117,20 +117,19 @@ test.describe('ST1b stylist', () => {
     await expect(page.locator('#stylist-heading')).toBeFocused();
     await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.settings'));
     await expect(toggle(page, false)).toBeVisible();
-    await expect(card(page)).toContainText(text('aiF.upTo', 'en', { limit: '$5' }));
+    await expect(card(page)).toContainText(text('aiF.upTo', 'en', { limit: '$17.94' }));
     await card(page).getByText(text('aiF.about'), { exact: true }).click();
     for (const key of ['stylistC.fields', 'stylistC.azureNotice', 'stylistC.trainingNotice', 'stylistC.retention', 'stylistC.chargeNotice',
       'stylistC.usageNotice', 'stylistC.optOut'] as const) await expect(card(page)).toContainText(text(key));
     const bodies: unknown[] = [];
     page.on('request', (request) => { if (new URL(request.url()).pathname === '/rest/v1/rpc/stylist_set_consent') bodies.push(request.postDataJSON()); });
     await toggle(page, false).click();
-    await expect(sheet(page)).toContainText(text('stylistC.offSummary', 'en', { stylistLimit: '$5', limit: '$17.94' }));
+    await expect(sheet(page)).toContainText(text('stylistC.offSummary', 'en', { stylistLimit: '$17.94', limit: '$17.94' }));
     expect(bodies).toEqual([]);
     await sheet(page).getByRole('button', { name: text('aiC.enable'), exact: true }).click();
     await expect(toggle(page, true)).toBeVisible();
     await expect(sheet(page)).toHaveCount(0);
     await expect(toggle(page, true)).toBeFocused();
-    await expect(card(page)).toContainText(text('aiC.usage', 'en', { used: '$0.00', limit: '$5' }));
     expect(bodies).toEqual([{ p_enabled: true, p_notice_revision: 1 }]);
     expect(api.stylistControl.consent[owners.a]).toBe(1);
     await toggle(page, true).click();
@@ -240,19 +239,17 @@ test.describe('ST1b stylist', () => {
 
   test('shows each refusal plainly and keeps the typed text (M5)', async ({ page }) => {
     const { api } = await start(page, { setup: {}, consent: true });
-    api.stylistControl.replies.push({ status: 429, body: { code: 'RATE_LIMIT' } });
+    // Refused for the one monthly budget: every feature uses it, not only the stylist.
+    api.stylistControl.replies.push((_body, owner) => {
+      api.stylistControl.setup[owner] = { ...api.stylistControl.setup[owner], totalMicro: '17900000' };
+      return { status: 402, body: { code: 'ALLOWANCE' } };
+    });
     await ask(page, 'First try');
-    await expect(page.getByRole('alert')).toHaveText(text('stylist.rate'));
     await expect(message(page)).toHaveValue('First try');
     await expect(page.locator('.stylist-turn')).toHaveCount(0);
-    // Refused for the shared limit: photo analysis used it, not the stylist.
-    api.stylistControl.replies.push({ status: 402, body: { code: 'ALLOWANCE' } });
-    api.stylistControl.setup[owners.a] = { ...api.stylistControl.setup[owners.a], totalMicro: '17900000' };
-    await sendButton(page).click();
     await expect(page.getByText(text('stylist.limitShared'), { exact: true })).toHaveCount(1);
     await expect(page.getByRole('alert')).toHaveCount(0);
     await expect(sendButton(page)).toBeDisabled();
-    await expect(page.getByText(text('stylist.limitOwn'), { exact: true })).toHaveCount(0);
     // Then the stylist is paused after a failure.
     api.stylistControl.setup[owners.a] = { configured: true, activated: true };
     await page.evaluate(() => dispatchEvent(new Event('focus')));

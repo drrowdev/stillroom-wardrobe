@@ -529,7 +529,7 @@ describe('AI status phases', () => {
     for (const code of aiCodes) {
       expect(phaseForCode(code)).toBe(off.includes(code) ? 'off' : code === 'ALLOWANCE' ? 'limit' : 'failed');
     }
-    expect(phaseForCode('RATE_LIMIT')).toBe('failed');
+    expect(phaseForCode('TIMEOUT')).toBe('failed');
   });
   it('maps every terminal reason to the neutral failure', () => {
     for (const reason of terminalReasons) expect(phaseForTerminal(reason)).toBe('failed');
@@ -551,7 +551,7 @@ describe('AI status phases', () => {
     expect(aiPhase({ ...base, status: 'idle', code: 'CONSENT_REQUIRED' })).toBe('off');
     expect(aiPhase({ ...base, status: 'idle', code: 'ALLOWANCE' })).toBe('limit');
     expect(aiPhase({ ...base, status: 'idle' })).toBe('none');
-    expect(aiPhase({ ...base, status: 'failed', code: 'RATE_LIMIT' })).toBe('failed');
+    expect(aiPhase({ ...base, status: 'failed', code: 'TIMEOUT' })).toBe('failed');
     expect(aiPhase({ ...base, status: 'failed', reason: 'EXPIRED', code: 'ALLOWANCE' })).toBe('failed');
     expect(aiPhase({ ...base, status: 'expired' })).toBe('failed');
   });

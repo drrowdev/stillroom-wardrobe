@@ -181,8 +181,6 @@ async function main() {
       && before.ai_usage.every((u) => !['held', 'reserved'].includes(u.charge_state))
       && before.ai_usage_evidence.length === 0 && before.ai_analysis_attestations.length === 0);
     requireEvidence(owners.every((o) => before.ai_controls.some((c) => c.owner_id === o.uid && c.execution_manifest_id === null)));
-    // B's three existing admissions must remain in the rate window throughout the bounded rehearsal.
-    requireEvidence(before.ai_usage.filter((u) => u.owner_id === owners[1].uid && Date.parse(u.created_at) > Date.now() - 2_400_000).length === 3);
     const columns = Object.keys(before.ai_controls[0]).filter((c) => c !== 'owner_id');
     requireEvidence(columns.every((c) => /^[a-z_]+$/.test(c)));
     const ownerWhere = `owner_id in (${owners.map((o) => literal(o.uid)).join(',')})`;
@@ -426,7 +424,7 @@ async function main() {
       const old = await client.rpc(owner, 'ai_status', {});
       await finish(owner, 11, analysisUsage, 'USAGE_ONLY');
       const after = await client.rpc(owner, 'ai_status', {});
-      requireEvidence(BigInt(old.usage.accountedMicro) - BigInt(after.usage.accountedMicro) === 4097351n);
+      requireEvidence(BigInt(old.budget.usedMicro) - BigInt(after.budget.usedMicro) === 4097351n);
       for (const n of [12, 13]) {
         if (n === 13) await finish(owner, n, analysisUsage, 'USAGE_ONLY');
         await bill(owner, n, 500);

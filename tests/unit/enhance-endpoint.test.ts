@@ -94,16 +94,18 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
   const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service',
     azure: { apiKey: 'fictional-azure-image' } };
   const status = { code: 'OK', consent: { enabled: true, noticeRevision: 2 }, policy: { activated: true, noticeRevision: 2,
-    manifestId: CLEANUP_MANIFEST, modelId: ENHANCE_MODEL, maxRequestMicro: ENHANCE_RESERVATION_MICRO, providerAvailable: true } };
+    manifestId: CLEANUP_MANIFEST, modelId: ENHANCE_MODEL, maxRequestMicro: ENHANCE_RESERVATION_MICRO, providerAvailable: true },
+  budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false } };
   const accounting = { basis: 'estimated', amountMicro: '71200', currency: 'USD' };
-  type Call = { url: string; body: Record<string, unknown> | null; auth: string | null; at: number };
+  type Call = { url: string; body: Record<string, unknown> | null; auth: string | null; at: number; contract: string | null };
   let clock = 0;
   function backend(options: { status?: unknown; claim?: Record<string, unknown>; finish?: Record<string, unknown>;
     finishGate?: Promise<void> } = {}) {
     const calls: Call[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const parsed = typeof init.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null;
-      calls.push({ url, body: parsed, auth: new Headers(init.headers).get('Authorization'), at: clock++ });
+      calls.push({ url, body: parsed, auth: new Headers(init.headers).get('Authorization'), at: clock++,
+        contract: new Headers(init.headers).get('X-Stillroom-AI-Budget-Contract') });
       if (url.endsWith('/auth/v1/user')) return Response.json({ id: OWNER, role: 'authenticated', is_anonymous: false });
       if (url.endsWith('/rpc/enhance_status')) return Response.json(options.status ?? status);
       if (url.endsWith('/rpc/enhance_claim')) return Response.json(options.claim ?? { code: 'OK', claimed: true,
@@ -124,7 +126,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     return { transport, sent };
   };
   const post = (bytes: Uint8Array = INPUT, extra: Record<string, string> = {}) => new Request('http://127.0.0.1:54321/functions/v1/enhance-photo', {
-    method: 'POST', headers: { Authorization: 'Bearer fictional-user', 'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': REQUEST, ...extra },
+    method: 'POST', headers: { Authorization: 'Bearer fictional-user', 'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': REQUEST, 'X-Stillroom-AI-Budget-Contract': '2', ...extra },
     body: bytes as BodyInit });
   const finishBody = (calls: Call[]) => calls.find((call) => call.url.endsWith('/rpc/enhance_finish'))?.body;
 
@@ -202,7 +204,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
   });
 
   it('passes admission refusals through without a provider call', async () => {
-    for (const code of ['ALLOWANCE', 'RATE_LIMIT', 'UNAVAILABLE', 'BUSY', 'TERMINAL', 'PROBE_LIMIT']) {
+    for (const code of ['ALLOWANCE', 'UNAVAILABLE', 'BUSY', 'TERMINAL', 'PROBE_LIMIT']) {
       backend({ claim: { code, claimed: false } });
       const { transport } = provider(() => Response.json(imageBody()));
       const response = await createEnhanceHandler(config, register, transport)(post());
@@ -269,7 +271,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
 
   it('suppresses H2 when finish reports an anomaly, expiry, revocation or conflict', async () => {
     for (const [finished, code] of [['USAGE_ANOMALY', 'FAILED'], ['EXPIRED', 'TIMEOUT'], ['CONSENT_REQUIRED', 'CONSENT_REQUIRED'],
-      ['UNAVAILABLE', 'UNAVAILABLE'], ['USAGE_CONFLICT', 'FAILED'], ['BUSY', 'BUSY']] as const) {
+      ['UNAVAILABLE', 'UNAVAILABLE'], ['USAGE_CONFLICT', 'FAILED'], ['BUSY', 'FAILED']] as const) {
       backend({ finish: { code: finished, accounting } });
       const { transport } = provider(() => Response.json(imageBody()));
       const response = await createEnhanceHandler(config, register, transport)(post());
@@ -354,6 +356,52 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     expect(transport).not.toHaveBeenCalled();
     expect(finishBody(calls)).toMatchObject({ p_code: 'NOT_DISPATCHED', p_usage: null });
   });
+  it('only a refusal before the claim is BUSY: contention while settling is FAILED after exactly one provider call', async () => {
+    const calls = backend({ finish: { code: 'BUSY' } });
+    const { transport } = provider(() => Response.json(imageBody()));
+    const response = await createEnhanceHandler(config, register, transport)(post());
+    expect([response.status, await response.json()]).toEqual([502, { code: 'FAILED' }]);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(calls.filter((call) => call.url.endsWith('/rpc/enhance_claim'))).toHaveLength(1);
+    expect(calls.filter((call) => call.url.endsWith('/rpc/enhance_finish'))).toHaveLength(1);
+    vi.unstubAllGlobals();
+    const refused = backend({ claim: { code: 'BUSY', claimed: false } });
+    const none = provider(() => Response.json(imageBody()));
+    const busy = await createEnhanceHandler(config, register, none.transport)(post());
+    expect([busy.status, await busy.json()]).toEqual([503, { code: 'BUSY' }]);
+    expect(none.transport).not.toHaveBeenCalled();
+    expect(refused.some((call) => call.url.endsWith('/rpc/enhance_finish'))).toBe(false);
+  });
+
+  it('refuses a missing or unsupported budget contract and an old-shape status before any claim', async () => {
+    for (const contract of [undefined, '1', '3']) {
+      const calls = backend();
+      const { transport } = provider(() => Response.json(imageBody()));
+      const request = post(INPUT, contract === undefined ? {} : { 'X-Stillroom-AI-Budget-Contract': contract });
+      if (contract === undefined) request.headers.delete('X-Stillroom-AI-Budget-Contract');
+      const response = await createEnhanceHandler(config, register, transport)(request);
+      expect([response.status, await response.json()]).toEqual([403, { code: 'UNAVAILABLE' }]);
+      expect(calls).toHaveLength(0);
+      expect(transport).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    }
+    const old = Object.fromEntries(Object.entries(status).filter(([key]) => key !== 'budget'));
+    for (const legacy of [old, { ...old, usage: { enhanceMicro: '0', totalMicro: '0', enhanceLastHour: 0, warning: false } },
+      { ...status, budget: null }]) {
+      const calls = backend({ status: legacy });
+      const { transport } = provider(() => Response.json(imageBody()));
+      const response = await createEnhanceHandler(config, register, transport)(post());
+      expect([response.status, await response.json()]).toEqual([403, { code: 'UNAVAILABLE' }]);
+      expect(calls.some((call) => call.url.endsWith('/rpc/enhance_claim'))).toBe(false);
+      expect(transport).not.toHaveBeenCalled();
+      vi.unstubAllGlobals();
+    }
+    const calls = backend();
+    const { transport } = provider(() => Response.json(imageBody()));
+    await createEnhanceHandler(config, register, transport)(post());
+    expect(calls.filter((call) => !call.url.endsWith('/auth/v1/user')).map((call) => call.contract)).toEqual(['2', '2', '2']);
+  });
+
   it('refuses unknown request headers in preflight and any query string', async () => {
     const options = new Request('http://127.0.0.1:54321/functions/v1/enhance-photo', { method: 'OPTIONS', headers: {
       Origin: 'http://127.0.0.1:5173', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'x-stillroom-draft-id' } });
@@ -374,7 +422,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     expect(Object.is(registered[0], observed[0])).toBe(true);
     expect(transport).toHaveBeenCalledTimes(1);
     expect(calls.filter((call) => call.url.endsWith('/rpc/enhance_finish'))).toHaveLength(1);
-    for (const code of ['ALLOWANCE', 'RATE_LIMIT', 'BUSY']) {
+    for (const code of ['ALLOWANCE', 'BUSY']) {
       vi.unstubAllGlobals();
       backend({ claim: { code, claimed: false } });
       await createEnhanceHandler(config, register, transport)(post());
@@ -447,7 +495,8 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     const SECRET = 'p'.repeat(43);
     const PROBE = '33333333-3333-4333-8333-333333333333';
     const probeConfig = { ...config, probeToken: SECRET };
-    const inactive = { code: 'INACTIVE', consent: { enabled: false, noticeRevision: null }, policy: { ...status.policy, activated: false } };
+    const inactive = { code: 'INACTIVE', consent: { enabled: false, noticeRevision: null }, policy: { ...status.policy, activated: false },
+      budget: status.budget };
     const probeHeaders = { 'X-Stillroom-Probe-Authorisation': PROBE, 'X-Stillroom-Probe-Token': SECRET };
 
     it('claims with the authorisation only while ordinary enhancement is off, whatever the consent', async () => {

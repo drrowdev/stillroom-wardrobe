@@ -178,12 +178,18 @@ export function controlsDigest() {
 
 // ---- D1 allocation receipt (coordinator SQL, not verifiable here). ----
 const RECEIPT_KEYS = ['kind', 'ownerRef', 'allocationMicro', 'reply', 'readBack', 'allocatedAt', 'approvalRef'];
+// v1 (historical) read back a separate stylist sub-limit that had to stay within the new total. v2 follows BUDGET1: the one
+// monthly budget is the only limit, so the read-back is that amount alone and no sub-limit is read, clamped or invented.
+export const RECEIPT_KINDS = Object.freeze({
+  'stylist-probe-allocation-v1': ['monthlyAllowanceMicro', 'stylistMonthlyAllowanceMicro'],
+  'stylist-probe-allocation-v2': ['monthlyAllowanceMicro'],
+});
 export function validateReceipt(value) {
-  requireThat(exact(value, RECEIPT_KEYS) && value.kind === 'stylist-probe-allocation-v1' && hex64(value.ownerRef)
+  const readBackKeys = value !== null && typeof value === 'object' && Object.hasOwn(RECEIPT_KINDS, value.kind) ? RECEIPT_KINDS[value.kind] : null;
+  requireThat(readBackKeys !== null && exact(value, RECEIPT_KEYS) && hex64(value.ownerRef)
     && micro(value.allocationMicro) && exact(value.reply, ['code', 'previousTotalMicro', 'newTotalMicro']) && value.reply.code === 'OK'
     && micro(value.reply.previousTotalMicro) && micro(value.reply.newTotalMicro)
-    && exact(value.readBack, ['monthlyAllowanceMicro', 'stylistMonthlyAllowanceMicro'])
-    && micro(value.readBack.monthlyAllowanceMicro) && micro(value.readBack.stylistMonthlyAllowanceMicro)
+    && exact(value.readBack, readBackKeys) && readBackKeys.every((key) => micro(value.readBack[key]))
     && isoTime(value.allocatedAt)
     && typeof value.approvalRef === 'string'
     && /^https:\/\/github\.com\/drrowdev\/stillroom-wardrobe\/(?:issues|pull)\/[1-9][0-9]{0,6}#issuecomment-[1-9][0-9]{0,15}$/.test(value.approvalRef),
@@ -191,10 +197,9 @@ export function validateReceipt(value) {
   const allocation = BigInt(value.allocationMicro), previous = BigInt(value.reply.previousTotalMicro), next = BigInt(value.reply.newTotalMicro);
   requireThat(allocation >= BigInt(PROBE.minAllocationMicro) && allocation <= BigInt(PROBE.maxAllocationMicro)
     && previous - allocation === next && BigInt(value.readBack.monthlyAllowanceMicro) === next
-    && BigInt(value.readBack.stylistMonthlyAllowanceMicro) <= next, 'RECEIPT_ARITHMETIC');
+    && (readBackKeys.length === 1 || BigInt(value.readBack.stylistMonthlyAllowanceMicro) <= next), 'RECEIPT_ARITHMETIC');
   return value;
-}
-/**
+}/**
  * One canonical run record per hosted allocation transition: owner, UTC month and the before/after totals. A second
  * receipt for the same transition (a copy, another directory, another process) maps to the same record and is refused.
  */

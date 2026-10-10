@@ -85,7 +85,7 @@ export const RUN_LIFETIME_MS = TRYON_LIMITS.chainMinutes * 60_000;
 const failureOf = (code: Exclude<TryOnCode, 'OK'>): FailureKind => {
   switch (code) {
     case 'FILTERED': return 'filtered';
-    case 'RATE_LIMIT': case 'BUSY': return 'busy';
+    case 'BUSY': return 'busy';
     case 'ALLOWANCE': return 'allowance';
     case 'FAILED': case 'TIMEOUT': case 'OUTPUT_REJECTED': return 'failed';
     case 'CHAIN_MISMATCH': return 'mismatch';

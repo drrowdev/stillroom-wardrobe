@@ -14,8 +14,8 @@ function raw(code = 'OK', enabled = true) {
   return { code, period: '2026-10', serverTimeMs: STYLIST_REVIEW_EXPIRES - 86_400_000,
     consent: { enabled, noticeRevision: enabled ? 1 : null, consentedAt: enabled ? '2026-10-01T00:00:00Z' : null },
     policy: code === 'UNCONFIGURED' ? null : { activated: true, noticeRevision: 1, manifestId: STYLIST_MANIFEST, modelId: STYLIST_MODEL,
-      maxRequestMicro: '129360', stylistAllowanceMicro: '5000000', totalAllowanceMicro: '17940000', maxRequestsPerHour: 20 },
-    usage: { stylistMicro: '0', totalMicro: '0', stylistLastHour: 0, warning: false } };
+      maxRequestMicro: '129360' },
+    budget: { monthlyAllowanceMicro: '17940000', usedMicro: '0', remainingMicro: '17940000', warning: false } };
 }
 const status = (code = 'OK', enabled = true) => parseStylistStatus(raw(code, enabled))!;
 function supabase() {
@@ -49,6 +49,7 @@ describe('ST1b stylist client', () => {
     const [url, init] = fetcher.mock.calls[0]!;
     expect(url).toBe(`${config.url}/rest/v1/rpc/stylist_status`);
     expect(init?.credentials).toBe('omit');
+    expect(new Headers(init?.headers).get('X-Stillroom-AI-Budget-Contract')).toBe('2');
   });
 
   it('sends the notice revision with consent and keeps unknown outcomes apart from refusals', async () => {
@@ -78,8 +79,12 @@ describe('ST1b stylist client', () => {
     await expect(stylist.chat(body)).resolves.toEqual({ code: 'OK', reply: 'Try these', outfits: [] });
     expect(fetcher.mock.calls[0]![0]).toBe(`${config.url}/functions/v1/stylist-chat`);
     expect(JSON.parse(String(fetcher.mock.calls[0]![1]?.body))).toEqual(body);
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'ALLOWANCE' }, { status: 429 }));
+    await expect(stylist.chat(body)).resolves.toEqual({ code: 'ALLOWANCE' });
+    // The retired hourly refusal is no longer a stylist code: anything outside the closed set is a failure.
     fetcher.mockResolvedValueOnce(Response.json({ code: 'RATE_LIMIT' }, { status: 429 }));
-    await expect(stylist.chat(body)).resolves.toEqual({ code: 'RATE_LIMIT' });
+    await expect(stylist.chat(body)).resolves.toEqual({ code: 'FAILED' });
+    expect(new Headers(fetcher.mock.calls[0]![1]?.headers).get('X-Stillroom-AI-Budget-Contract')).toBe('2');
     fetcher.mockRejectedValueOnce(new TypeError('network'));
     await expect(stylist.chat(body)).resolves.toEqual({ code: 'FAILED' });
   });

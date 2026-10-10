@@ -43,16 +43,16 @@ describe('UI1 feature switch', () => {
 
 describe('UI1 spending figures', () => {
   it('copies the analysis figures with the period its parser keeps, and none without a policy', () => {
-    const status = { policy: { monthlyAllowanceMicro: '5000000' }, usage: { accountedMicro: '1200000' }, serverTimeMs: MAR_10,
-      period: '2026-03' } as unknown as AiStatus;
+    const status = { budget: { monthlyAllowanceMicro: '5000000', usedMicro: '1200000', remainingMicro: '3800000', warning: false },
+      serverTimeMs: MAR_10, period: '2026-03' } as unknown as AiStatus;
     expect(analysisFigures(status)).toEqual({ usedMicro: '1200000', limitMicro: '5000000', serverTimeMs: MAR_10, period: '2026-03' });
-    expect(analysisFigures({ ...status, policy: null } as unknown as AiStatus)).toBeNull();
+    expect(analysisFigures({ ...status, budget: null } as unknown as AiStatus)).toBeNull();
   });
-  it('copies the shared total from the other statuses, and none without policy, usage or server time', () => {
-    const status = { policy: { totalAllowanceMicro: '5000000' }, usage: { totalMicro: '2500000' }, serverTimeMs: MAR_10 };
+  it('copies the one budget from the other statuses, and none without a budget or server time', () => {
+    const status = { budget: { monthlyAllowanceMicro: '5000000', usedMicro: '2500000', remainingMicro: '2500000', warning: false },
+      serverTimeMs: MAR_10 };
     expect(sharedFigures(status as never)).toEqual({ usedMicro: '2500000', limitMicro: '5000000', serverTimeMs: MAR_10 });
-    expect(sharedFigures({ ...status, usage: null } as never)).toBeNull();
-    expect(sharedFigures({ ...status, policy: null } as never)).toBeNull();
+    expect(sharedFigures({ ...status, budget: null } as never)).toBeNull();
     expect(sharedFigures({ ...status, serverTimeMs: null } as never)).toBeNull();
   });
   it('derives UTC periods and boundaries, including December', () => {

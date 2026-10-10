@@ -1,4 +1,5 @@
 import { assertSanitizedJpeg, readJpegHeader } from '../../../src/images/jpeg.ts';
+import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
 import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MANIFEST, AZURE_MODEL, AZURE_RESERVATION, AZURE_REVIEW_EXPIRES, AZURE_SETTINGS,
   type AzureConfig, type AzureTransport } from './azure-openai.ts';
 import {
@@ -10,11 +11,11 @@ export type HandlerConfig = { supabaseUrl: string; publicKey: string; serviceKey
 const statusCodes: Record<string, number> = {
   INVALID_INPUT: 400, UNAUTHENTICATED: 401, UNAVAILABLE: 403, CONSENT_REQUIRED: 403,
   CONFLICT: 409, ACTIVE_DRAFT: 409, TERMINAL: 409, TOO_LARGE: 413, UNSUPPORTED_MEDIA: 415,
-  RATE_LIMIT: 429, ALLOWANCE: 429, UNCONFIGURED: 503, INACTIVE: 503, CONFIG_CHANGED: 503,
+  ALLOWANCE: 429, UNCONFIGURED: 503, INACTIVE: 503, CONFIG_CHANGED: 503,
   ANALYSIS_FAILED: 502, TIMEOUT: 504,
 };
 const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info',
-  'x-stillroom-request-id', 'x-stillroom-draft-id', 'x-stillroom-generation'];
+  'x-stillroom-request-id', 'x-stillroom-draft-id', 'x-stillroom-generation', AI_BUDGET_CONTRACT_HEADER.toLowerCase()];
 function stageSignal(signal: AbortSignal, ms: number) { return AbortSignal.any([signal, AbortSignal.timeout(ms)]); }
 function closedCode(value: unknown): string {
   return typeof value === 'string' && Object.hasOwn(statusCodes, value) ? value : 'ANALYSIS_FAILED';
@@ -55,6 +56,7 @@ export function createHandler(config: HandlerConfig, azureTransport: AzureTransp
       const bearer = request.headers.get('Authorization') ?? '';
       if (!bearer.startsWith('Bearer ') || !/^[A-Za-z0-9._~+/-]{1,8192}={0,2}$/.test(bearer.slice(7))) return error('UNAUTHENTICATED');
       if (!serverConfig(config)) return error('UNCONFIGURED');
+      if (request.headers.get(AI_BUDGET_CONTRACT_HEADER) !== AI_BUDGET_CONTRACT) return error('UNAVAILABLE');
       const requestId = request.headers.get('X-Stillroom-Request-Id') ?? '';
       const draftId = request.headers.get('X-Stillroom-Draft-Id') ?? '';
       const generation = request.headers.get('X-Stillroom-Generation') ?? '';
@@ -75,7 +77,8 @@ export function createHandler(config: HandlerConfig, azureTransport: AzureTransp
         const response = await fetch(`${config.supabaseUrl}/rest/v1/rpc/${name}`, {
           method: 'POST', redirect: 'error', cache: 'no-store', signal: dbSignal,
           headers: { Authorization: service ? 'Bearer '.concat(config.serviceKey) : bearer,
-            apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json' },
+            apikey: service ? config.serviceKey : config.publicKey, 'Content-Type': 'application/json',
+            [AI_BUDGET_CONTRACT_HEADER]: AI_BUDGET_CONTRACT },
           body: JSON.stringify(body),
         });
         const result = await readJson(response, 32768, dbSignal);
@@ -104,6 +107,8 @@ export function createHandler(config: HandlerConfig, azureTransport: AzureTransp
       const imageHash = await sha256(image);
       const preflight = await rpc('ai_status', {});
       if (preflight.code !== 'OK') return error(closedCode(preflight.code));
+      // A database that ignored the contract header answers in the old shape: refused before any claim.
+      if (parseAiBudget(preflight.budget) === null) return error('UNAVAILABLE');
       if (!object(preflight.policy) || preflight.policy.activated !== true) return error('INACTIVE');
       if (!object(preflight.consent) || preflight.consent.enabled !== true
         || !Number.isInteger(preflight.policy.noticeRevision) || Number(preflight.policy.noticeRevision) < 1

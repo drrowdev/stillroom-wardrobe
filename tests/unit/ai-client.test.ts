@@ -13,8 +13,8 @@ function status() {
     consent: { enabled: true, noticeRevision: 2, consentedAt: '2026-09-12T00:00:00Z', profileVersion: '1' },
     policy: { activated: true, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 1, noticeRevision: 2,
       executionManifestId: 'azure-eu-terra-devtest-v1',
-      maxRequestMicro: '4097351', monthlyAllowanceMicro: '100000000', maxRequestsPerHour: 200, resultTtlSeconds: 3600 },
-    usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } };
+      maxRequestMicro: '4097351', resultTtlSeconds: 3600 },
+    budget: { monthlyAllowanceMicro: '100000000', usedMicro: '0', remainingMicro: '100000000', warning: false } };
 }
 function fixture() {
   const abort = new AbortController(), scope = { ownerId: owner, epoch: 1, signal: abort.signal };
@@ -275,10 +275,26 @@ describe('status validation and current policy', () => {
   it('rejects unsafe numeric money, bad counters and extra fields', () => {
     const good = status();
     expect(parseAiStatus(good)).not.toBeNull();
-    expect(parseAiStatus({ ...good, usage: { ...good.usage, accountedMicro: 0 } })).toBeNull();
+    expect(parseAiStatus({ ...good, budget: { ...good.budget, usedMicro: 0 } })).toBeNull();
+    expect(parseAiStatus({ ...good, budget: { ...good.budget, remainingMicro: '1' } })).toBeNull();
+    expect(parseAiStatus({ ...good, budget: { ...good.budget, monthlyAllowanceMicro: '0', remainingMicro: '0' } })).toBeNull();
+    expect(parseAiStatus({ ...good, budget: { ...good.budget, extra: true } })).toBeNull();
     expect(parseAiStatus({ ...good, policy: { ...good.policy, resultTtlSeconds: 86401 } })).toBeNull();
     expect(parseAiStatus({ ...good, consent: { ...good.consent, profileVersion: '01' } })).toBeNull();
     expect(parseAnalysisReply({ code: 'TERMINAL', reason: 'private text' })).toBeNull();
+  });
+  it('refuses the old quota shape: a database that ignored the contract header is never trusted', () => {
+    const rest = Object.fromEntries(Object.entries(status()).filter(([key]) => key !== 'budget')) as ReturnType<typeof status>;
+    const legacy = { ...rest, policy: { ...rest.policy, monthlyAllowanceMicro: '100000000', maxRequestsPerHour: 200 },
+      usage: { accountedMicro: '0', requestsLastHour: 0, warning: false } };
+    expect(parseAiStatus(legacy)).toBeNull();
+    expect(parseAiStatus({ ...status(), usage: legacy.usage })).toBeNull();
+    expect(parseAiStatus({ ...status(), policy: legacy.policy })).toBeNull();
+    expect(parseAiStatus({ ...status(), policy: null })).toBeNull();
+    expect(parseAiStatus({ ...status(), budget: null })).toBeNull();
+  });
+  it('accepts an account without controls: no policy and no budget', () => {
+    expect(parseAiStatus({ ...status(), code: 'UNCONFIGURED', policy: null, budget: null })).toMatchObject({ budget: null, policy: null });
   });
   it('refuses unknown notice/model, inactive controls and expired review', () => {
     const good = parseAiStatus(status())!;
@@ -324,6 +340,17 @@ describe('Settings status version 2', () => {
   ])('rejects a malformed negotiated reply: %s', async (_name, build) => {
     const f = fixture(); responseReader(JSON.stringify(build()));
     await expect(f.ai.settingsStatus()).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+  });
+  it('sends the budget contract on every status request, including the Settings read', async () => {
+    const f = fixture(), stream = responseReader();
+    await f.ai.status();
+    const sent = new Headers((stream.fetcher.mock.calls[0]?.[1] as RequestInit).headers);
+    expect(sent.get('X-Stillroom-AI-Budget-Contract')).toBe('2');
+    const g = fixture(), settings = responseReader(JSON.stringify({ ...status(), photoModelNoticeUntilMs: null }));
+    await g.ai.settingsStatus();
+    const sentSettings = new Headers((settings.fetcher.mock.calls[0]?.[1] as RequestInit).headers);
+    expect(sentSettings.get('X-Stillroom-AI-Budget-Contract')).toBe('2');
+    expect(sentSettings.get('X-Stillroom-AI-Status-Version')).toBe('2');
   });
   it('keeps the ordinary parser exact: the notice field is refused without negotiation', () => {
     expect(parseAiStatus(noticeStatus(null))).toBeNull();
