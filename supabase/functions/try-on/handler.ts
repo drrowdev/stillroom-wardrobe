@@ -1,5 +1,5 @@
 import {
-  TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_STEPS, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_RESERVATION_MICRO, TRYON_REVIEW_EXPIRES_AT,
+  TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_IDEA_ITEMS, TRYON_MAX_STEPS, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_RESERVATION_MICRO, TRYON_REVIEW_EXPIRES_AT,
   tryOnSlots, type TryOnSlot,
 } from '../../../src/domain/tryon.ts';
 import { refusalFinishArgs } from '../../../src/domain/provider-refusal.ts';
@@ -29,6 +29,7 @@ const claimCodes: Record<string, string> = { PROBE_LIMIT: 'UNAVAILABLE' };
 const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info', AI_BUDGET_CONTRACT_HEADER.toLowerCase()];
 const exposedHeaders = ['x-stillroom-tryon-sha256'];
 const FIELDS = ['chainId', 'step', 'requestId', 'manifestId', 'person'];
+// Step 1 names the garments by exactly one of a saved outfit or an unsaved idea's item list (comma-separated UUIDs).
 function closedCode(value: unknown, map: Record<string, string> = {}): string {
   const code = typeof value === 'string' && Object.hasOwn(map, value) ? map[value] : value;
   return typeof code === 'string' && Object.hasOwn(statusCodes, code) ? code : 'FAILED';
@@ -51,7 +52,8 @@ const HEX64 = /^[0-9a-f]{64}$/;
 const GARMENT_PATH = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?:\/[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}){1,4}$/;
 const hex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
-type Ingress = { chainId: string; step: number; requestId: string; outfitId: string | null; person: Uint8Array<ArrayBuffer> };
+type Ingress = { chainId: string; step: number; requestId: string; outfitId: string | null; itemIds: string[] | null;
+  person: Uint8Array<ArrayBuffer> };
 async function readIngress(request: Request, signal: AbortSignal): Promise<Ingress | string> {
   const type = request.headers.get('Content-Type') ?? '';
   if (!/^multipart\/form-data; ?boundary=[A-Za-z0-9'()+_,./:=?-]{1,70}$/.test(type) || request.headers.has('Content-Encoding')) {
@@ -66,15 +68,22 @@ async function readIngress(request: Request, signal: AbortSignal): Promise<Ingre
   const text = (name: string) => { const all = form.getAll(name); return all.length === 1 && typeof all[0] === 'string' ? all[0] : null; };
   const stepText = text('step');
   const step = stepText !== null && /^[1-3]$/.test(stepText) ? Number(stepText) : 0;
-  const expected = step === 1 ? [...FIELDS, 'outfitId'] : FIELDS;
+  const subject = step === 1 ? (keys.includes('itemIds') ? 'itemIds' : 'outfitId') : null;
+  const expected = subject === null ? FIELDS : [...FIELDS, subject];
   if (step === 0 || step > TRYON_MAX_STEPS || keys.length !== expected.length || !expected.every((name) => form.getAll(name).length === 1)) {
     return 'INVALID_INPUT';
   }
   const chainId = text('chainId'), requestId = text('requestId'), manifestId = text('manifestId');
-  const outfitId = step === 1 ? text('outfitId') : null;
+  const outfitId = subject === 'outfitId' ? text('outfitId') : null;
+  const itemsText = subject === 'itemIds' ? text('itemIds') : null;
+  const itemIds = itemsText === null ? null : itemsText.split(',');
   const file = form.get('person');
   if (chainId === null || !UUID.test(chainId) || requestId === null || !UUID.test(requestId) || manifestId === null
-    || (step === 1 && (outfitId === null || !UUID.test(outfitId))) || !(file instanceof Blob)) return 'INVALID_INPUT';
+    || (subject === 'outfitId' && (outfitId === null || !UUID.test(outfitId)))
+    || (itemIds !== null && (itemIds.length > TRYON_MAX_IDEA_ITEMS || !itemIds.every((id) => UUID.test(id))
+      || new Set(itemIds).size !== itemIds.length))
+    || (subject === 'itemIds' && itemIds === null)
+    || !(file instanceof Blob)) return 'INVALID_INPUT';
   if (manifestId !== TRYON_MANIFEST) return 'CONFIG_CHANGED';
   if (file.type !== 'image/jpeg') return 'UNSUPPORTED_MEDIA';
   if (file.size > TRYON_LIMITS.personBytes) return 'TOO_LARGE';
@@ -89,7 +98,7 @@ async function readIngress(request: Request, signal: AbortSignal): Promise<Ingre
       || !isPhotoInputJpeg(bytes, width, height, { bytes: personBytes, side: Math.max(width, height) })) return 'INVALID_INPUT';
     person = bytes;
   } catch { return 'INVALID_INPUT'; }
-  return { chainId, step, requestId, outfitId, person };
+  return { chainId, step, requestId, outfitId, itemIds, person };
 }
 
 /**
@@ -172,7 +181,8 @@ export function createTryOnHandler(config: TryOnConfig, registrar: TryOnRegistra
       // The claim writes a held row, so it runs on the server-owned lifetime, not the browser's.
       const claim = await rpc('tryon_claim', { p_owner_id: owner, p_chain_id: ingress.chainId, p_step: ingress.step,
         p_request_id: ingress.requestId, p_manifest_id: TRYON_MANIFEST, p_outfit_id: ingress.outfitId,
-        p_person_sha256: ingress.step === 1 ? null : personSha, p_probe_id: probe.id }, true, server);
+        p_person_sha256: ingress.step === 1 ? null : personSha, p_probe_id: probe.id,
+        ...(ingress.itemIds === null ? {} : { p_item_ids: ingress.itemIds }) }, true, server);
       if (claim.code !== 'OK' || claim.claimed !== true) return error(String(claim.code), claimCodes);
       const garment = object(claim.garment) ? claim.garment : null;
       if (!exact(claim, ['code', 'claimed', 'manifestId', 'chainId', 'step', 'steps', 'last', 'slot', 'garment', 'dispatchBeforeMs',

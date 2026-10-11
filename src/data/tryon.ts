@@ -3,7 +3,7 @@
 // src/data/enhancement.ts. The strict parsers below accept only the closed replies of 20261003090000_try_on.sql; the
 // server's checks stay authoritative, and nothing here decides eligibility on its own.
 import type { OwnerScope } from '../auth/session';
-import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_REVIEW_EXPIRES_AT, tryOnSlots, type TryOnSlot } from '../domain/tryon';
+import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_IDEA_ITEMS, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_REVIEW_EXPIRES_AT, tryOnResultsHeaders, tryOnSlots, type TryOnSlot } from '../domain/tryon';
 import { aiBudgetHeaders, parseOptionalAiBudget, type AiBudget } from '../domain/ai-budget';
 import { isUuid } from '../domain/wardrobe';
 import type { AppClient } from './client';
@@ -147,16 +147,16 @@ export function parseCancel(value: unknown): CancelResult | null {
   return code ? { code } as CancelResult : null;
 }
 
-export type TryOnResult = { id: string; outfitId: string; itemIds: string[]; bytes: number; completedAtMs: number; expiresAtMs: number };
+export type TryOnResult = { id: string; outfitId: string | null; itemIds: string[]; bytes: number; completedAtMs: number; expiresAtMs: number };
 export function parseResults(value: unknown): TryOnResult[] | null {
   if (!exactKeys(value, ['code', 'results']) || value.code !== 'OK' || !Array.isArray(value.results) || value.results.length > 20) return null;
   const results: TryOnResult[] = [];
   for (const entry of value.results as unknown[]) {
     if (!exactKeys(entry, ['id', 'outfitId', 'itemIds', 'bytes', 'completedAtMs', 'expiresAtMs']) || !uuid(entry.id)
-      || !uuid(entry.outfitId) || !Array.isArray(entry.itemIds) || entry.itemIds.length < 1 || entry.itemIds.length > 3
+      || (entry.outfitId !== null && !uuid(entry.outfitId)) || !Array.isArray(entry.itemIds) || entry.itemIds.length < 1 || entry.itemIds.length > 3
       || !entry.itemIds.every(uuid) || !count(entry.bytes) || entry.bytes < 1 || entry.bytes > TRYON_LIMITS.outputBytes
       || !count(entry.completedAtMs) || !count(entry.expiresAtMs)) return null;
-    results.push({ id: entry.id, outfitId: entry.outfitId, itemIds: [...entry.itemIds as string[]], bytes: entry.bytes,
+    results.push({ id: entry.id, outfitId: entry.outfitId as string | null, itemIds: [...entry.itemIds as string[]], bytes: entry.bytes,
       completedAtMs: entry.completedAtMs, expiresAtMs: entry.expiresAtMs });
   }
   return results;
@@ -186,7 +186,9 @@ export function parseResultImage(value: unknown): ResultImage | null {
 /** One step's reply: the intermediate picture for the next step, the final result, or a closed code. */
 export type StepResponse = { kind: 'intermediate'; body: Uint8Array<ArrayBuffer>; sha256: string }
   | { kind: 'result'; resultId: string; expiresAtMs: number } | { kind: 'code'; code: Exclude<TryOnCode, 'OK'> };
-export type StepInput = { chainId: string; step: number; requestId: string; person: Uint8Array<ArrayBuffer>; outfitId?: string };
+/** Step 1 names its garments by a saved outfit or by an unsaved idea's item ids (never both); later steps carry neither. */
+export type StepInput = { chainId: string; step: number; requestId: string; person: Uint8Array<ArrayBuffer>; outfitId?: string;
+  itemIds?: readonly string[] };
 export type TryOnStatusRead = { kind: 'missing' } | { kind: 'ready'; status: TryOnStatus };
 export type TryOnConsentResult = { kind: 'applied'; status: TryOnStatus }
   | { kind: 'refused'; code: 'UNAVAILABLE' | 'INVALID_INPUT' | 'UNCONFIGURED' | 'CONFIG_CHANGED' };
@@ -293,7 +295,8 @@ export class TryOnClient {
       const token = await this.bearer(5000, wait);
       const response = await wait(fetch(`${this.config.url}/rest/v1/rpc/${path}`, {
         method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', signal,
-        headers: this.headers(token, { Accept: 'application/json', 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+        headers: this.headers(token, { Accept: 'application/json', 'Content-Type': 'application/json',
+          ...(path === 'tryon_results_v1' || path === 'tryon_result_image_v1' ? tryOnResultsHeaders : {}) }), body: JSON.stringify(body),
       }));
       return { status: response.status, value: await this.json(response, wait, limit) };
     });
@@ -355,14 +358,17 @@ export class TryOnClient {
     throw new TryOnError('UNAVAILABLE');
   }
   /**
-   * Sends one step once under `requestId`, with the 100-second client deadline. Step 1 carries the outfit; a later step
+   * Sends one step once under `requestId`, with the 100-second client deadline. Step 1 carries the outfit or the idea's items; a later step
    * sends the previous step's picture unchanged. A thrown TIMEOUT or UNAVAILABLE means the outcome is unknown: the
    * caller reconciles through `chainStatus` and never sends the step again by itself.
    */
   async step(input: StepInput, signal: AbortSignal): Promise<StepResponse> {
-    const { chainId, step, requestId, person, outfitId } = input;
+    const { chainId, step, requestId, person, outfitId, itemIds } = input;
     if (!isUuid(chainId) || !isUuid(requestId) || !Number.isInteger(step) || step < 1 || step > 3
-      || (step === 1) !== (outfitId !== undefined) || (outfitId !== undefined && !isUuid(outfitId))
+      || (step === 1 ? (outfitId === undefined) === (itemIds === undefined) : outfitId !== undefined || itemIds !== undefined)
+      || (outfitId !== undefined && !isUuid(outfitId))
+      || (itemIds !== undefined && (itemIds.length < 1 || itemIds.length > TRYON_MAX_IDEA_ITEMS || !itemIds.every(isUuid)
+        || new Set(itemIds).size !== itemIds.length))
       || person.length < 4 || person.length > TRYON_LIMITS.personBytes) throw new TryOnError('INVALID_INPUT');
     return this.bounded(TRYON_LIMITS.clientStepMs, signal, async (inner, wait) => {
       const token = await this.bearer(TRYON_LIMITS.serverMs, wait);
@@ -372,6 +378,7 @@ export class TryOnClient {
       form.append('requestId', requestId);
       form.append('manifestId', TRYON_MANIFEST);
       if (outfitId !== undefined) form.append('outfitId', outfitId);
+      if (itemIds !== undefined) form.append('itemIds', itemIds.join(','));
       form.append('person', new Blob([person], { type: 'image/jpeg' }), 'person.jpg');
       const response = await wait(fetch(`${this.config.url}/functions/v1/try-on`, {
         method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', signal: inner,

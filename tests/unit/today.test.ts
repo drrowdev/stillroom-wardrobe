@@ -63,8 +63,9 @@ describe('I15 suggestion data', () => {
     expect(localDate('Not/AZone', now)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  it('highlights Today in the navigation', () => {
+  it('highlights Today in the navigation, also while an idea is being tried on', () => {
     expect(navFamilyFor('today')).toBe('today');
+    expect(navFamilyFor('today-try-on')).toBe('today');
   });
 });
 

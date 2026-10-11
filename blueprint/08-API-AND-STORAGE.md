@@ -922,6 +922,19 @@ jsonb, jsonb, text)` add `tryOn` to the AD1a contract with the same rules;
 v1 is unchanged except the `CONFLICT` above. No try-on table or stop marker is
 exported or restored.
 
+Unsaved-idea try-on (TRYON-IDEA1, ADR30): `tryon_claim` takes one more trailing
+argument, `p_item_ids uuid[] default null`; step 1 names exactly one of
+`p_outfit_id` or `p_item_ids` (1 to 8 distinct ids, each the caller's own item,
+else `NOT_FOUND`; `INVALID_INPUT` for any other combination). The chain keeps
+its identity in `private.tryon_chains.idea_item_ids` and a step-1 retry must
+repeat it. `outfit_id` is null on such a chain and its result, and
+`tryon_results_v1` returns `outfitId: null` for it, but only to a request that sends
+`X-Stillroom-TryOn-Results-Contract: 2` (also required to read such a picture with
+`tryon_result_image_v1`); without the header the two reads return outfit results only,
+as before. The `try-on` Edge function
+takes `itemIds` (comma-separated UUIDs) instead of `outfitId` on step 1 and sends
+`p_item_ids` only then. Money, holds, Stop, withdrawal and expiry are unchanged.
+
 Budget contract (BUDGET1, ADR29): the status, consent, claim, probe, bootstrap
 and admin functions keep their names and signatures. The request header
 `X-Stillroom-AI-Budget-Contract: 2` selects the one-monthly-budget replies:

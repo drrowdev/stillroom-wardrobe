@@ -163,6 +163,39 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
       p_output: `\\x${Buffer.from(OUTPUT).toString('hex')}` });
   });
 
+  it('starts an idea chain from the item ids alone: no outfit, one claim argument more, nothing else changed', async () => {
+    const calls = backend({ steps: 1 });
+    const { transport } = provider(() => Response.json(imageBody()));
+    const ITEMS = [OUTFIT, RESULT, PROBE];
+    const response = await createTryOnHandler(config, register, transport)(post(form(1, { outfitId: null, itemIds: ITEMS.join(',') })));
+    expect(response.status).toBe(200);
+    expect(rpcBody(calls, 'tryon_claim')).toEqual({ p_owner_id: OWNER, p_chain_id: CHAIN, p_step: 1, p_request_id: REQUEST,
+      p_manifest_id: TRYON_MANIFEST, p_outfit_id: null, p_person_sha256: null, p_probe_id: null, p_item_ids: ITEMS });
+  });
+
+  it('refuses a malformed garment reference before any network call', async () => {
+    const calls = backend();
+    const { transport } = provider(() => Response.json(imageBody()));
+    const handler = createTryOnHandler(config, register, transport);
+    const ids = [OUTFIT, RESULT, PROBE];
+    const nine = Array.from({ length: 9 }, (_, index) => `00000000-0000-4000-8000-00000000000${index}`);
+    for (const body of [
+      form(1, { itemIds: ids.join(',') }),
+      form(1, { outfitId: null }),
+      form(1, { outfitId: null, itemIds: '' }),
+      form(1, { outfitId: null, itemIds: `${OUTFIT},${OUTFIT}` }),
+      form(1, { outfitId: null, itemIds: `${OUTFIT},not-a-uuid` }),
+      form(1, { outfitId: null, itemIds: nine.join(',') }),
+      form(1, { outfitId: null, itemIds: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' }),
+      form(2, { itemIds: ids.join(',') }),
+    ]) {
+      const response = await handler(post(body));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ code: 'INVALID_INPUT' });
+    }
+    expect(calls).toEqual([]);
+  });
+
   it('accepts a person photo with restart intervals, as phone encoders write them, and sends it unchanged', async () => {
     const calls = backend();
     const { transport, sent } = provider(() => Response.json(imageBody()));

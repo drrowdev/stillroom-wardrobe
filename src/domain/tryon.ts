@@ -15,6 +15,13 @@ export const TRYON_REVIEW_EXPIRES_AT = '2027-01-01T00:00:00Z';
 export const TRYON_RESERVATION_MICRO = '360000';
 export const TRYON_MAX_STEPS = 3;
 export const TRYON_MAX_RESULTS = 20;
+// A client that parses results without an outfit (unsaved Today ideas) says so on the results reads; without the header the
+// database returns outfit results only, so an older cached client keeps a list it can parse.
+export const TRYON_RESULTS_HEADER = 'X-Stillroom-TryOn-Results-Contract';
+export const TRYON_RESULTS_CONTRACT = '2';
+export const tryOnResultsHeaders = { [TRYON_RESULTS_HEADER]: TRYON_RESULTS_CONTRACT } as const;
+// The most garments an unsaved idea may list (an outfit's own size limit applies to saved outfits).
+export const TRYON_MAX_IDEA_ITEMS = 8;
 
 // The wardrobe categories, kept import-free so the try-on Edge function can load this module (pinned equal to
 // src/domain/wardrobe.ts in tests/unit/tryon-chain.test.ts).

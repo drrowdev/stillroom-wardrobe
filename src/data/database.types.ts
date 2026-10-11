@@ -1029,6 +1029,7 @@ export type Database = {
       tryon_claim: {
         Args: {
           p_chain_id: string
+          p_item_ids?: string[]
           p_manifest_id: string
           p_outfit_id: string
           p_owner_id: string

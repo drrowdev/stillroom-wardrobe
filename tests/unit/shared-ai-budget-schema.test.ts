@@ -27,10 +27,12 @@ const body = (sql: string, name: string) => {
 describe('BUDGET1 migration source', () => {
   it('replaces the existing public functions with identical arguments and returns, and adds none', async () => {
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
-    expect(names.at(-1)).toBe(NEW);
+    // Predecessor-relative: later migrations follow without changing this file's neighbours.
+    const at = names.indexOf(NEW);
+    expect(at).toBeGreaterThan(0);
     const sql = await read(NEW);
     expect(sql).not.toMatch(/create function public\./i);
-    const prior = (await Promise.all(names.slice(0, -1).map(read))).join('\n');
+    const prior = (await Promise.all(names.slice(0, at).map(read))).join('\n');
     for (const name of PUBLIC_NAMES) {
       const before = signature(prior, name);
       expect(before, name).not.toBeNull();

@@ -158,7 +158,7 @@ describe('CI workflow browser split', () => {
     expect(projects).toEqual(['chromium', 'mobile', 'webkit-photo', 'cleanup-timing', 'cleanup-timing-webkit']);
     expect(config).toContain("testMatch: ['image-processing.spec.ts', 'slice.spec.ts', 'profile.spec.ts', 'images.spec.ts', "
       + "'item-details.spec.ts', 'garment-fields.spec.ts', 'ai-photo-first.spec.ts', 'items.spec.ts', 'ux-l1a.spec.ts', "
-      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts', 'admin.spec.ts', 'tryon.spec.ts', 'settings-layout.spec.ts', 'shell-layout.spec.ts', 'auth-session.spec.ts', 'remember.spec.ts', 'bulk-trash.spec.ts', 'bulk-upload.spec.ts'],");
+      + "'ux-l1b.spec.ts', 'ux-l2a.spec.ts', 'outfits.spec.ts', 'today.spec.ts', 'weather.spec.ts', 'backup.spec.ts', 'lazy-routes.spec.ts', 'restore.spec.ts', 'delete-account.spec.ts', 'background-removal.spec.ts', 'enhancement.spec.ts', 'admin.spec.ts', 'tryon.spec.ts', 'tryon-idea.spec.ts', 'settings-layout.spec.ts', 'shell-layout.spec.ts', 'auth-session.spec.ts', 'remember.spec.ts', 'bulk-trash.spec.ts', 'bulk-upload.spec.ts'],");
     // PROC1: flaky tests fail through the allowlist reporter instead (tests/unit/flake-gate.test.ts).
     expect(config).toContain('  failOnFlakyTests: false,\n');
     expect(config).toContain("  reporter: [['list'], ['./tests/flake-gate-reporter.ts']],\n");

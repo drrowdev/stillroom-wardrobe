@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { OwnerScope } from '../../../auth/session';
 import type { AppClient } from '../../../data/client';
 import { tryOnReady } from '../../../data/tryon';
-import type { OutfitComponent, OutfitRecord } from '../../../domain/outfits';
-import type { TryOnStep } from '../../../domain/tryon';
+import type { OutfitComponent } from '../../../domain/outfits';
+import type { TryOnSelection, TryOnStep } from '../../../domain/tryon';
 import type { Language, MessageKey, Translate } from '../../../i18n';
 import '../../../i18n/tryon';
 import { BODY_ASPECT, BodyPhotoError, admitBodySource, prepareBodyPhoto, type BodyPhoto, type BodySource } from '../../../images/body-photo';
@@ -11,10 +11,11 @@ import { largestAspectCrop, type PhotoEdit } from '../../../images/crop';
 import { CropEditor } from '../../../images/crop-editor';
 import { tryOnStoreFor, type TryOnStore } from '../../settings/tryon-store';
 import { useOutfit } from '../use-outfits';
-import { browserEnvironment, failureAction, itemName, slotKey, TryOnRun, tryOnSelection, useTryOnStatus, type FailureKind, type RunPhase } from '../use-try-on';
+import { browserEnvironment, failureAction, ideaSelection, itemName, slotKey, TryOnRun, tryOnSelection, useTryOnStatus, type FailureKind, type RunPhase } from '../use-try-on';
 import { ConfirmDialog, TryOnPicture } from './try-on-parts';
 
-type Props = { client: AppClient; scope: OwnerScope; id: string | null; online: boolean; language: Language; t: Translate; onBack: () => void };
+type Common = { client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; onBack: () => void };
+type Props = Common & { id: string | null };
 
 const focus = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
 const photoMessage = (error: unknown): MessageKey | null => {
@@ -43,7 +44,7 @@ export function TryOnScreen(props: Props) {
     : <p role="status">{t('common.loading')}</p>;
   else if (!store || status === null) body = <p role="status">{t('common.loading')}</p>;
   else if (!tryOnReady(status)) body = <p className="notice" role="status">{t(status.code === 'CONSENT_REQUIRED' ? 'tryon.failure.turnedOff' : 'tryon.failure.unavailable')}</p>;
-  else body = <Setup {...props} store={store} components={view.data.components} record={record}
+  else body = <Setup {...props} store={store} components={view.data.components} selection={tryOnSelection(record, view.data.components)}
     onStart={(steps, photo) => {
       const next = new TryOnRun(store.api, store, browserEnvironment(), record.id, steps, photo.bytes);
       setRun(next);
@@ -57,12 +58,45 @@ export function TryOnScreen(props: Props) {
   </section>;
 }
 
-type SetupProps = Props & {
-  store: TryOnStore; record: OutfitRecord; components: ReadonlyMap<string, OutfitComponent>;
+/** An unsaved Today idea: its garments are kept in memory by the app for this route only and nothing is saved. */
+export type TryOnIdeaSeed = { itemIds: readonly string[]; components: ReadonlyMap<string, OutfitComponent> };
+
+/** Route `#/today/try-on`: the idea's garments, a photo of the owner, then one try-on chain that names the garments, not an outfit. */
+export function IdeaTryOnScreen(props: Common & { idea: TryOnIdeaSeed | null }) {
+  const { client, scope, idea, t, onBack } = props;
+  const store = tryOnStoreFor(client, scope);
+  const status = useTryOnStatus(store);
+  const selection = useMemo(() => idea ? ideaSelection(idea.itemIds, idea.components) : null, [idea]);
+  const [run, setRun] = useState<TryOnRun | null>(null);
+  useEffect(() => () => run?.abandon(), [run]);
+  // After a reload or a pasted link the idea is gone and there is nothing to try on.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only a missing idea sends the owner back
+  useEffect(() => { if (!idea) onBack(); }, [idea]);
+  let body;
+  if (run && store && idea) body = <RunView key={run.id} {...props} store={store} run={run} components={idea.components}
+    onRestart={() => { run.abandon(); setRun(null); focus('tryon-choose'); }}
+    onClose={() => { run.abandon(); onBack(); }} />;
+  else if (!idea || !selection || !store || status === null) body = <p role="status">{t('common.loading')}</p>;
+  else if (!tryOnReady(status)) body = <p className="notice" role="status">{t(status.code === 'CONSENT_REQUIRED' ? 'tryon.failure.turnedOff' : 'tryon.failure.unavailable')}</p>;
+  else body = <Setup {...props} store={store} components={idea.components} selection={selection}
+    onStart={(steps, photo) => {
+      const next = new TryOnRun(store.api, store, browserEnvironment(), { itemIds: steps.map(step => step.itemId) }, steps, photo.bytes);
+      setRun(next);
+      next.start();
+      focus('tryon-progress-title');
+    }} />;
+  return <section className="detail-page tryon-page" aria-labelledby="tryon-title">
+    <button type="button" className="text-button" onClick={(event) => { event.currentTarget.focus(); run?.abandon(); onBack(); }}>{t('outfits.back')}</button>
+    <header className="settings-heading"><h1 id="tryon-title" tabIndex={-1}>{t('tryon.open')}</h1></header>
+    {body}
+  </section>;
+}
+
+type SetupProps = Common & {
+  store: TryOnStore; selection: TryOnSelection; components: ReadonlyMap<string, OutfitComponent>;
   onStart: (steps: TryOnStep[], photo: BodyPhoto) => void;
 };
-function Setup({ record, components, online, t, onStart }: SetupProps) {
-  const selection = useMemo(() => tryOnSelection(record, components), [record, components]);
+function Setup({ selection, components, online, t, onStart }: SetupProps) {
   const input = useRef<HTMLInputElement>(null);
   const preparation = useRef<AbortController | null>(null);
   const focusStart = useRef(false);
@@ -133,7 +167,8 @@ function Setup({ record, components, online, t, onStart }: SetupProps) {
   }
   const count = selection.steps.length;
   return <div className="stack">
-    <ul className="tryon-garments" aria-label={t('tryon.steps')}>
+    {count > 0 && <p id="tryon-subset" className="tryon-subset">{t('tryon.subset')}</p>}
+    <ul className="tryon-garments" aria-label={t('tryon.steps')} aria-describedby={count > 0 ? 'tryon-subset' : undefined}>
       {selection.steps.map(step => <li key={step.itemId}>{t('tryon.slotLine', { slot: t(slotKey(step.slot)), name: itemName(components, step.itemId, t) })}</li>)}
     </ul>
     {selection.notIncluded.length > 0 && <p className="muted">{t('tryon.notIncluded', { names: selection.notIncluded.map(item => itemName(components, item, t)).join(', ') })}</p>}
@@ -167,7 +202,7 @@ function Setup({ record, components, online, t, onStart }: SetupProps) {
 
 const failureKey = (failure: FailureKind): MessageKey => `tryon.failure.${failure}` as MessageKey;
 
-function RunView({ run, store, components, language, online, t, onRestart, onClose }: Props & {
+function RunView({ run, store, components, language, online, t, onRestart, onClose }: Common & {
   run: TryOnRun; store: TryOnStore; components: ReadonlyMap<string, OutfitComponent>;
   onRestart: () => void; onClose: () => void;
 }) {

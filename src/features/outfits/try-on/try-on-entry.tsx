@@ -20,13 +20,19 @@ export function TryOnButton({ client, scope, record, components, disabled, t, on
   return <button id="tryon-open" type="button" className="button button-secondary" disabled={disabled} onClick={onTryOn}>{t('tryon.open')}</button>;
 }
 
+/**
+ * Saved try-ons of one outfit, or (`outfitId` null) of unsaved Today ideas: a collapsed list that loads its pictures only
+ * when opened. The ideas' metadata list is read whenever the device is online, whatever the try-on status says (the status
+ * read may fail, and saved pictures must not vanish with it); a failed read is shown with Retry.
+ */
 export function SavedTryOns({ client, scope, outfitId, online, language, t }: {
-  client: AppClient; scope: OwnerScope; outfitId: string; online: boolean; language: Language; t: Translate;
+  client: AppClient; scope: OwnerScope; outfitId: string | null; online: boolean; language: Language; t: Translate;
 }) {
   const store = tryOnStoreFor(client, scope);
   const status = useTryOnStatus(store);
-  const { state, retry } = useOutfitTryOns(store?.api ?? null, outfitId, status !== null && status.results > 0);
+  const { state, retry } = useOutfitTryOns(store?.api ?? null, outfitId, outfitId === null ? online : status !== null && status.results > 0);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
+  const [open, setOpen] = useState(false);
   // Idempotent: reporting the same removal again changes nothing and renders nothing.
   const remove = useCallback((id: string) => setRemoved(current => current.has(id) ? current : new Set(current).add(id)), []);
   if (!store) return null;
@@ -39,8 +45,7 @@ export function SavedTryOns({ client, scope, outfitId, online, language, t }: {
   }
   if (state.kind !== 'ready' || !state.results.length) return null;
   const shown = state.results.filter(result => !removed.has(result.id));
-  return <section className="tryon-saved stack" aria-labelledby="tryon-saved-title">
-    <h2 id="tryon-saved-title">{t('tryon.saved')}</h2>
+  const body = <>
     {removed.size > 0 && <p role="status">{t('tryon.deleted')}</p>}
     {shown.length > 0 && <ul className="tryon-saved-list">
       {shown.map(result => <li key={result.id}>
@@ -48,5 +53,16 @@ export function SavedTryOns({ client, scope, outfitId, online, language, t }: {
           onDeleted={() => remove(result.id)} />
       </li>)}
     </ul>}
+  </>;
+  if (outfitId === null) {
+    if (!shown.length && !removed.size) return null;
+    return <details id="tryon-ideas" className="tryon-saved stack" onToggle={event => setOpen(event.currentTarget.open)}>
+      <summary>{t('tryon.savedCount', { count: shown.length })}</summary>
+      {open && body}
+    </details>;
+  }
+  return <section className="tryon-saved stack" aria-labelledby="tryon-saved-title">
+    <h2 id="tryon-saved-title">{t('tryon.saved')}</h2>
+    {body}
   </section>;
 }

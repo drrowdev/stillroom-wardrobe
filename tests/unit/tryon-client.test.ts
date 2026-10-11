@@ -7,8 +7,9 @@ import {
 } from '../../src/data/tryon';
 import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, type TryOnStep } from '../../src/domain/tryon';
 import {
-  RECONCILE_EVERY_MS, RECONCILE_FOR_MS, RUN_LIFETIME_MS, TryOnRun, failureAction, type RunEnvironment, type TryOnApi,
+  RECONCILE_EVERY_MS, RECONCILE_FOR_MS, RUN_LIFETIME_MS, TryOnRun, failureAction, ideaSelection, type RunEnvironment, type TryOnApi,
 } from '../../src/features/outfits/use-try-on';
+import type { OutfitComponent } from '../../src/domain/outfits';
 import { readTryOnStatus, TryOnStore, tryOnViewOf } from '../../src/features/settings/tryon-store';
 import { testAccessToken } from './test-token';
 
@@ -78,6 +79,10 @@ describe('closed try-on replies', () => {
     expect(parseResults({ code: 'OK', results: [result] })).toHaveLength(1);
     expect(parseResults({ code: 'OK', results: [{ ...result, bytes: 600_000 }] })).toBeNull();
     expect(parseResults({ code: 'OK', results: [{ ...result, itemIds: [] }] })).toBeNull();
+    // An unsaved idea's result has no outfit; anything else in that place is refused.
+    expect(parseResults({ code: 'OK', results: [{ ...result, outfitId: null }] })).toEqual([{ ...result, outfitId: null }]);
+    expect(parseResults({ code: 'OK', results: [{ ...result, outfitId: 'not-an-id' }] })).toBeNull();
+    expect(parseResults({ code: 'OK', results: [{ ...result, outfitId: undefined }] })).toBeNull();
     const jpeg = btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xd9));
     expect(parseResultImage({ code: 'OK', jpegBase64: jpeg, bytes: 4 })?.kind).toBe('image');
     expect(parseResultImage({ code: 'OK', jpegBase64: jpeg, bytes: 5 })).toBeNull();
@@ -145,6 +150,28 @@ const chain = (over: Partial<Extract<ChainStatus, { kind: 'chain' }>>): ChainSta
   steps: plan, activeAttempt: false, resultId: null, expiresAtMs: 0, ...over });
 
 describe('the try-on run (rev4 §2.3-§3.2)', () => {
+  it('selects an idea\'s garments in the idea\'s order and lists the layers it leaves out', () => {
+    const piece = (id: string, category: OutfitComponent['category'], extra: Partial<OutfitComponent> = {}): [string, OutfitComponent] =>
+      [id, { id, state: 'current', title: id, category, colour: null, lifecycle: 'active', thumbPath: `${id}.jpg`, altText: '', ...extra }];
+    const components = new Map([piece('polo', 'top'), piece('grey', 'bottom'), piece('jacket', 'outerwear'), piece('shoes', 'footwear'),
+      piece('gone', 'top', { state: 'trashed' }), piece('plain', 'top', { thumbPath: null })]);
+    expect(ideaSelection(['polo', 'grey', 'jacket', 'shoes'], components)).toEqual({
+      steps: [{ slot: 'top', itemId: 'polo' }, { slot: 'bottom', itemId: 'grey' }, { slot: 'footwear', itemId: 'shoes' }],
+      notIncluded: ['jacket'],
+    });
+    expect(ideaSelection(['gone', 'plain', 'unknown', 'jacket'], components).steps).toEqual([]);
+  });
+  it('starts an idea chain by naming its garments, not an outfit, and only on the first step', async () => {
+    const h = new Harness();
+    h.stepReplies = [picture(20), picture(30), { kind: 'result', resultId: ID(9), expiresAtMs: 5 }];
+    const run = new TryOnRun(h.api, h.session, h.env, { itemIds: plan.map((step) => step.itemId) }, plan, new Uint8Array(new ArrayBuffer(10)));
+    run.start();
+    await flush();
+    expect(h.steps.map((step) => [step.step, step.outfitId ?? null, step.itemIds ?? null]))
+      .toEqual([[1, null, [ID(1), ID(2), ID(3)]], [2, null, null], [3, null, null]]);
+    expect(run.get()).toMatchObject({ kind: 'result', resultId: ID(9) });
+    expect(run.holdsPicture()).toBe(false);
+  });
   it('sends each step once, chains the previous picture and drops everything at the result', async () => {
     const h = new Harness();
     h.stepReplies = [picture(20), picture(30), { kind: 'result', resultId: ID(9), expiresAtMs: 5 }];
@@ -486,6 +513,24 @@ const stepInput = (step = 1): StepInput => ({ chainId: ID(50), step, requestId: 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('the try-on client transport', () => {
+  it('asks for results without an outfit only on the two result reads', async () => {
+    const client = new TryOnClient(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    const jpeg = btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xd9));
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', results: [] }));
+    await client.results();
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', jpegBase64: jpeg, bytes: 4 }));
+    await client.resultImage(ID(3));
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK' }));
+    await client.deleteResult(ID(3));
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'CANCELLED' }));
+    await client.cancel(ID(4));
+    const sent = fetcher.mock.calls.map(([url, init]) => [String(url).split('/').pop(),
+      new Headers(init?.headers).get('X-Stillroom-TryOn-Results-Contract'), new Headers(init?.headers).get('X-Stillroom-AI-Budget-Contract')]);
+    expect(sent).toEqual([['tryon_results_v1', '2', '2'], ['tryon_result_image_v1', '2', '2'], ['tryon_delete_result', null, '2'],
+      ['tryon_cancel', null, '2']]);
+  });
   it('treats only the missing-function reply as no try-on, and parses the status strictly', async () => {
     const client = new TryOnClient(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });
     const fetcher = vi.fn<typeof fetch>();
@@ -500,6 +545,7 @@ describe('the try-on client transport', () => {
     expect(url).toBe(`${config.url}/rest/v1/rpc/tryon_status`);
     expect(init?.credentials).toBe('omit');
     expect(new Headers(init?.headers).get('X-Stillroom-AI-Budget-Contract')).toBe('2');
+    expect(new Headers(init?.headers).get('X-Stillroom-TryOn-Results-Contract')).toBeNull();
     fetcher.mockResolvedValueOnce(Response.json(statusRaw()));
     await client.consent(true);
     expect(JSON.parse(String(fetcher.mock.calls[3]![1]?.body))).toEqual({ p_enabled: true, p_notice_revision: TRYON_NOTICE_REVISION });
@@ -534,6 +580,23 @@ describe('the try-on client transport', () => {
     await expect(client.step({ ...stepInput(), person: jpegBody(TRYON_LIMITS.personBytes + 1) }, new AbortController().signal))
       .rejects.toMatchObject({ code: 'INVALID_INPUT' });
     expect(fetcher).toHaveBeenCalledTimes(8);
+  });
+  it('sends an idea\'s items as one comma-separated field, and refuses any other combination', async () => {
+    const client = new TryOnClient(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    const idea = (extra: Partial<StepInput> = {}, step = 1): StepInput => ({ chainId: ID(50), step, requestId: ID(51), person: jpegBody(100),
+      ...(step === 1 ? { itemIds: [ID(1), ID(2)] } : {}), ...extra });
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', resultId: ID(9), expiresAtMs: 5 }));
+    await client.step(idea(), new AbortController().signal);
+    const form = fetcher.mock.calls[0]![1]!.body as FormData;
+    expect([...form.keys()].sort()).toEqual(['chainId', 'itemIds', 'manifestId', 'person', 'requestId', 'step']);
+    expect(form.get('itemIds')).toBe(`${ID(1)},${ID(2)}`);
+    for (const bad of [idea({ outfitId: OUTFIT }), idea({ itemIds: [] }), idea({ itemIds: [ID(1), ID(1)] }), idea({ itemIds: ['x'] }),
+      idea({ itemIds: Array.from({ length: 9 }, (_, index) => ID(index + 1)) }), idea({ itemIds: undefined }), idea({ itemIds: [ID(1)] }, 2)]) {
+      await expect(client.step(bad, new AbortController().signal)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    }
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
   it('gives up on a step after the 100-second client deadline', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });

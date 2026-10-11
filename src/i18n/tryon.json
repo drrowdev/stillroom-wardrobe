@@ -28,7 +28,9 @@
   "tryon.photoUnusable": {"en":"This photo can't be used. Try another.","fi":"Tätä kuvaa ei voi käyttää. Kokeile toista.","sv":"Den här bilden kan inte användas. Prova en annan."},
   "tryon.startOne": {"en":"Try on (1 item)","fi":"Sovita (1 vaate)","sv":"Prova (1 plagg)"},
   "tryon.startMany": {"en":"Try on ({count} items)","fi":"Sovita ({count} vaatetta)","sv":"Prova ({count} plagg)"},
-  "tryon.limitLine": { "en": "Each item counts toward your monthly try-on limit.", "fi": "Jokainen vaate lasketaan kuukauden sovitusrajaan.", "sv": "Varje plagg räknas mot din månadsgräns för provning." },
+  "tryon.limitLine": { "en": "Each item counts toward this month's AI budget.", "fi": "Jokainen vaate lasketaan tämän kuun tekoälybudjettiin.", "sv": "Varje plagg räknas mot månadens AI-budget." },
+  "tryon.ideaOpen": {"en":"Show on me","fi":"Näytä päälläni","sv":"Visa på mig"},
+  "tryon.subset": {"en":"Only these items will be tried on:","fi":"Vain nämä vaatteet sovitetaan:","sv":"Bara de här plaggen provas:"},
   "tryon.progress": {"en":"Trying on {step} of {total}: {slot}","fi":"Sovitetaan {step}/{total}: {slot}","sv":"Provar {step} av {total}: {slot}"},
   "tryon.steps": {"en":"Steps","fi":"Vaiheet","sv":"Steg"},
   "tryon.stepDone": {"en":"{slot}: done","fi":"{slot}: valmis","sv":"{slot}: klar"},
@@ -55,7 +57,7 @@
   "tryon.offline": {"en":"You're offline. The try-on will be checked when you're back online.","fi":"Olet offline-tilassa. Sovitus tarkistetaan, kun yhteys palaa.","sv":"Du är offline. Provningen kontrolleras när du är online igen."},
   "tryon.failure.filtered": {"en":"Couldn't create this try-on. Try another outfit or photo.","fi":"Tätä sovitusta ei voitu tehdä. Kokeile toista asua tai kuvaa.","sv":"Provningen kunde inte skapas. Prova en annan outfit eller bild."},
   "tryon.failure.busy": {"en":"Try-on is busy. Try again in a minute.","fi":"Sovitus on varattu. Yritä uudelleen hetken kuluttua.","sv":"Provningen är upptagen. Försök igen om en minut."},
-  "tryon.failure.allowance": {"en":"You've reached this month's try-on limit.","fi":"Tämän kuun sovitusraja on täynnä.","sv":"Du har nått månadens gräns för provning."},
+  "tryon.failure.allowance": {"en":"This month's AI budget is used.","fi":"Tämän kuun tekoälybudjetti on käytetty.","sv":"Månadens AI-budget är slut."},
   "tryon.failure.failed": {"en":"The try-on didn't finish.","fi":"Sovitus ei valmistunut.","sv":"Provningen blev inte klar."},
   "tryon.failure.lost": {"en":"The picture from the last step was lost. Start again? Items already tried on count toward your limit.","fi":"Edellisen vaiheen kuva katosi. Aloitetaanko alusta? Jo sovitetut vaatteet lasketaan rajaasi.","sv":"Bilden från förra steget försvann. Börja om? Plagg som redan provats räknas mot din gräns."},
   "tryon.failure.mismatch": { "en": "One of the items changed. Start again.", "fi": "Jokin vaatteista muuttui. Aloita alusta.", "sv": "Ett av plaggen har ändrats. Börja om." },
@@ -64,5 +66,6 @@
   "tryon.failure.unavailable": {"en":"Try-on isn't available right now.","fi":"Sovitus ei ole juuri nyt käytettävissä.","sv":"Provning är inte tillgänglig just nu."},
   "tryon.startAgain": {"en":"Start again","fi":"Aloita alusta","sv":"Börja om"},
   "tryon.saved": {"en":"Try-ons","fi":"Sovitukset","sv":"Provningar"},
+  "tryon.savedCount": {"en":"Try-ons ({count})","fi":"Sovitukset ({count})","sv":"Provningar ({count})"},
   "tryon.noGarments": { "en": "None of these items can be tried on.", "fi": "Mitään näistä vaatteista ei voi sovittaa.", "sv": "Inget av de här plaggen kan provas." }
 }

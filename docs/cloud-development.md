@@ -969,6 +969,27 @@ exported. Not additive: cancel of a missing or foreign chain answers
 Try-on activation (G9) stays held until this is applied, deployed and its gates
 pass (release-gates row M12).
 
+**TRYON-IDEA1 try on an unsaved Today idea (source only; hosted apply, Edge and Pages deploys owner-gated).**
+Adds `20261011090000_tryon_idea.sql`: the Today idea card can try its garments on directly, without saving an outfit
+first. `private.tryon_chains` and `private.tryon_results` allow a null `outfit_id` (the composite owner keys skip a null),
+chains gain `idea_item_ids` as the idea's immutable request identity, `tryon_claim` gains one trailing defaulted argument
+`p_item_ids uuid[]` (dropped with `RESTRICT`; service role only) and `tryon_results_v1` / `tryon_result_image_v1` also answer
+for results that have no outfit. The `try-on` Edge function accepts exactly one of `outfitId` or `itemIds` on step 1.
+Garments are the owner's own items only (a foreign id answers `NOT_FOUND`); layers, outerwear and accessories are not
+tried on. An idea's picture belongs to no outfit: it expires after 7 days, can be deleted by the owner, is listed under
+Today's Try-ons and counts toward the 20-result cap. A result without an outfit is returned by `tryon_results_v1` and
+`tryon_result_image_v1` only to a request that sends `X-Stillroom-TryOn-Results-Contract: 2` (the app's results reads send
+it); without the header an older cached client sees outfit results only and its strict parser keeps working. The owner's
+delete by id needs no header, and listing, reading and deleting work while try-on is off or paused. Deploy in this order,
+all before try-on activation: database, then the Edge function, then Pages. After applying the migration the operator
+reloads the PostgREST schema cache (`notify pgrst, 'reload schema'`) and runs the old-shaped (eight-argument) and new-shaped
+(nine-argument) non-dispatching claim checks with a random owner (both must answer `UNAVAILABLE` with no row) BEFORE the Edge
+function is deployed. An older Edge (or a database without the migration) refuses an idea before any claim or charge, a cached
+query that still names the old signature fails closed (function not found: nothing is claimed, held or charged), and outfit
+try-on works in every combination. The BUDGET1 header contract 2 is unchanged. Generated types: `database.types.ts` changes by the one
+`p_item_ids` argument and is taken byte for byte from the exact-head CI `database-types` artifact, never written by hand.
+Try-on activation (G9) and the probe are unchanged separate owner gates.
+
 Platform restore: after any database restore and before access reopens, run
 `select public.tryon_discard_transient();` as the database owner and record its
 counts in the restore receipt. It deletes every try-on result, chain and attempt
