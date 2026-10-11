@@ -291,12 +291,16 @@ export async function tryonPhotoProbes(snapshot, sql, mark) {
     // sees the table; both run in a block that is rolled back, so no other try-on row of the rehearsal is touched.
     equal((await put(a, photos.mine)).code, 'OK');
     equal((await put(b, photos.other)).code, 'OK');
+    // Statements, not one expression: a query never sees the deletes made by a volatile function it calls, so the photo count
+    // after the discard has to be read by a later statement.
     const rolled = await one(`create or replace function pg_temp.photo1_discard() returns jsonb language plpgsql as $$
-      declare res jsonb;
+      declare res jsonb; discarded jsonb; remaining bigint;
       begin
         begin
-          res := jsonb_build_object('absentBefore',private.deletion_owner_rows_absent(${literal(a.uid)}::uuid),
-            'discard',public.tryon_discard_transient(),'left',(select count(*) from private.tryon_person_photos));
+          res := jsonb_build_object('absentBefore',private.deletion_owner_rows_absent(${literal(a.uid)}::uuid));
+          discarded := public.tryon_discard_transient();
+          select count(*) into remaining from private.tryon_person_photos;
+          res := res || jsonb_build_object('discard',discarded,'left',remaining);
           raise exception 'PHOTO1_ROLLBACK';
         exception when others then
           if sqlerrm<>'PHOTO1_ROLLBACK' then raise; end if;
