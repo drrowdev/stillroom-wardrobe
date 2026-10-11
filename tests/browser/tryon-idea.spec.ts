@@ -1,8 +1,11 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { randomUUID } from 'node:crypto';
+import { lstat, mkdir, open } from 'node:fs/promises';
+import path from 'node:path';
 import { translate, type Language, type MessageKey } from '../../src/i18n/all';
 import '../../src/i18n/tryon';
+import { TRYON_NOTICE_REVISION } from '../../src/domain/tryon';
 import { mockBackend, owners, signIn, type TryOnSetup } from './mock-backend';
 import { expectSignedIn } from './shell-support';
 
@@ -52,7 +55,7 @@ async function start(page: Page, options: Start = {}) {
     peer: add('Robin private shirt', 'top', 'b') };
   if (options.missing) api.tryonControl.missing = true;
   if (options.setup !== null) api.tryonControl.setup[owners.a] = { activated: true, ...options.setup };
-  if (options.consent !== false) api.tryonControl.consent[owners.a] = 1;
+  if (options.consent !== false) api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION;
   await options.preload?.(api, clothes);
   await page.goto('/#/today'); await signIn(page);
   await expectSignedIn(page);
@@ -319,6 +322,60 @@ test.describe('try on an unsaved Today idea', () => {
       await openFromToday(page, language);
       await expect(page.locator('#tryon-subset')).toHaveText(text('tryon.subset', language));
       await expect(page.locator('.tryon-garments')).toHaveAttribute('aria-label', text('tryon.steps', language));
+    });
+  }
+});
+
+// TRYON-IDEA1 visual evidence for Today: two bounded viewport captures (never full page), written by their selected project
+// only; every project keeps the functional and axe assertions. Synthetic garments and picture, ignored buffers.
+test.describe('bounded TRYON-IDEA1 Today visual evidence', () => {
+  test.describe.configure({ retries: 0 });
+  const scenes = [
+    { scene: 'idea-card', project: 'chromium', language: 'en', width: 1280, suffix: 'en-desktop' },
+    { scene: 'ideas-list', project: 'mobile', language: 'fi', width: 320, suffix: 'fi-320' },
+  ] as const;
+  for (const selected of scenes) {
+    test(`${selected.scene} ${selected.suffix} retains functional assertions in every project`, async ({ page }, testInfo: TestInfo) => {
+      const language: Language = selected.language;
+      const write = testInfo.project.name === selected.project;
+      const directory = path.resolve('test-results/tryon-visual');
+      if (write) {
+        await mkdir(directory, { recursive: true });
+        const info = await lstat(directory); expect(info.isDirectory() && !info.isSymbolicLink()).toBe(true);
+      }
+      await page.setViewportSize({ width: selected.width, height: 900 });
+      if (selected.scene === 'idea-card') {
+        await start(page, { language });
+        await expect(tryOn(page)).toHaveText(text('tryon.ideaOpen', language));
+        await tryOn(page).scrollIntoViewIfNeeded();
+      } else {
+        await start(page, { language, preload: (api, clothes) => {
+          for (const [ago, itemId] of [[1000, clothes.top.id], [2000, clothes.trousers.id]] as const) {
+            api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId: null, itemIds: [itemId], image: api.fixture,
+              completedAtMs: Date.now() - ago, expiresAtMs: Date.now() + 3 * 86_400_000 });
+          }
+        } });
+        const saved = page.locator('#tryon-ideas');
+        await expect(saved.locator('summary')).toHaveText(text('tryon.savedCount', language, { count: 2 }));
+        await saved.locator('summary').click();
+        await expect(saved.locator('.tryon-saved-list img')).toHaveCount(2);
+        for (const image of await saved.locator('.tryon-saved-list img').all()) await expect(image).toHaveJSProperty('complete', true);
+        await saved.scrollIntoViewIfNeeded();
+      }
+      await axe(page);
+      expect(await page.evaluate(({ expectedLanguage, width }) => {
+        const privatePattern = /jwt|eyJ|sb_|service_role|[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/i;
+        return location.hostname === '127.0.0.1' && document.documentElement.lang === expectedLanguage && innerWidth === width
+          && document.documentElement.scrollWidth <= innerWidth && !document.querySelector('input[type=password],#email,#password')
+          && !privatePattern.test(document.body.innerText);
+      }, { expectedLanguage: language, width: selected.width })).toBe(true);
+      if (write) {
+        const png = await page.screenshot({ fullPage: false, animations: 'disabled', type: 'png', scale: 'css' });
+        expect(png.byteLength > 0 && png.byteLength <= 1048576).toBe(true);
+        expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && png.readUInt32BE(16) === selected.width).toBe(true);
+        const file = await open(path.join(directory, `${selected.scene}-${selected.suffix}.png`), 'wx');
+        try { await file.writeFile(png); } finally { await file.close(); }
+      }
     });
   }
 });

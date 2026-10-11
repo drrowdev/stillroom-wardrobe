@@ -736,6 +736,14 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     consentWrites: [] as { owner: string; body: unknown }[],
     /** The picture each step returns and the final result: a small JPEG. */
     picture: null as Buffer | null,
+    /** TRYON-PHOTO1: each owner's one saved reference photo, call counts, scripted faults and holds on the next reads. */
+    photos: {} as Record<string, { jpeg: Buffer; sha256: string; savedAtMs: number }>,
+    photoCalls: { status: 0, get: 0, put: 0, delete: 0 },
+    photoDeletes: 0,
+    photoFaults: { status: [], get: [], put: [], delete: [] } as Record<'status' | 'get' | 'put' | 'delete', ('fail' | 'abort')[]>,
+    photoHolds: [] as Promise<void>[],
+    /** Every status read fails while this is true (an existing server photo stays in `photos`). */
+    photoStatusDown: false,
   };
   // AD1b admin: which owner is the app's admin (none by default), each account's limits and a scripted write reply.
   // Without a script a write behaves like admin_set_ai_limits_v2 for the fixture: CONFLICT, UNCHANGED or OK.
@@ -1026,6 +1034,35 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       // A result without an outfit is listed and readable only for a request that opts in, as the database does.
       const ideasOn = request.headers()['x-stillroom-tryon-results-contract'] === '2';
       const visible = live.filter(row => row.outfitId !== null || ideasOn);
+      // TRYON-PHOTO1: the one saved reference photo. Status/get/delete need only the owner; put needs consent at the supported revision (2).
+      if (name.startsWith('tryon_person_photo_')) {
+        const call = name.slice('tryon_person_photo_'.length, -'_v1'.length) as 'status' | 'get' | 'put' | 'delete';
+        tryonControl.photoCalls[call]++;
+        const fault = (call === 'status' && tryonControl.photoStatusDown ? 'fail' : undefined) ?? tryonControl.photoFaults[call].shift();
+        const hold = call === 'get' ? tryonControl.photoHolds.shift() : undefined;
+        if (hold) await hold;
+        if (fault === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
+        if (fault === 'abort') { await route.abort('failed'); return; }
+        const row = tryonControl.photos[owner];
+        if (call === 'status') { await json(row ? { code: 'OK', saved: true, bytes: row.jpeg.length, savedAtMs: row.savedAtMs } : { code: 'OK', saved: false }); return; }
+        if (call === 'get') {
+          await json(row ? { code: 'OK', jpegBase64: row.jpeg.toString('base64'), sha256: row.sha256, bytes: row.jpeg.length, savedAtMs: row.savedAtMs }
+            : { code: 'NOT_FOUND' }); return;
+        }
+        if (call === 'delete') { tryonControl.photoDeletes++; delete tryonControl.photos[owner]; await json({ code: 'OK', saved: false }); return; }
+        const consent = tryonControl.consent[owner] ?? null;
+        if (!setup.configured) { await json({ code: 'UNCONFIGURED' }); return; }
+        if (!setup.activated) { await json({ code: 'INACTIVE' }); return; }
+        if (consent !== 2 || setup.noticeRevision !== 2) { await json({ code: 'CONSENT_REQUIRED' }); return; }
+        const text = typeof body.p_jpeg_base64 === 'string' ? body.p_jpeg_base64 : '';
+        const jpeg = Buffer.from(text, 'base64');
+        const size = jpegSize(jpeg);
+        if (!jpeg.length || jpeg.length > 512000 || createHash('sha256').update(jpeg).digest('hex') !== body.p_sha256
+          || size?.width !== 1024 || size.height !== 1280) { await json({ code: 'INVALID_INPUT' }); return; }
+        const savedAtMs = Date.now();
+        tryonControl.photos[owner] = { jpeg, sha256: String(body.p_sha256), savedAtMs };
+        await json({ code: 'OK', saved: true, bytes: jpeg.length, savedAtMs }); return;
+      }
       if (name === 'tryon_status' || name === 'tryon_set_consent') {
         if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }); return; }
         if (name === 'tryon_set_consent') {
@@ -1034,6 +1071,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
           if (body.p_enabled && (!setup.activated || body.p_notice_revision !== setup.noticeRevision)) { await json({ code: 'CONFIG_CHANGED' }); return; }
           tryonControl.consent[owner] = body.p_enabled ? setup.noticeRevision : null;
           if (!body.p_enabled) for (const chain of tryonControl.chains) if (chain.owner === owner && chain.state === 'running') chain.state = 'withdrawn';
+          // Withdrawal removes the saved photo in the same transaction (the ai_controls trigger).
+          if (!body.p_enabled) delete tryonControl.photos[owner];
         } else tryonControl.statusReads++;
         await json(tryOnStatusReply(setup, tryonControl.consent[owner] ?? null, live.length)); return;
       }

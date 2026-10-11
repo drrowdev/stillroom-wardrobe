@@ -80,7 +80,7 @@ const READ_ONLY_RPCS = new Set(['admin_status', 'analyzed_item_save_preflight', 
   'image_change_requests', 'image_change_status', 'image_recovery_preflight', 'image_recovery_versions', 'item_attribution_history',
   'item_attribution_history_v2', 'attribution_digest',
   'item_deletion_operation_status', 'item_deletion_operations', 'item_deletion_status', 'restore_image_change_status',
-  'restore_item_save_status']);
+  'restore_item_save_status', 'tryon_person_photo_status_v1']);
 
 // Every row of the ten owner tables (paged until exhausted) and every stored object with its SHA-256, read as the owner.
 async function snapshot({ client, scope }: Owner): Promise<Snapshot> {

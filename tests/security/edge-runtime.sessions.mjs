@@ -534,7 +534,7 @@ async function main() {
       check(PROVIDER, 'tryon-frozen-same-token', refused(frozenTryOn, 403, 'UNAVAILABLE'), summary(frozenTryOn));
       const revoked = await client.rpc(B, 'tryon_set_consent', { p_enabled: false, p_notice_revision: null });
       const noConsent = await tryOn(B.token, fields(id(B, 33), 1, id(B, 4), outfitB), person());
-      const reconsented = await client.rpc(B, 'tryon_set_consent', { p_enabled: true, p_notice_revision: 1 });
+      const reconsented = await client.rpc(B, 'tryon_set_consent', { p_enabled: true, p_notice_revision: 2 });
       check(PROVIDER, 'tryon-consent-required', revoked?.code === 'CONSENT_REQUIRED' && refused(noConsent, 403, 'CONSENT_REQUIRED')
         && reconsented?.code === 'OK', { revoked: revoked?.code, call: summary(noConsent) });
       counted = await count();

@@ -29,14 +29,15 @@ const TRYON_STOP_VERSION = '20261004090000';
 const SAVE1_PRIOR_VERSION = '20261007090000';
 const BUDGET1_PRIOR_VERSION = '20261009090000';
 const IDEA_PRIOR_VERSION = '20261010090000';
+const PHOTO_PRIOR_VERSION = '20261011090000';
 // Exact applied prefix per labelled stage; 'target' is the full source inventory.
 const STAGE_VERSIONS = Object.freeze({ base: '20260905000000', 'hosted-source': HOSTED_SOURCE_VERSION,
   'prior-main': PRIOR_MAIN_VERSION, 'azure-target': AZURE_TARGET_VERSION, 'image-change': IMAGE_CHANGE_VERSION,
   colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, 'save1-prior': SAVE1_PRIOR_VERSION, 'budget1-prior': BUDGET1_PRIOR_VERSION,
-  'idea-prior': IDEA_PRIOR_VERSION, target: null });
+  'idea-prior': IDEA_PRIOR_VERSION, 'photo-prior': PHOTO_PRIOR_VERSION, target: null });
 const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], 'image-change': ['azure-target', 'hosted-source'],
   colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], 'budget1-prior': ['save1-prior'],
-  'idea-prior': ['budget1-prior'], target: ['idea-prior'] });
+  'idea-prior': ['budget1-prior'], 'photo-prior': ['idea-prior'], target: ['photo-prior'] });
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -73,6 +74,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261009090000_stylist_weather_outerwear.sql', version: '20261009090000', time: '2026-10-09 09:00:00', bytes: 7237, sha256: '72f11f973476ac8d92f73cdca826871d41350e6161655c1f4f23eb97de691e56' },
   { name: '20261010090000_shared_ai_budget.sql', version: '20261010090000', time: '2026-10-10 09:00:00', bytes: 63172, sha256: '8c813bd31aebfc4fdf515b9f34fc9571f6be841878b64a220e9c73e2df1bb79e' },
   { name: '20261011090000_tryon_idea.sql', version: '20261011090000', time: '2026-10-11 09:00:00', bytes: 24325, sha256: '666e3da6a75033d7a6a43678f879c07f1584b4eea1b5b6867e379f3854ff4d4a' },
+  { name: '20261011100000_tryon_person_photo.sql', version: '20261011100000', time: '2026-10-11 10:00:00', bytes: 21848, sha256: '465973355f31dd3137ffc2168820c318a77a87c417c01b1969e882ce5ee12331' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1371,16 +1373,32 @@ async function main() {
       stage = 'IDEA1-seed';
       const { ideaUpgradeSeed, ideaUpgradeVerify, tryonIdeaProbes } = await import('../tests/integration/tryon-idea.sessions.mjs');
       const ideaSeed = await ideaUpgradeSeed(colourSnapshot, privilegedLocalSql);
-      stage = 'IDEA1-prior-to-target';
-      await migrateToStage(run, 'idea-prior', 'target');
+      stage = 'IDEA1-prior-to-photo-prior';
+      await migrateToStage(run, 'idea-prior', 'photo-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
-      await history('target'); await verifyCiStorageGuard();
+      await history('photo-prior'); await verifyCiStorageGuard();
       stage = 'IDEA1-upgrade-verify';
       await ideaUpgradeVerify(ideaSeed, (label) => { stage = `IDEA1-upgrade-${label}`; });
       stage = 'IDEA1-tryon-idea';
       await tryonIdeaProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `IDEA1-${label}`; }, localService);
       colourFinalizer.assertRunning();
+      // TRYON-PHOTO1: the IDEA1 checks ran at their own exact inventory. Both owners are configured at notice revision 1 and have
+      // consented at revision 1 first; the photo migration is applied; then the configured notice is proven moved to 2 with the
+      // consent untouched, a revision-1 consent is refused a photo, and the new contract is probed.
+      stage = 'PHOTO1-seed';
+      const { photoUpgradeSeed, photoUpgradeVerify, tryonPhotoProbes } = await import('../tests/integration/tryon-photo.sessions.mjs');
+      const photoSeed = await photoUpgradeSeed(colourSnapshot, privilegedLocalSql);
+      stage = 'PHOTO1-prior-to-target';
+      await migrateToStage(run, 'photo-prior', 'target');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('target'); await verifyCiStorageGuard();
+      stage = 'PHOTO1-upgrade-verify';
+      await photoUpgradeVerify(photoSeed, (label) => { stage = `PHOTO1-upgrade-${label}`; });
+      stage = 'PHOTO1-tryon-photo';
+      await tryonPhotoProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `PHOTO1-${label}`; });
+      colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
+    console.log('PASS: TRYON-PHOTO1 saved reference photo; the photo migration was applied after the frozen checks, the configured notice moved to revision 2 with consent left at 1, a revision-1 consent cannot save a photo, saves are admitted only for the app\'s own JPEG shape, each owner has one private photo that only they can read, replace or remove, withdrawal and any notice change remove it, removal needs no activation, a save racing a withdrawal never survives it, and the platform-restore step removes every photo; no provider calls');
     console.log('PASS: TRYON-IDEA1 unsaved try-on; the idea migration was applied after the frozen checks, an idea chain is claimed from the owner\'s own items without an outfit, keeps its identity, is isolated per owner, and its results are visible and deletable without an outfit while outfit try-on is unchanged; no provider calls');
     console.log('PASS: FILT1 upgrade; try-on and enhancement rows settled by the old finishes keep their digest, origin, anomaly and amount after the provider_refusal migration, the new columns are null, replays with the refusal arguments omitted or null match and write nothing; seeded rows removed before the compare; no provider calls');
     console.log('PASS: BUDGET1 shared monthly budget; frozen upgrade checks ran at the exact prior inventory, then the budget migration was applied and the new contract (one shared sum across analysis, Stylist, cleanup and try-on, no hourly request limit, header-selected and fail-closed without the header, withdrawal effective, probe authorisation not double-subtracted) was probed; no provider calls');

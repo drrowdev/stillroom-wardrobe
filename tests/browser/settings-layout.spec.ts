@@ -34,7 +34,7 @@ function sheetTexts(feature: Feature, language: Language): string[] {
     analysis: ['aiC.processing', 'aiC.azureNotice', 'aiC.retentionTitle', 'aiC.azureTrainingNotice', 'aiC.retentionNotice',
       'aiC.chargesTitle', 'aiC.allowanceNotice', 'aiC.usageNotice', 'aiC.optOutNotice'],
     enhance: ['enhanceC.noticeSent', 'enhanceC.noticeRedraw', 'enhanceC.noticeProcessing', 'enhanceC.noticeCharges'],
-    tryon: ['tryonC.noticeSent', 'tryonC.noticeResult', 'tryonC.noticeProcessing', 'tryonC.noticeCharges'],
+    tryon: ['tryonC.notice2Sent', 'tryonC.notice2Saved', 'tryonC.notice2Result', 'tryonC.notice2Processing', 'tryonC.notice2Charges'],
     stylist: ['stylistC.fieldsTitle', 'stylistC.fields', 'stylistC.processing', 'stylistC.azureNotice', 'aiC.retentionTitle',
       'stylistC.trainingNotice', 'stylistC.retention', 'aiC.chargesTitle', 'stylistC.chargeNotice', 'stylistC.usageNotice', 'stylistC.optOut'],
   };

@@ -10,8 +10,10 @@ import { BODY_ASPECT, BodyPhotoError, admitBodySource, prepareBodyPhoto, type Bo
 import { largestAspectCrop, type PhotoEdit } from '../../../images/crop';
 import { CropEditor } from '../../../images/crop-editor';
 import { tryOnStoreFor, type TryOnStore } from '../../settings/tryon-store';
+import { loadPersonPhoto, readPersonPhoto, removePersonPhoto, savePersonPhoto, type LoadedPersonPhoto } from '../../settings/tryon-photo';
+import { SavedPhotoCard } from '../../settings/saved-photo-card';
 import { useOutfit } from '../use-outfits';
-import { browserEnvironment, failureAction, ideaSelection, itemName, slotKey, TryOnRun, tryOnSelection, useTryOnStatus, type FailureKind, type RunPhase } from '../use-try-on';
+import { browserEnvironment, deletionDate, failureAction, ideaSelection, itemName, slotKey, TryOnRun, tryOnSelection, useTryOnStatus, type FailureKind, type RunPhase } from '../use-try-on';
 import { ConfirmDialog, TryOnPicture } from './try-on-parts';
 
 type Common = { client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; onBack: () => void };
@@ -42,8 +44,11 @@ export function TryOnScreen(props: Props) {
   else if (!view.data || !record) body = view.error
     ? <div className="notice notice-error" role="alert"><span>{t(view.error)}</span><button type="button" className="text-button" disabled={!online} onClick={view.reload}>{t('common.retry')}</button></div>
     : <p role="status">{t('common.loading')}</p>;
-  else if (!store || status === null) body = <p role="status">{t('common.loading')}</p>;
-  else if (!tryOnReady(status)) body = <p className="notice" role="status">{t(status.code === 'CONSENT_REQUIRED' ? 'tryon.failure.turnedOff' : 'tryon.failure.unavailable')}</p>;
+  else if (!store || status === null) body = <><p role="status">{t('common.loading')}</p>{store && <SavedPhotoCard store={store} online={online} language={props.language} t={t} />}</>;
+  else if (!tryOnReady(status)) body = <>
+    <p className="notice" role="status">{t(status.code === 'CONSENT_REQUIRED' ? 'tryon.failure.turnedOff' : 'tryon.failure.unavailable')}</p>
+    <SavedPhotoCard store={store} online={online} language={props.language} t={t} />
+  </>;
   else body = <Setup {...props} store={store} components={view.data.components} selection={tryOnSelection(record, view.data.components)}
     onStart={(steps, photo) => {
       const next = new TryOnRun(store.api, store, browserEnvironment(), record.id, steps, photo.bytes);
@@ -76,8 +81,11 @@ export function IdeaTryOnScreen(props: Common & { idea: TryOnIdeaSeed | null }) 
   if (run && store && idea) body = <RunView key={run.id} {...props} store={store} run={run} components={idea.components}
     onRestart={() => { run.abandon(); setRun(null); focus('tryon-choose'); }}
     onClose={() => { run.abandon(); onBack(); }} />;
-  else if (!idea || !selection || !store || status === null) body = <p role="status">{t('common.loading')}</p>;
-  else if (!tryOnReady(status)) body = <p className="notice" role="status">{t(status.code === 'CONSENT_REQUIRED' ? 'tryon.failure.turnedOff' : 'tryon.failure.unavailable')}</p>;
+  else if (!idea || !selection || !store || status === null) body = <><p role="status">{t('common.loading')}</p>{store && <SavedPhotoCard store={store} online={props.online} language={props.language} t={t} />}</>;
+  else if (!tryOnReady(status)) body = <>
+    <p className="notice" role="status">{t(status.code === 'CONSENT_REQUIRED' ? 'tryon.failure.turnedOff' : 'tryon.failure.unavailable')}</p>
+    <SavedPhotoCard store={store} online={props.online} language={props.language} t={t} />
+  </>;
   else body = <Setup {...props} store={store} components={idea.components} selection={selection}
     onStart={(steps, photo) => {
       const next = new TryOnRun(store.api, store, browserEnvironment(), { itemIds: steps.map(step => step.itemId) }, steps, photo.bytes);
@@ -96,7 +104,9 @@ type SetupProps = Common & {
   store: TryOnStore; selection: TryOnSelection; components: ReadonlyMap<string, OutfitComponent>;
   onStart: (steps: TryOnStep[], photo: BodyPhoto) => void;
 };
-function Setup({ selection, components, online, t, onStart }: SetupProps) {
+type Stored = { kind: 'idle' | 'loading' | 'none' | 'unknown' | 'unusable' | 'failed' } | { kind: 'ready'; photo: Extract<LoadedPersonPhoto, { kind: 'ready' }>; url: string };
+
+function Setup({ store, selection, components, online, language, t, onStart }: SetupProps) {
   const input = useRef<HTMLInputElement>(null);
   const preparation = useRef<AbortController | null>(null);
   const focusStart = useRef(false);
@@ -108,22 +118,58 @@ function Setup({ selection, components, online, t, onStart }: SetupProps) {
   const [photo, setPhoto] = useState<BodyPhoto | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
+  // TRYON-PHOTO1: the saved reference photo. Its bytes are fetched here for this screen only and dropped with it.
+  const saved = useSyncExternalStore(store.subscribePhoto, store.getPhoto);
+  const savedAt = saved.saved?.savedAtMs ?? null;
+  const [stored, setStored] = useState<Stored>({ kind: 'idle' });
+  const [attempt, setAttempt] = useState(0);
+  const [savedThis, setSavedThis] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removedNote, setRemovedNote] = useState(false);
+  const removeButton = useRef<HTMLButtonElement>(null);
+  const photoChosen = photo !== null;
+  const readKnown = saved.read !== 'unknown';
+  // A failed status read with nothing confirmed: a photo may or may not exist, so it is never treated as "none".
+  const statusUnknown = saved.read === 'failed' && saved.saved === null;
+  useEffect(() => { void readPersonPhoto(store); }, [store]);
+  useEffect(() => {
+    if (photoChosen) return;
+    if (!readKnown) { setStored({ kind: 'idle' }); return; }
+    if (statusUnknown) { setStored({ kind: 'unknown' }); return; }
+    if (savedAt === null) { setStored({ kind: 'none' }); return; }
+    const controller = new AbortController();
+    let url: string | null = null;
+    setStored({ kind: 'loading' });
+    void loadPersonPhoto(store, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      if (result.kind === 'ready') {
+        url = URL.createObjectURL(new Blob([result.bytes], { type: 'image/jpeg' }));
+        setStored({ kind: 'ready', photo: result, url });
+      // A save, removal or consent change moved the state while this was in flight: read it again instead of using the bytes.
+      } else if (result.kind === 'stale') {
+        if (!store.disposed) { void readPersonPhoto(store); setAttempt((value) => value + 1); }
+      } else { setStored({ kind: result.kind }); if (result.kind === 'none') void readPersonPhoto(store); }
+    });
+    return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
+  }, [store, savedAt, readKnown, statusUnknown, photoChosen, attempt]);
   useEffect(() => () => { if (sourceUrl) URL.revokeObjectURL(sourceUrl); }, [sourceUrl]);
   useEffect(() => () => { if (photoUrl) URL.revokeObjectURL(photoUrl); }, [photoUrl]);
   useEffect(() => () => preparation.current?.abort(), []);
+  const active: BodyPhoto | null = photo ?? (stored.kind === 'ready' ? stored.photo : null);
   // The start button is enabled only once preparation has finished, so focus moves there after that render.
   useEffect(() => {
-    if (preparing || !photo || !focusStart.current) return;
+    if (preparing || !active || !focusStart.current) return;
     focusStart.current = false;
     document.getElementById('tryon-start')?.focus();
-  }, [preparing, photo]);
+  }, [preparing, active]);
   const clear = useCallback(() => {
     preparation.current?.abort();
     setSource(null); setSourceUrl(null); setEdit(null); setEditing(false); setPreparing(false); setPhoto(null); setPhotoUrl(null);
+    setSavedThis(false);
   }, []);
   async function choose(file: File | undefined) {
     if (!file) return;
-    clear(); setError(null);
+    clear(); setError(null); setRemovedNote(false);
     const controller = new AbortController();
     preparation.current = controller;
     setPreparing(true);
@@ -150,7 +196,7 @@ function Setup({ selection, components, online, t, onStart }: SetupProps) {
     try {
       const prepared = await prepareBodyPhoto(source, next, controller.signal);
       if (controller.signal.aborted) return;
-      setEdit(next); setPhoto(prepared); setEditing(false);
+      setEdit(next); setPhoto(prepared); setEditing(false); setSavedThis(false);
       setPhotoUrl(URL.createObjectURL(new Blob([prepared.bytes], { type: 'image/jpeg' })));
       focusStart.current = true;
     } catch (failure) {
@@ -165,7 +211,20 @@ function Setup({ selection, components, online, t, onStart }: SetupProps) {
     if (!photo) clear();
     focus(photo ? 'tryon-edit' : 'tryon-choose');
   }
+  async function keepPhoto() {
+    if (!photo) return;
+    const result = await savePersonPhoto(store, photo);
+    if (result === 'saved') setSavedThis(true);
+  }
+  async function removeSaved() {
+    setRemoving(false);
+    if (await removePersonPhoto(store)) { setRemovedNote(true); focus('tryon-choose'); }
+    else requestAnimationFrame(() => removeButton.current?.focus());
+  }
   const count = selection.steps.length;
+  const shownUrl = photoUrl ?? (stored.kind === 'ready' ? stored.url : null);
+  const waiting = !photo && (stored.kind === 'idle' || stored.kind === 'loading') && (!readKnown || savedAt !== null);
+  const storedProblem: MessageKey | null = photo ? null : stored.kind === 'unknown' ? 'tryon.photoStatusFailed' : stored.kind === 'unusable' ? 'tryon.photoUnusableSaved' : stored.kind === 'failed' ? 'tryon.photoLoadFailed' : null;
   return <div className="stack">
     {count > 0 && <p id="tryon-subset" className="tryon-subset">{t('tryon.subset')}</p>}
     <ul className="tryon-garments" aria-label={t('tryon.steps')} aria-describedby={count > 0 ? 'tryon-subset' : undefined}>
@@ -176,24 +235,40 @@ function Setup({ selection, components, online, t, onStart }: SetupProps) {
       <div className="photo-panel">
         {editing && source && sourceUrl && edit ? <CropEditor preview={sourceUrl} width={source.width} height={source.height} accepted={edit}
           preparing={preparing} t={t} aspect={BODY_ASPECT} applyUnchanged={!photo} onApply={(next) => { void apply(next); }} onCancel={cancelEdit} />
-          : <div className={`capture-photo tryon-photo ${photoUrl ? 'has-photo' : ''}`} aria-busy={preparing}>
-            {photoUrl ? <img src={photoUrl} alt={t('tryon.photoReady')} width={1024} height={1280} />
-              : preparing ? <p role="status">{t('tryon.preparing')}</p>
+          : <div className={`capture-photo tryon-photo ${shownUrl ? 'has-photo' : ''}`} aria-busy={preparing || waiting}>
+            {shownUrl ? <img src={shownUrl} alt={t(photo ? 'tryon.photoReady' : 'tryon.savedPhoto')} width={1024} height={1280} />
+              : preparing || waiting ? <p role="status">{t(preparing ? 'tryon.preparing' : 'common.loading')}</p>
               : <p className="muted" id="tryon-photo-tip">{t('tryon.photoTip')}</p>}
           </div>}
         <input ref={input} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1} aria-label={t('tryon.choosePhoto')}
           onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
+        {!editing && !photo && stored.kind === 'ready' && saved.saved && <p className="muted" id="tryon-saved-caption">{t('tryon.photoSavedOn', { date: deletionDate(saved.saved.savedAtMs, language) })}</p>}
         {!editing && <div className="photo-actions">
-          <button id="tryon-choose" type="button" className="button button-secondary" disabled={preparing} aria-describedby={photoUrl ? undefined : 'tryon-photo-tip'}
-            onClick={() => input.current?.click()}>{t(photo ? 'tryon.changePhoto' : 'tryon.choosePhoto')}</button>
+          <button id="tryon-choose" type="button" className="button button-secondary" disabled={preparing} aria-describedby={shownUrl ? undefined : 'tryon-photo-tip'}
+            onClick={() => input.current?.click()}>{t(active ? 'tryon.changePhoto' : 'tryon.choosePhoto')}</button>
           {photo && source && <button id="tryon-edit" type="button" className="button button-quiet" disabled={preparing} onClick={() => setEditing(true)}>{t('tryon.editCrop')}</button>}
+          {photo && !savedThis && readKnown && !statusUnknown && <button id="tryon-save-photo" type="button" className="button button-quiet" disabled={!online || preparing || saved.busy !== null}
+            onClick={() => { void keepPhoto(); }}>{t(saved.busy === 'save' ? 'common.saving' : savedAt !== null ? 'tryon.replacePhoto' : 'tryon.savePhoto')}</button>}
+          {!photo && (saved.saved || statusUnknown) && <button ref={removeButton} id="tryon-remove-photo" type="button" className="button button-quiet" disabled={!online || saved.busy !== null}
+            onClick={() => setRemoving(true)}>{t('tryon.removePhoto')}</button>}
+          {(storedProblem === 'tryon.photoLoadFailed' || statusUnknown) && <button id="tryon-photo-retry" type="button" className="button button-quiet" disabled={!online}
+            onClick={() => { if (statusUnknown) void readPersonPhoto(store); else setAttempt((value) => value + 1); }}>{t('common.retry')}</button>}
         </div>}
+        {photo && statusUnknown && <p className="notice notice-error" role="alert">{t('tryon.photoStatusFailed')}</p>}
+        {photo && savedThis && saved.error === null && <p role="status">{t('tryon.photoSaved')}</p>}
+        {removedNote && !saved.saved && <p role="status">{t('tryon.photoRemoved')}</p>}
+        {saved.error === 'save' && <p className="notice notice-error" role="alert">{t('tryon.photoSaveFailed')}</p>}
+        {saved.error === 'remove' && <p className="notice notice-error" role="alert">{t('tryon.removePhotoFailed')}</p>}
+        {storedProblem && <p className="notice notice-error" role="alert">{t(storedProblem)}</p>}
         {error && <p className="notice notice-error" role="alert">{t(error)}</p>}
+        {removing && <ConfirmDialog id="tryon-remove-photo-confirm" title={t('tryon.removePhotoTitle')} text={t('tryon.removePhotoText')}
+          confirm={t('tryon.removePhoto')} cancel={t('common.cancel')} danger onConfirm={() => { void removeSaved(); }}
+          onCancel={() => { setRemoving(false); requestAnimationFrame(() => removeButton.current?.focus()); }} />}
       </div>
-      {photo && !editing && <div className="stack">
+      {active && !editing && <div className="stack">
         <p className="muted" id="tryon-limit">{t('tryon.limitLine')}</p>
         <button id="tryon-start" type="button" className="button button-primary" aria-describedby="tryon-limit" disabled={!online || preparing}
-          onClick={() => { const bytes = photo; clear(); onStart(selection.steps, bytes); }}>
+          onClick={() => { const bytes = active; clear(); onStart(selection.steps, bytes); }}>
           {count === 1 ? t('tryon.startOne') : t('tryon.startMany', { count })}</button>
       </div>}
     </>}

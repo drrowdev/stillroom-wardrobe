@@ -715,6 +715,22 @@ async function foreignMatrix(attacker, victim) {
   const tryonResults = await probeRpc(attacker, victim, 'tryon_results_v1', {});
   if (control(attacker, 'tryon_results_v1', tryonResults.ok && isDeepStrictEqual(tryonResults.data, { code: 'OK', results: [] }),
     describe(tryonResults))) tag('tryon_results_v1', `${d}:owner-only`);
+  // TRYON-PHOTO1: the saved reference photo acts only on the caller's own row and takes no reference to anyone else. Neither
+  // fixture has try-on configured, so the owner-only reads are the empty states, removal is an idempotent own no-op and a save is
+  // refused by the owner's own consent state before any input is read. A saved photo's isolation, replacement and peer
+  // non-mutation need a consented owner and run in tests/integration/tryon-photo.sessions.mjs.
+  const photoStatus = await probeRpc(attacker, victim, 'tryon_person_photo_status_v1', {});
+  if (control(attacker, 'tryon_person_photo_status_v1', matchOutcome({ status: 200, data: { code: 'OK', saved: false } }, photoStatus),
+    describe(photoStatus))) tag('tryon_person_photo_status_v1', `${d}:owner-only`);
+  const photoGet = await probeRpc(attacker, victim, 'tryon_person_photo_get_v1', {});
+  if (control(attacker, 'tryon_person_photo_get_v1', matchOutcome({ status: 200, data: { code: 'NOT_FOUND' } }, photoGet),
+    describe(photoGet))) tag('tryon_person_photo_get_v1', `${d}:owner-only`);
+  const photoDelete = await probeRpc(attacker, victim, 'tryon_person_photo_delete_v1', {});
+  if (control(attacker, 'tryon_person_photo_delete_v1', matchOutcome({ status: 200, data: { code: 'OK', saved: false } }, photoDelete),
+    describe(photoDelete))) tag('tryon_person_photo_delete_v1', `${d}:owner-only`);
+  const photoPut = await probeRpc(attacker, victim, 'tryon_person_photo_put_v1', { p_jpeg_base64: null, p_sha256: null });
+  if (control(attacker, 'tryon_person_photo_put_v1', photoPut.ok && typeof photoPut.data?.code === 'string'
+    && ['UNCONFIGURED', 'INACTIVE', 'CONSENT_REQUIRED'].includes(photoPut.data.code), describe(photoPut))) tag('tryon_person_photo_put_v1', `${d}:owner-only`);
   await tryonReferenceProbes(attacker, victim);
   // The caller's own provenance only: exactly its fixture row, and the digest of that same list.
   const provenance = await probeRpc(attacker, victim, 'image_provenance_v1', {});
@@ -1205,6 +1221,10 @@ async function freezeCase(frozen, other) {
       ['stylist_set_consent', { p_enabled: false, p_notice_revision: null }, UNAVAILABLE],
       ['enhance_status', {}, UNAVAILABLE],
       ['enhance_set_consent', { p_enabled: false, p_notice_revision: null }, UNAVAILABLE],
+      ['tryon_person_photo_status_v1', {}, UNAVAILABLE],
+      ['tryon_person_photo_get_v1', {}, UNAVAILABLE],
+      ['tryon_person_photo_delete_v1', {}, UNAVAILABLE],
+      ['tryon_person_photo_put_v1', { p_jpeg_base64: null, p_sha256: null }, UNAVAILABLE],
       ['admin_status', {}, UNAVAILABLE],
       ['admin_ai_spending', { p_months: 6 }, UNAVAILABLE],
       ['image_provenance_v1', {}, { status: 403, code: '42501' }],

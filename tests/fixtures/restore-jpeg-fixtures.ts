@@ -1,7 +1,7 @@
 // Synthetic, decodable flat-colour JPEGs for restore tests (Q6). Every block has one DC value and no AC detail, with all
 // quantizers 8, so each component's DC coefficient is simply `value - 128`. Baseline, restart-marker, extended and
 // progressive variants share one bit writer; hostile variants are built by editing these bytes in the tests.
-import { joinBytes, jpegSegment } from './jpeg-helpers';
+import { joinBytes, jpegSegment } from './jpeg-helpers.ts';
 
 export type FlatJpegOptions = {
   width: number;

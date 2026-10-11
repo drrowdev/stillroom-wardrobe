@@ -102,7 +102,10 @@ Each step is on both phones unless it says otherwise.
 
 5. **Try-on first use.** After activation only. One saved outfit with your own
    photo: progress, Stop, the result with "Made with AI" and its keep-until date,
-   Delete, and the monthly figure in Settings.
+   Delete, and the monthly figure in Settings. With revision 2 of the notice you
+   can also press **Save photo** once and check that the next try-on starts from
+   it, that **Remove saved photo** works on the try-on screen and in Settings,
+   and that turning try-on off removes it.
    - Before activation: report `NOT ACTIVE`. Try-on acceptance stays **BLOCKED**.
 
 6. **P1: suggestions with 500 items.** From a clean checkout of C, run:

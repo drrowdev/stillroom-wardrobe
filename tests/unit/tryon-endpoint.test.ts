@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  TRYON_DEPLOYMENT, TRYON_MANIFEST, TRYON_MODEL, TRYON_PARAMETERS, TRYON_RESERVATION_MICRO, tryOnPrompt,
+  TRYON_DEPLOYMENT, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_PARAMETERS, TRYON_RESERVATION_MICRO, tryOnPrompt,
 } from '../../src/domain/tryon';
 import { classifyTryOnResponse, tryOnForm, tryOnUsagePayload } from '../../supabase/functions/try-on/azure';
 import { claimedWorkObserver, createTryOnHandler, TRYON_RPCS } from '../../supabase/functions/try-on/handler';
@@ -68,7 +68,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); registered.length = 0; claimedWorkObserver.current = null; });
   const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service',
     azure: { apiKey: 'fictional-azure-image' } };
-  const status = { code: 'OK', consent: { enabled: true, noticeRevision: 1 }, policy: { activated: true, noticeRevision: 1,
+  const status = { code: 'OK', consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION }, policy: { activated: true, noticeRevision: TRYON_NOTICE_REVISION,
     manifestId: TRYON_MANIFEST, modelId: TRYON_MODEL, maxRequestMicro: TRYON_RESERVATION_MICRO, providerAvailable: true },
   budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false } };
   const accounting = { basis: 'estimated', amountMicro: '252000', currency: 'USD' };
@@ -245,6 +245,11 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
       [{ consent: { enabled: false, noticeRevision: null } }, 'CONSENT_REQUIRED', register],
       [{ policy: { ...status.policy, providerAvailable: false } }, 'UNAVAILABLE', register],
       [{ policy: { ...status.policy, maxRequestMicro: '1000' } }, 'UNCONFIGURED', register],
+      // TRYON-PHOTO1: the handler keeps its exact equality check with the shared notice revision (2), never a range.
+      [{ policy: { ...status.policy, noticeRevision: TRYON_NOTICE_REVISION - 1 }, consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION - 1 } }, 'UNCONFIGURED', register],
+      [{ policy: { ...status.policy, noticeRevision: TRYON_NOTICE_REVISION + 1 }, consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION + 1 } }, 'UNCONFIGURED', register],
+      // Consent at another revision than the configured one never passes, whatever the configured revision is.
+      [{ consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION - 1 } }, 'CONSENT_REQUIRED', register],
       [{}, 'UNCONFIGURED', null]] as const) {
       const calls = backend({ status: { ...status, ...override } });
       const { transport } = provider(() => Response.json(imageBody()));
