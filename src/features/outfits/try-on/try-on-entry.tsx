@@ -22,14 +22,15 @@ export function TryOnButton({ client, scope, record, components, disabled, t, on
 
 /**
  * Saved try-ons of one outfit, or (`outfitId` null) of unsaved Today ideas: a collapsed list that loads its pictures only
- * when opened, so Today fetches nothing until the owner asks.
+ * when opened. The ideas' metadata list is read whenever the device is online, whatever the try-on status says (the status
+ * read may fail, and saved pictures must not vanish with it); a failed read is shown with Retry.
  */
 export function SavedTryOns({ client, scope, outfitId, online, language, t }: {
   client: AppClient; scope: OwnerScope; outfitId: string | null; online: boolean; language: Language; t: Translate;
 }) {
   const store = tryOnStoreFor(client, scope);
   const status = useTryOnStatus(store);
-  const { state, retry } = useOutfitTryOns(store?.api ?? null, outfitId, status !== null && status.results > 0);
+  const { state, retry } = useOutfitTryOns(store?.api ?? null, outfitId, outfitId === null ? online : status !== null && status.results > 0);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [open, setOpen] = useState(false);
   // Idempotent: reporting the same removal again changes nothing and renders nothing.

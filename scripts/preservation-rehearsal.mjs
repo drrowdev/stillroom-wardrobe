@@ -72,7 +72,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261008080000_analysis_model_identity.sql', version: '20261008080000', time: '2026-10-08 08:00:00', bytes: 11083, sha256: '1a3b8c3d1723378f0734dd1828bddf235a68af5e6fe1c7711ff7fa2a4a952e19' },
   { name: '20261009090000_stylist_weather_outerwear.sql', version: '20261009090000', time: '2026-10-09 09:00:00', bytes: 7237, sha256: '72f11f973476ac8d92f73cdca826871d41350e6161655c1f4f23eb97de691e56' },
   { name: '20261010090000_shared_ai_budget.sql', version: '20261010090000', time: '2026-10-10 09:00:00', bytes: 63172, sha256: '8c813bd31aebfc4fdf515b9f34fc9571f6be841878b64a220e9c73e2df1bb79e' },
-  { name: '20261011090000_tryon_idea.sql', version: '20261011090000', time: '2026-10-11 09:00:00', bytes: 24372, sha256: '9f4bcb260aba68fd0222d57a91671ac071914ccd10242eaebe9e51487751d9b0' },
+  { name: '20261011090000_tryon_idea.sql', version: '20261011090000', time: '2026-10-11 09:00:00', bytes: 24325, sha256: '666e3da6a75033d7a6a43678f879c07f1584b4eea1b5b6867e379f3854ff4d4a' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.

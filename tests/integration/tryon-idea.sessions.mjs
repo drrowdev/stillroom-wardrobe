@@ -236,9 +236,16 @@ export async function tryonIdeaProbes(snapshot, sql, mark, service) {
 
     mark('readiness');
     // The operator reloads the PostgREST schema cache, then runs the old- and new-shaped non-dispatching checks over HTTP: a
-    // random owner is refused UNAVAILABLE before any row, for the eight-argument and the nine-argument shape alike.
+    // random owner is refused UNAVAILABLE before any row, for the eight-argument and the nine-argument shape alike. Accounting
+    // from earlier stages is durable and stays; the calls must leave the baseline exactly as it was.
     if (service) {
       const serviceRpc = serviceRpcOf(service);
+      const baseline = async () => one(`select jsonb_build_object('mine',(select jsonb_build_object('usage',count(*)) from private.ai_usage
+        where owner_id=${literal(a.uid)} and purpose='try_on'),'workflow',(select jsonb_build_object('chains',count(*),'results',
+        (select count(*) from private.tryon_results),'attempts',(select count(*) from private.tryon_attempts),
+        'evidence',(select count(*) from private.ai_usage_evidence where tryon_dispatch_before is not null),
+        'usage',(select count(*) from private.ai_usage where purpose='try_on')) from private.tryon_chains));`);
+      const quiet = await baseline();
       await sql(`notify pgrst, 'reload schema';`);
       const shape = () => ({ p_owner_id: randomUUID(), p_chain_id: randomUUID(), p_step: 1, p_request_id: randomUUID(), p_manifest_id: MANIFEST,
         p_outfit_id: randomUUID(), p_person_sha256: null, p_probe_id: null });
@@ -249,7 +256,7 @@ export async function tryonIdeaProbes(snapshot, sql, mark, service) {
         requireEvidence(Date.now() < until);
         await delay(250);
       }
-      equal((await rows(a)).usage, 0);
+      equal(await baseline(), quiet);
     }
 
     mark('input');
@@ -350,6 +357,22 @@ export async function tryonIdeaProbes(snapshot, sql, mark, service) {
     equal(await claim(a, early, 1, randomUUID(), { items: [top, bottom] }), { code: 'CANCELLED', claimed: false });
     equal(await claim(a, early, 1, randomUUID(), { items: [top], outfit }), { code: 'INVALID_INPUT', claimed: false });
     equal(await rows(a), beforeEarly);
+    // After step 1 even the chain's own outfit id is refused, before any hold: neither subject is carried on a later step.
+    const trio = await h.saveOutfit(a, [top, bottom, shoes], 'Fictional continuation outfit');
+    const running = fresh();
+    const first = await runStep(a, running, 1, { outfit: trio });
+    const heldBefore = await rows(a);
+    const slotsBefore = await scalar(`select count(*) from private.ai_usage where owner_id=${literal(a.uid)} and purpose='try_on'
+      and charge_state='held';`);
+    for (const options of [{ outfit: trio }, { outfit: randomUUID() }, { items: [top, bottom, shoes] }, { outfit: trio, items: [top] }]) {
+      equal(await claim(a, running, 2, randomUUID(), { ...options, person: first.out.sha }), { code: 'INVALID_INPUT', claimed: false });
+    }
+    equal(await rows(a), heldBefore);
+    equal(await scalar(`select count(*) from private.ai_usage where owner_id=${literal(a.uid)} and purpose='try_on'
+      and charge_state='held';`), slotsBefore);
+    // The continuation with neither subject goes on, and the chain completes.
+    const second = await runStep(a, running, 2, { person: first.out.sha });
+    await runStep(a, running, 3, { person: second.out.sha, last: true });
 
     mark('selection');
     // SQL and TypeScript pick the same garments, in the same slots, for the same list.

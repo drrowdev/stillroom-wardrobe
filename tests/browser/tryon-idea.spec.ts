@@ -236,6 +236,29 @@ test.describe('try on an unsaved Today idea', () => {
     expect(api.tryonControl.results.map((row) => row.id)).toEqual([ids[1]]);
   });
 
+  test('stored unsaved try-ons stay listed when the status read fails, with no Show on me button', async ({ page }) => {
+    engineOnly();
+    const ids: string[] = [];
+    const { api } = await start(page, { preload: async (api, clothes) => {
+      await page.route('**/rest/v1/rpc/tryon_status', async route => {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: '{"message":"fixture"}' });
+      });
+      const id = randomUUID();
+      ids.push(id);
+      api.tryonControl.results.push({ id, owner: owners.a, outfitId: null, itemIds: [clothes.top.id], image: api.fixture,
+        completedAtMs: Date.now() - 1000, expiresAtMs: Date.now() + 3_600_000 });
+    } });
+    const saved = page.locator('#tryon-ideas');
+    await expect(saved.locator('summary')).toHaveText(text('tryon.savedCount', 'en', { count: 1 }));
+    await expect(tryOn(page)).toHaveCount(0);
+    await saved.locator('summary').click();
+    await expect(saved.locator('.tryon-saved-list img')).toBeVisible();
+    await page.locator(`#tryon-${ids[0]}-delete`).click();
+    await page.locator(`#tryon-${ids[0]}-confirm-confirm`).click();
+    await expect(saved.locator('.tryon-saved-list img')).toHaveCount(0);
+    expect(api.tryonControl.deletes).toEqual([ids[0]]);
+  });
+
   test('a failed list of unsaved try-ons is shown with Retry, never hidden', async ({ page }) => {
     engineOnly();
     let failing = true;

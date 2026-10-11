@@ -170,7 +170,7 @@ begin
     or (p_step=1 and (p_outfit_id is null) = (p_item_ids is null))
     or (p_step=1 and t.chain_id is not null and (p_outfit_id is distinct from t.outfit_id
       or p_item_ids is distinct from t.idea_item_ids))
-    or (p_step>1 and (p_item_ids is not null or (p_outfit_id is not null and p_outfit_id is distinct from t.outfit_id)))
+    or (p_step>1 and (p_item_ids is not null or p_outfit_id is not null))
     or (p_item_ids is not null and (coalesce(array_ndims(p_item_ids),0)<>1 or cardinality(p_item_ids) not between 1 and 8
       or array_position(p_item_ids,null) is not null
       or (select count(distinct x) from unnest(p_item_ids) x)<>cardinality(p_item_ids))) then

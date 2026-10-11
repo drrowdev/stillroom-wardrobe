@@ -29,7 +29,7 @@ const EDITS: [string, string][] = [
     or (p_step=1 and (p_outfit_id is null) = (p_item_ids is null))
     or (p_step=1 and t.chain_id is not null and (p_outfit_id is distinct from t.outfit_id
       or p_item_ids is distinct from t.idea_item_ids))
-    or (p_step>1 and (p_item_ids is not null or (p_outfit_id is not null and p_outfit_id is distinct from t.outfit_id)))
+    or (p_step>1 and (p_item_ids is not null or p_outfit_id is not null))
     or (p_item_ids is not null and (coalesce(array_ndims(p_item_ids),0)<>1 or cardinality(p_item_ids) not between 1 and 8
       or array_position(p_item_ids,null) is not null
       or (select count(distinct x) from unnest(p_item_ids) x)<>cardinality(p_item_ids))) then
@@ -131,7 +131,10 @@ describe('try-on idea migration (TRYON-IDEA1)', () => {
     const claim = body(await read(MAIN), 'create function public.tryon_claim(');
     expect(claim).toContain('(p_step=1 and (p_outfit_id is null) = (p_item_ids is null))');
     expect(claim).toContain('(p_step=1 and t.chain_id is not null and (p_outfit_id is distinct from t.outfit_id\n      or p_item_ids is distinct from t.idea_item_ids))');
-    expect(claim).toContain('(p_step>1 and (p_item_ids is not null or (p_outfit_id is not null and p_outfit_id is distinct from t.outfit_id)))');
+    expect(claim).toContain('(p_step>1 and (p_item_ids is not null or p_outfit_id is not null))');
+    // The rejection is a validation: it returns before any lock-dependent read, hold or write.
+    expect(claim.indexOf('(p_step>1 and (p_item_ids is not null or p_outfit_id is not null))'))
+      .toBeLessThan(claim.indexOf('insert into private.ai_usage('));
     // One money implementation: the budget precheck, per-step re-check and holds are the single shared body.
     expect(claim.match(/private\.ai_budget_used\(/g)).toHaveLength(1);
     expect(claim.match(/insert into private\.ai_usage\(/g)).toHaveLength(1);
