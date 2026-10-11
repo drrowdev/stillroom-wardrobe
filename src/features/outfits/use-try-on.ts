@@ -1,4 +1,4 @@
-// VTO-2 try-on run (plan rev4 §2.3-§2.4, §3.2): one chain for one saved outfit, held in memory only. The encoded body
+// VTO-2 try-on run (plan rev4 §2.3-§2.4, §3.2): one chain for one saved outfit or one unsaved Today idea, held in memory only. The encoded body
 // photo and the latest intermediate picture live here and are dropped on the result, Close, Stop, a chain end or
 // disposal (navigation, UID change, logout), and at the latest when the chain's lifetime ends. A step is sent once:
 // after a lost or ambiguous reply the run reconciles through tryon_chain_status and never sends it again by itself. Try
@@ -97,6 +97,8 @@ const failureOf = (code: Exclude<TryOnCode, 'OK'>): FailureKind => {
 /** Codes that may come after the server claimed the step: its outcome is decided by the chain status, not the reply. */
 const ambiguous = (code: Exclude<TryOnCode, 'OK'>) => code === 'FAILED' || code === 'TIMEOUT' || code === 'OUTPUT_REJECTED';
 
+export type TryOnIdea = { itemIds: readonly string[] };
+
 export class TryOnRun {
   private phase: RunPhase = { kind: 'ready' };
   private readonly listeners = new Set<() => void>();
@@ -112,9 +114,13 @@ export class TryOnRun {
   private expiresAt: number | null = null;
   private generation = 0;
 
+  /** What step 1 names: a saved outfit's id, or an unsaved idea's garments (the planned steps' items, in order). */
+  private readonly named: { outfitId: string } | { itemIds: readonly string[] };
+
   constructor(private readonly api: TryOnApi, private readonly session: SessionStop, private readonly env: RunEnvironment,
-    readonly outfitId: string, readonly steps: readonly TryOnStep[], photo: Uint8Array<ArrayBuffer>) {
+    subject: string | TryOnIdea, readonly steps: readonly TryOnStep[], photo: Uint8Array<ArrayBuffer>) {
     if (steps.length < 1 || steps.length > 3) throw new TryOnError('INVALID_INPUT');
+    this.named = typeof subject === 'string' ? { outfitId: subject } : { itemIds: [...subject.itemIds] };
     this.chainId = env.uuid();
     this.person = photo;
   }
@@ -180,7 +186,7 @@ export class TryOnRun {
     let reply: StepResponse;
     try {
       reply = await this.api.step({ chainId: this.chainId, step: index + 1, requestId: this.env.uuid(), person,
-        ...(index === 0 ? { outfitId: this.outfitId } : {}) }, controller.signal);
+        ...(index === 0 ? this.named : {}) }, controller.signal);
     } catch (error) {
       if (!this.live(generation)) return;
       this.inFlight = null;
@@ -326,17 +332,25 @@ export class TryOnRun {
   holdsPicture(): boolean { return this.person !== null; }
 }
 
-/** The outfit's garments in saved order, as the step selection sees them. Removed or unknown items are skipped. */
-export function tryOnCandidates(record: OutfitRecord, components: ReadonlyMap<string, OutfitComponent>): TryOnCandidate[] {
-  return record.links.flatMap(({ itemId }) => {
+/** The garments in the given order, as the step selection sees them. Removed or unknown items are skipped. */
+export function tryOnCandidatesOf(itemIds: readonly string[], components: ReadonlyMap<string, OutfitComponent>): TryOnCandidate[] {
+  return itemIds.flatMap((itemId) => {
     const component = components.get(itemId);
     if (!component || component.category === null || component.lifecycle === null) return [];
     return [{ itemId, category: component.category, lifecycle: component.lifecycle,
       deleted: component.state === 'trashed' || component.state === 'missing', readyImage: component.thumbPath !== null }];
   });
 }
+/** The outfit's garments in saved order. */
+export function tryOnCandidates(record: OutfitRecord, components: ReadonlyMap<string, OutfitComponent>): TryOnCandidate[] {
+  return tryOnCandidatesOf(record.links.map(({ itemId }) => itemId), components);
+}
 export function tryOnSelection(record: OutfitRecord, components: ReadonlyMap<string, OutfitComponent>): TryOnSelection {
   return selectTryOnSteps(tryOnCandidates(record, components));
+}
+/** An unsaved idea's garments, in the idea's order. */
+export function ideaSelection(itemIds: readonly string[], components: ReadonlyMap<string, OutfitComponent>): TryOnSelection {
+  return selectTryOnSteps(tryOnCandidatesOf(itemIds, components));
 }
 export const slotKey = (slot: string): MessageKey => `tryon.slot.${slot}` as MessageKey;
 export const itemName = (components: ReadonlyMap<string, OutfitComponent>, id: string, t: Translate) =>
@@ -356,8 +370,8 @@ export function useTryOnStatus(store: TryOnStore | null): TryOnStatus | null {
 
 /** Saved try-ons of one outfit. `missing`: this backend has no try-on; `failed`: the list couldn't be read. */
 export type SavedTryOnsState = { kind: 'idle' | 'loading' | 'missing' | 'failed' } | { kind: 'ready'; results: TryOnResult[] };
-/** Saved try-ons of one outfit, newest first; each stays until it expires or is deleted. `retry` reads the list again. */
-export function useOutfitTryOns(api: TryOnClient | null, outfitId: string, enabled: boolean): { state: SavedTryOnsState; retry: () => void } {
+/** Saved try-ons of one outfit, or (`null`) of unsaved ideas, newest first; each stays until it expires or is deleted. `retry` reads the list again. */
+export function useOutfitTryOns(api: TryOnClient | null, outfitId: string | null, enabled: boolean): { state: SavedTryOnsState; retry: () => void } {
   const [state, setState] = useState<SavedTryOnsState>({ kind: 'idle' });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {

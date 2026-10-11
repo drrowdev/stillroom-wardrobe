@@ -10,6 +10,11 @@ import type { Category, WardrobeItem } from '../../domain/wardrobe';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
 import { ComponentText, OutfitThumb } from '../outfits/outfits-screen';
+import { SavedTryOns } from '../outfits/try-on/try-on-entry';
+import type { TryOnIdeaSeed } from '../outfits/try-on/try-on-screen';
+import { ideaSelection, useTryOnStatus } from '../outfits/use-try-on';
+import { tryOnReady } from '../../data/tryon';
+import { tryOnStoreFor } from '../settings/tryon-store';
 import { pickerComponent } from '../outfits/use-outfits';
 import { defaultSeason, useSuggestions, type Pending } from './use-suggestions';
 import { useWeather, type WeatherStore } from './use-weather';
@@ -35,6 +40,7 @@ type Props = {
   client: AppClient; scope: OwnerScope; images: PrivateImages; online: boolean; language: Language; t: Translate;
   timeZone: string; invalidation: number; weather: WeatherConfig; weatherStore: WeatherStore;
   onSave: (itemIds: string[], occasion: Occasion) => void; onAddItem: () => void; onTurnOnWeather: () => void;
+  onTryOn: (idea: TryOnIdeaSeed) => void;
   stylist: StylistStore; onStylist: () => void; onWorn: () => void; onWriting: (busy: boolean) => void;
 };
 const titleId = 'today-featured-title';
@@ -45,8 +51,9 @@ const focusById = (id: string, from: Element | null = document.activeElement) =>
   if (active === from || lostFocus(active)) document.getElementById(id)?.focus();
 });
 
-export function TodayScreen({ client, scope, images, online, language, t, timeZone, invalidation, weather, weatherStore, onSave, onAddItem, onTurnOnWeather, stylist, onStylist, onWorn, onWriting }: Props) {
+export function TodayScreen({ client, scope, images, online, language, t, timeZone, invalidation, weather, weatherStore, onSave, onAddItem, onTurnOnWeather, onTryOn, stylist, onStylist, onWorn, onWriting }: Props) {
   useStylistStatus(stylist);
+  const tryOnStatus = useTryOnStatus(tryOnStoreFor(client, scope));
   const stylistEntry = viewOf(useStylist(stylist)).entry;
   const [occasion, setOccasion] = useState<Occasion>('everyday');
   const [season, setSeason] = useState<Season>(() => defaultSeason(timeZone));
@@ -144,6 +151,11 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
     if (shown.kind === 'gone' && status === 'ideas' && document.activeElement === document.body) focusById('today-gone');
   }, [shown.kind, status]);
   const suggestion = shownKey ? ideas.ideas.find(entry => entry.key === shownKey) ?? null : null;
+  // The idea's garments for a try-on, as the same components the outfit screens use. Nothing is saved or sent from here.
+  const tryOn = suggestion && tryOnReady(tryOnStatus) ? (() => {
+    const components = new Map(suggestion.itemIds.flatMap(id => { const item = byId.get(id); return item ? [[id, pickerComponent(item)] as const] : []; }));
+    return ideaSelection(suggestion.itemIds, components).steps.length ? () => onTryOn({ itemIds: suggestion.itemIds, components }) : null;
+  })() : null;
   // Until the page moves on after a pair is avoided, nothing is shown in place of the idea.
   const advancing = shown.kind === 'gone' && ideas.avoids !== handled.current.avoids && ideas.avoidContext === ideas.contextKey;
   const moreButton = <button type="button" className="button button-secondary" disabled={browseLocked} onClick={another}><Icon name="refresh" />{t('today.more')}</button>;
@@ -192,13 +204,14 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
             onSave={() => onSave(suggestion.itemIds, occasion)} onLike={() => ideas.like(suggestion.key)}
             onHide={() => ideas.hide(suggestion.key)} onUndo={() => ideas.undo(suggestion.key)}
             unsettled={ideas.unsettledPair(suggestion.key)} onAvoid={(first, second) => ideas.avoid(suggestion.key, first, second)}
-            wearBlocked={wear.blocked} pairBusy={ideas.pairBusy} onWear={() => wear.wear(suggestion.itemIds, byId)} more={moreButton} />
+            wearBlocked={wear.blocked} pairBusy={ideas.pairBusy} onWear={() => wear.wear(suggestion.itemIds, byId)} more={moreButton} onTryOn={tryOn} />
             : advancing ? null : <div className="today-empty">
               <p id="today-gone" tabIndex={-1} role="status">{t('today.ideaGone')}</p>
               {moreButton}
             </div>}
         </div>
       </>}
+    <SavedTryOns client={client} scope={scope} outfitId={null} online={online} language={language} t={t} />
     {ideas.undoKey && <UndoPair t={t} online={online} locked={browseLocked} pending={ideas.pending?.key === ideas.undoKey}
       failed={ideas.failed === ideas.undoKey} unresolved={ideas.unresolved === ideas.undoKey} onUndo={ideas.allow} onRetry={ideas.retry} />}
     {stylistEntry && <div className="today-more"><button type="button" className="button button-secondary" onClick={onStylist}>{t('stylist.open')}</button></div>}
@@ -248,10 +261,10 @@ type IdeaProps = {
   vote: 1 | -1 | null; pending: Pending | null; failed: boolean; unresolved: boolean; locked: boolean;
   onSave: () => void; onLike: () => void; onHide: () => void; onUndo: () => void; onRetry: () => void;
   unsettled: string | null; onAvoid: (first: string, second: string) => void;
-  wearBlocked: boolean; pairBusy: boolean; onWear: () => void; more: ReactNode;
+  wearBlocked: boolean; pairBusy: boolean; onWear: () => void; more: ReactNode; onTryOn: (() => void) | null;
 };
 function Idea({ suggestion, number, byId, images, t, list, online, vote, pending, failed, unresolved, locked, onSave, onLike, onHide, onUndo, onRetry,
-  unsettled, onAvoid, wearBlocked, pairBusy, onWear, more }: IdeaProps) {
+  unsettled, onAvoid, wearBlocked, pairBusy, onWear, more, onTryOn }: IdeaProps) {
   const [menu, setMenu] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [picked, setPicked] = useState<string[]>([]);
@@ -324,6 +337,7 @@ function Idea({ suggestion, number, byId, images, t, list, online, vote, pending
       {more}
     </div>
     <div className="today-quiet">
+      {onTryOn && <button id="today-tryon" type="button" className="text-button" disabled={!online || pairing || locked} onClick={onTryOn}>{t('tryon.open')}</button>}
       <button type="button" className="text-button" disabled={!online || pairing} onClick={onSave}>{t('today.save')}</button>
       <button type="button" className="text-button today-like" aria-pressed={vote === 1} disabled={!online || busy} aria-busy={mine && pending.kind === 'like' || undefined} onClick={onLike}>{t('today.like')}</button>
       <MoreMenu label={t('common.moreOptions')} open={menu && !choosing} disabled={!online || busy} toggle={toggle} onOpen={setMenu}>

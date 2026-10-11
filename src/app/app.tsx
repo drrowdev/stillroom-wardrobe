@@ -28,6 +28,7 @@ import { newUndo, type LifecycleSnapshot, type UndoItem } from '../domain/item-l
 import type { ProfileRow } from '../data/rows';
 import { leaveDialogFor, navFamilyFor, outfitRouteId } from '../domain/outfits';
 import { OutfitLeaveDialog } from '../features/outfits/leave-dialog';
+import type { TryOnIdeaSeed } from '../features/outfits/try-on/try-on-screen';
 import { LazyBoundary } from './lazy';
 import { PasswordRecovery } from '../auth/password-recovery';
 import { remembered } from '../auth/remembered';
@@ -50,6 +51,7 @@ const OutfitsScreen = lazyNamed(() => import('../features/outfits/outfits-screen
 const NewOutfit = lazyNamed(() => import('../features/outfits/detail'), 'NewOutfit');
 const OutfitDetail = lazyNamed(() => import('../features/outfits/detail'), 'OutfitDetail');
 const TryOnScreen = lazyNamed(() => import('../features/outfits/try-on/try-on-screen'), 'TryOnScreen');
+const IdeaTryOnScreen = lazyNamed(() => import('../features/outfits/try-on/try-on-screen'), 'IdeaTryOnScreen');
 const TodayScreen = lazyNamed(() => import('../features/today/today-screen'), 'TodayScreen');
 const CalendarScreen = lazyNamed(() => import('../features/calendar/calendar'), 'CalendarScreen');
 const StatisticsScreen = lazyNamed(() => import('../features/statistics/statistics-screen'), 'StatisticsScreen');
@@ -98,11 +100,11 @@ function Unconfigured({ status }: { status: Configuration['status'] }) {
   const [context] = useState(() => ({}));
   return <EntryLayout language={language} onLanguage={setLanguage} t={t} context={context}><section className="entry-card setup-card"><div className="small-mark"><Icon name="wardrobe" /></div><h1>{t('setup.title')}</h1><p className="muted">{t(status === 'invalid' ? 'setup.invalid' : 'setup.body')}</p><details className="copy-details"><summary>{t('setup.instructions')}</summary><ol className="setup-steps"><li>{t('setup.step1')}<code>npm run db:start</code></li><li>{t('setup.step2')}<code>.env.local</code></li><li>{t('setup.step3')}</li></ol></details></section></EntryLayout>;
 }
-type WorkspaceRoute = 'today' | 'stylist' | 'wardrobe' | 'add' | 'add-several' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | 'statistics' | 'admin' | `detail:${string}` | `outfit:${string}`;
-const routeHash = { today: '#/today', stylist: '#/stylist', wardrobe: '#/wardrobe', add: '#/items/new', 'add-several': '#/items/new/several', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar', statistics: '#/statistics', admin: '#/admin' };
+type WorkspaceRoute = 'today' | 'today-try-on' | 'stylist' | 'wardrobe' | 'add' | 'add-several' | 'settings' | 'trash' | 'outfits' | 'outfit-new' | 'calendar' | 'statistics' | 'admin' | `detail:${string}` | `outfit:${string}`;
+const routeHash = { today: '#/today', 'today-try-on': '#/today/try-on', stylist: '#/stylist', wardrobe: '#/wardrobe', add: '#/items/new', 'add-several': '#/items/new/several', settings: '#/settings', trash: '#/trash', outfits: '#/outfits', 'outfit-new': '#/outfits/new', calendar: '#/calendar', statistics: '#/statistics', admin: '#/admin' };
 const TRYON_ROUTE = '/try-on';
 function currentRoute(hash = location.hash): WorkspaceRoute {
-  return hash === '#/today' ? 'today' : hash === '#/stylist' ? 'stylist' : hash === '#/calendar' ? 'calendar' : hash === '#/statistics' ? 'statistics' : hash === '#/admin' ? 'admin' : hash === '#/items/new' ? 'add' : hash === '#/items/new/several' ? 'add-several' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
+  return hash === '#/today' ? 'today' : hash === '#/today/try-on' ? 'today-try-on' : hash === '#/stylist' ? 'stylist' : hash === '#/calendar' ? 'calendar' : hash === '#/statistics' ? 'statistics' : hash === '#/admin' ? 'admin' : hash === '#/items/new' ? 'add' : hash === '#/items/new/several' ? 'add-several' : hash === '#/settings' ? 'settings' : hash === '#/trash' ? 'trash'
     : hash === '#/outfits' ? 'outfits' : hash === '#/outfits/new' ? 'outfit-new'
       : hash.startsWith('#/outfits/') ? `outfit:${hash.slice(10)}`
         : hash.startsWith('#/items/') ? `detail:${hash}` : 'wardrobe';
@@ -110,19 +112,21 @@ function currentRoute(hash = location.hash): WorkspaceRoute {
 function hashForRoute(route: WorkspaceRoute) {
   return route.startsWith('detail:') ? route.slice(7) : route.startsWith('outfit:') ? `#/outfits/${route.slice(7)}` : routeHash[route as keyof typeof routeHash];
 }
-const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', stylist: 'stylist-title', add: 'capture-title', 'add-several': 'bulk-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title', calendar: 'calendar-title', statistics: 'statistics-title', admin: 'admin-title' };
+const routeFocus: Partial<Record<WorkspaceRoute, string>> = { today: 'today-title', 'today-try-on': 'tryon-title', stylist: 'stylist-title', add: 'capture-title', 'add-several': 'bulk-title', settings: 'settings-title', trash: 'trash-title', outfits: 'outfits-title', 'outfit-new': 'outfit-editor-title', calendar: 'calendar-title', statistics: 'statistics-title', admin: 'admin-title' };
 function OwnedWardrobe({ client, config, controller, scope, profile, change, busy, unresolved, t, language, online, onRouteCommitted, onSignOut }: { client: AppClient; config: PublicConfig; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; unresolved: boolean; t: Translate; language: Language; online: boolean; onRouteCommitted: (route: string) => void; onSignOut: () => void }) {
   const [route, setRoute] = useState<WorkspaceRoute>(() => currentRoute());
   const [outfitUnresolved, setOutfitUnresolved] = useState(false);
   const [outfitsInvalidation, setOutfitsInvalidation] = useState(0);
   const [outfitNotice, setOutfitNotice] = useState<string | null>(null);
   const [outfitSeed, setOutfitSeed] = useState<{ itemIds: string[]; occasion: string } | null>(null);
+  const [tryOnIdea, setTryOnIdea] = useState<TryOnIdeaSeed | null>(null);
   const [calendarSeed, setCalendarSeed] = useState<{ outfitId: string } | null>(null);
   const invalidateOutfits = useCallback(() => setOutfitsInvalidation(value => value + 1), []);
   useEffect(() => {
     onRouteCommitted(route);
     setOutfitNotice(current => current !== null && route !== `outfit:${current}` ? null : current);
     if (route !== 'outfit-new') setOutfitSeed(null);
+    if (route !== 'today-try-on') setTryOnIdea(null);
     if (route !== 'calendar') setCalendarSeed(null);
   }, [route, onRouteCommitted]);
   const browse = useWardrobeBrowse(client, scope, language, online);
@@ -339,7 +343,10 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
             invalidation={outfitsInvalidation} seed={calendarSeed} onSeedUsed={calendarSeedUsed} onChanged={invalidateHistory} onWriting={onWriting} />
           : route === 'statistics' ? <StatisticsScreen client={client} scope={scope} online={online} language={language} t={t} currency={profile.currency} />
           : route === 'admin' ? <AdminScreen client={client} scope={scope} online={online} language={language} t={t} onBack={() => changeRoute('settings')} />
+          : route === 'today-try-on' ? <IdeaTryOnScreen key={route} client={client} scope={scope} idea={tryOnIdea}
+            online={online} language={language} t={t} onBack={() => changeRoute('today')} />
           : route === 'today' ? <TodayScreen client={client} scope={scope} images={images} online={online} language={language} t={t}
+            onTryOn={idea => { setTryOnIdea(idea); changeRoute('today-try-on'); }}
             timeZone={profile.timezone} invalidation={outfitsInvalidation} weather={weather} weatherStore={weatherStore} onAddItem={() => changeRoute('add')} onTurnOnWeather={() => { stylistFocus.current = false; weatherFocus.current = true; }}
             stylist={stylist} onStylist={() => changeRoute('stylist')} onWorn={invalidateHistory} onWriting={onWriting}
             onSave={(itemIds, occasion) => { setOutfitSeed({ itemIds, occasion }); changeRoute('outfit-new'); }} />

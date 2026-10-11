@@ -28,12 +28,15 @@ const COLOUR_VERSION = '20260924100000';
 const TRYON_STOP_VERSION = '20261004090000';
 const SAVE1_PRIOR_VERSION = '20261007090000';
 const BUDGET1_PRIOR_VERSION = '20261009090000';
+const IDEA_PRIOR_VERSION = '20261010090000';
 // Exact applied prefix per labelled stage; 'target' is the full source inventory.
 const STAGE_VERSIONS = Object.freeze({ base: '20260905000000', 'hosted-source': HOSTED_SOURCE_VERSION,
   'prior-main': PRIOR_MAIN_VERSION, 'azure-target': AZURE_TARGET_VERSION, 'image-change': IMAGE_CHANGE_VERSION,
-  colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, 'save1-prior': SAVE1_PRIOR_VERSION, 'budget1-prior': BUDGET1_PRIOR_VERSION, target: null });
+  colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, 'save1-prior': SAVE1_PRIOR_VERSION, 'budget1-prior': BUDGET1_PRIOR_VERSION,
+  'idea-prior': IDEA_PRIOR_VERSION, target: null });
 const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], 'image-change': ['azure-target', 'hosted-source'],
-  colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], 'budget1-prior': ['save1-prior'], target: ['budget1-prior'] });
+  colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], 'budget1-prior': ['save1-prior'],
+  'idea-prior': ['budget1-prior'], target: ['idea-prior'] });
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -69,6 +72,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261008080000_analysis_model_identity.sql', version: '20261008080000', time: '2026-10-08 08:00:00', bytes: 11083, sha256: '1a3b8c3d1723378f0734dd1828bddf235a68af5e6fe1c7711ff7fa2a4a952e19' },
   { name: '20261009090000_stylist_weather_outerwear.sql', version: '20261009090000', time: '2026-10-09 09:00:00', bytes: 7237, sha256: '72f11f973476ac8d92f73cdca826871d41350e6161655c1f4f23eb97de691e56' },
   { name: '20261010090000_shared_ai_budget.sql', version: '20261010090000', time: '2026-10-10 09:00:00', bytes: 63172, sha256: '8c813bd31aebfc4fdf515b9f34fc9571f6be841878b64a220e9c73e2df1bb79e' },
+  { name: '20261011090000_tryon_idea.sql', version: '20261011090000', time: '2026-10-11 09:00:00', bytes: 20395, sha256: 'f0d79cac0942c9ebd558d9522bab7f4b973ece97dc5df72746267d6f8595f3eb' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1354,15 +1358,25 @@ async function main() {
       await tryonProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `VTO1-tryon-${label}`; }, localService);
       colourFinalizer.assertRunning();
       // BUDGET1: every frozen historical check above ran at the exact prior inventory; the budget migration is applied now.
-      stage = 'BUDGET1-prior-to-target';
-      await migrateToStage(run, 'budget1-prior', 'target');
+      stage = 'BUDGET1-prior-to-idea-prior';
+      await migrateToStage(run, 'budget1-prior', 'idea-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
-      await history('target'); await verifyCiStorageGuard();
+      await history('idea-prior'); await verifyCiStorageGuard();
       stage = 'BUDGET1-shared-budget';
       const { sharedBudgetProbes } = await import('../tests/integration/shared-ai-budget.sessions.mjs');
       await sharedBudgetProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BUDGET1-${label}`; }, localService);
       colourFinalizer.assertRunning();
+      // TRYON-IDEA1: the BUDGET1 checks ran at their own exact inventory; the idea migration is applied now.
+      stage = 'IDEA1-prior-to-target';
+      await migrateToStage(run, 'idea-prior', 'target');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('target'); await verifyCiStorageGuard();
+      stage = 'IDEA1-tryon-idea';
+      const { tryonIdeaProbes } = await import('../tests/integration/tryon-idea.sessions.mjs');
+      await tryonIdeaProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `IDEA1-${label}`; }, localService);
+      colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
+    console.log('PASS: TRYON-IDEA1 unsaved try-on; the idea migration was applied after the frozen checks, an idea chain is claimed from the owner\'s own items without an outfit, keeps its identity, is isolated per owner, and its results are visible and deletable without an outfit while outfit try-on is unchanged; no provider calls');
     console.log('PASS: FILT1 upgrade; try-on and enhancement rows settled by the old finishes keep their digest, origin, anomaly and amount after the provider_refusal migration, the new columns are null, replays with the refusal arguments omitted or null match and write nothing; seeded rows removed before the compare; no provider calls');
     console.log('PASS: BUDGET1 shared monthly budget; frozen upgrade checks ran at the exact prior inventory, then the budget migration was applied and the new contract (one shared sum across analysis, Stylist, cleanup and try-on, no hourly request limit, header-selected and fail-closed without the header, withdrawal effective, probe authorisation not double-subtracted) was probed; no provider calls');
     console.log('PASS: COL1 populated11/twelve/fifteen; rows, v1 manifest and unchanged bodies preserved at each compare; probes only after fifteen; no provider calls');

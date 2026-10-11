@@ -570,11 +570,11 @@ function enhanceStatus(setup: EnhanceSetup, consent: number | null) {
 // step on the server and then drops the reply (a lost reply). `hold` waits before answering.
 export type TryOnSetup = { configured: boolean; activated: boolean; providerAvailable: boolean; noticeRevision: number };
 export type TryOnReply = { code?: string; status?: number; abort?: boolean; commit?: boolean; hold?: Promise<void> };
-export type TryOnChain = { id: string; owner: string; outfitId: string; steps: TryOnStep[]; nextStep: number;
+export type TryOnChain = { id: string; owner: string; outfitId: string | null; steps: TryOnStep[]; nextStep: number;
   state: 'running' | 'complete' | 'cancelled' | 'withdrawn' | 'expired' | 'stale'; resultId: string | null; expiresAtMs: number };
-export type TryOnStored = { id: string; owner: string; outfitId: string; itemIds: string[]; image: Buffer; completedAtMs: number; expiresAtMs: number };
+export type TryOnStored = { id: string; owner: string; outfitId: string | null; itemIds: string[]; image: Buffer; completedAtMs: number; expiresAtMs: number };
 export type TryOnRequest = { owner: string; chainId: string; step: number; requestId: string; outfitId: string | null;
-  bytes: number; width: number | null; height: number | null; soi: boolean };
+  itemIds: string[] | null; bytes: number; width: number | null; height: number | null; soi: boolean };
 const tryOnDefaults: TryOnSetup = { configured: true, activated: false, providerAvailable: true, noticeRevision: TRYON_NOTICE_REVISION };
 export const tryOnServerNow = () => Math.min(Date.now(), Date.parse(TRYON_REVIEW_EXPIRES_AT) - 86_400_000);
 /** The frame size of a baseline or progressive JPEG, read from its first SOF marker. */
@@ -1022,7 +1022,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const setup = { ...tryOnDefaults, ...tryonControl.setup[owner] };
       const now = Date.now();
       const live = tryonControl.results.filter(row => row.owner === owner && row.expiresAtMs > now
-        && outfits.some(outfit => outfit.owner_id === owner && outfit.id === row.outfitId && outfit.deleted_at === null));
+        && (row.outfitId === null || outfits.some(outfit => outfit.owner_id === owner && outfit.id === row.outfitId && outfit.deleted_at === null)));
       if (name === 'tryon_status' || name === 'tryon_set_consent') {
         if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }); return; }
         if (name === 'tryon_set_consent') {
@@ -1078,8 +1078,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const bytes = person && typeof person !== 'string' ? Buffer.from(await person.arrayBuffer()) : Buffer.alloc(0);
       const size = jpegSize(bytes);
       const chainId = String(form?.get('chainId') ?? ''), step = Number(form?.get('step')), outfitId = form?.get('outfitId');
+      const itemsField = form?.get('itemIds');
+      const itemIds = typeof itemsField === 'string' ? itemsField.split(',') : null;
       tryonControl.requests.push({ owner, chainId, step, requestId: String(form?.get('requestId') ?? ''),
-        outfitId: typeof outfitId === 'string' ? outfitId : null, bytes: bytes.length, width: size?.width ?? null, height: size?.height ?? null,
+        outfitId: typeof outfitId === 'string' ? outfitId : null, itemIds, bytes: bytes.length, width: size?.width ?? null, height: size?.height ?? null,
         soi: bytes[0] === 0xff && bytes[1] === 0xd8 });
       const reply = tryonControl.replies.shift() ?? {};
       if (reply.hold) await reply.hold;
@@ -1094,9 +1096,11 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
           return { kind: 'code', code: 'CANCELLED', status: 409 };
         }
         if (!chain && step === 1) {
-          const links = outfitItems.filter(link => link.owner_id === owner && link.outfit_id === outfitId)
-            .sort((a, b) => Number(a.position) - Number(b.position));
-          const candidates: TryOnCandidate[] = links.flatMap(link => {
+          // An outfit names its garments in saved order; an idea lists them itself, and each must be this owner's own item.
+          const ordered = itemIds !== null ? itemIds.map(id => ({ owner_id: owner, item_id: id }))
+            : outfitItems.filter(link => link.owner_id === owner && link.outfit_id === outfitId).sort((a, b) => Number(a.position) - Number(b.position));
+          if (itemIds !== null && itemIds.some(id => !items.some(row => row.owner_id === owner && row.id === id))) return { kind: 'code', code: 'NOT_FOUND', status: 404 };
+          const candidates: TryOnCandidate[] = ordered.flatMap(link => {
             const item = items.find(row => row.owner_id === owner && row.id === link.item_id);
             if (!item) return [];
             return [{ itemId: String(item.id), category: item.category as TryOnCandidate['category'], lifecycle: item.lifecycle as TryOnCandidate['lifecycle'],
@@ -1104,7 +1108,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
           });
           const steps = selectTryOnSteps(candidates).steps;
           if (!steps.length) return { kind: 'code', code: 'NO_GARMENTS', status: 422 };
-          chain = { id: chainId, owner, outfitId: String(outfitId), steps, nextStep: 1, state: 'running', resultId: null, expiresAtMs: tryOnServerNow() + 1_800_000 };
+          chain = { id: chainId, owner, outfitId: typeof outfitId === 'string' ? outfitId : null, steps, nextStep: 1, state: 'running', resultId: null, expiresAtMs: tryOnServerNow() + 1_800_000 };
           tryonControl.chains.push(chain);
         }
         if (!chain) return { kind: 'code', code: 'NOT_FOUND', status: 404 };

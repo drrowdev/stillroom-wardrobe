@@ -969,6 +969,20 @@ exported. Not additive: cancel of a missing or foreign chain answers
 Try-on activation (G9) stays held until this is applied, deployed and its gates
 pass (release-gates row M12).
 
+**TRYON-IDEA1 try on an unsaved Today idea (source only; hosted apply, Edge and Pages deploys owner-gated).**
+Adds `20261011090000_tryon_idea.sql`: the Today idea card can try its garments on directly, without saving an outfit
+first. `private.tryon_chains` and `private.tryon_results` allow a null `outfit_id` (the composite owner keys skip a null),
+chains gain `idea_item_ids` as the idea's immutable request identity, `tryon_claim` gains one trailing defaulted argument
+`p_item_ids uuid[]` (dropped with `RESTRICT`; service role only) and `tryon_results_v1` / `tryon_result_image_v1` also answer
+for results that have no outfit. The `try-on` Edge function accepts exactly one of `outfitId` or `itemIds` on step 1.
+Garments are the owner's own items only (a foreign id answers `NOT_FOUND`); layers, outerwear and accessories are not
+tried on. An idea's picture belongs to no outfit: it expires after 7 days, can be deleted by the owner, is listed under
+Today's Try-ons and counts toward the 20-result cap. Deploy in this order, all before try-on activation: database,
+then the Edge function, then Pages. An older Edge (or a database without the migration) refuses an idea before any claim
+or charge, and outfit try-on works in every combination. Generated types: `database.types.ts` changes by the one
+`p_item_ids` argument and is taken byte for byte from the exact-head CI `database-types` artifact, never written by hand.
+Try-on activation (G9) and the probe are unchanged separate owner gates.
+
 Platform restore: after any database restore and before access reopens, run
 `select public.tryon_discard_transient();` as the database owner and record its
 counts in the restore receipt. It deletes every try-on result, chain and attempt
