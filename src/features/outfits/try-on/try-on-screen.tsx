@@ -167,7 +167,8 @@ function Setup({ selection, components, online, t, onStart }: SetupProps) {
   }
   const count = selection.steps.length;
   return <div className="stack">
-    <ul className="tryon-garments" aria-label={t('tryon.steps')}>
+    {count > 0 && <p id="tryon-subset" className="tryon-subset">{t('tryon.subset')}</p>}
+    <ul className="tryon-garments" aria-label={t('tryon.steps')} aria-describedby={count > 0 ? 'tryon-subset' : undefined}>
       {selection.steps.map(step => <li key={step.itemId}>{t('tryon.slotLine', { slot: t(slotKey(step.slot)), name: itemName(components, step.itemId, t) })}</li>)}
     </ul>
     {selection.notIncluded.length > 0 && <p className="muted">{t('tryon.notIncluded', { names: selection.notIncluded.map(item => itemName(components, item, t)).join(', ') })}</p>}

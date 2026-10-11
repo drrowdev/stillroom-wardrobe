@@ -1780,9 +1780,9 @@ describe('COL1 strict preservation pass and twelve-only probes (source order, no
       'await analysisModelSeed(colourSnapshot, privilegedLocalSql)', "await migrateToStage(run, 'save1-prior', 'budget1-prior')",
       "await history('budget1-prior'); await verifyCiStorageGuard();", 'await analysisModelVerify(modelSeed, privilegedLocalSql',
       "await colourProbes(sixEnv, privilegedLocalSql, 'target')", "await migrateToStage(run, 'budget1-prior', 'idea-prior')",
-      "await history('idea-prior'); await verifyCiStorageGuard();", 'await sharedBudgetProbes(',
+      "await history('idea-prior'); await verifyCiStorageGuard();", 'await sharedBudgetProbes(', 'await ideaUpgradeSeed(',
       "await migrateToStage(run, 'idea-prior', 'target')", "await history('target'); await verifyCiStorageGuard();",
-      'await tryonIdeaProbes(', 'await colourFinalizer.stop()',
+      'await ideaUpgradeVerify(', 'await tryonIdeaProbes(', 'await colourFinalizer.stop()',
       "'--version', COLOUR_VERSION", "await history('colours'); await verifyCiStorageGuard();", 'provision-test-users.mjs',
       "await colourProbes(twelveEnv, privilegedLocalSql, 'colours')", 'await twelveFinalizer.stop()']) {
       const next = col1.indexOf(step, offset); expect(next, step).toBeGreaterThanOrEqual(offset); offset = next + step.length;

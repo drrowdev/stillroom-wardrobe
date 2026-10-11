@@ -72,7 +72,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261008080000_analysis_model_identity.sql', version: '20261008080000', time: '2026-10-08 08:00:00', bytes: 11083, sha256: '1a3b8c3d1723378f0734dd1828bddf235a68af5e6fe1c7711ff7fa2a4a952e19' },
   { name: '20261009090000_stylist_weather_outerwear.sql', version: '20261009090000', time: '2026-10-09 09:00:00', bytes: 7237, sha256: '72f11f973476ac8d92f73cdca826871d41350e6161655c1f4f23eb97de691e56' },
   { name: '20261010090000_shared_ai_budget.sql', version: '20261010090000', time: '2026-10-10 09:00:00', bytes: 63172, sha256: '8c813bd31aebfc4fdf515b9f34fc9571f6be841878b64a220e9c73e2df1bb79e' },
-  { name: '20261011090000_tryon_idea.sql', version: '20261011090000', time: '2026-10-11 09:00:00', bytes: 20395, sha256: 'f0d79cac0942c9ebd558d9522bab7f4b973ece97dc5df72746267d6f8595f3eb' },
+  { name: '20261011090000_tryon_idea.sql', version: '20261011090000', time: '2026-10-11 09:00:00', bytes: 24372, sha256: '9f4bcb260aba68fd0222d57a91671ac071914ccd10242eaebe9e51487751d9b0' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1366,13 +1366,18 @@ async function main() {
       const { sharedBudgetProbes } = await import('../tests/integration/shared-ai-budget.sessions.mjs');
       await sharedBudgetProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BUDGET1-${label}`; }, localService);
       colourFinalizer.assertRunning();
-      // TRYON-IDEA1: the BUDGET1 checks ran at their own exact inventory; the idea migration is applied now.
+      // TRYON-IDEA1: the BUDGET1 checks ran at their own exact inventory. Real outfit chains, a result and their ledger rows are
+      // written by the old shapes first; the idea migration is applied; then they are proven unchanged and the new contract probed.
+      stage = 'IDEA1-seed';
+      const { ideaUpgradeSeed, ideaUpgradeVerify, tryonIdeaProbes } = await import('../tests/integration/tryon-idea.sessions.mjs');
+      const ideaSeed = await ideaUpgradeSeed(colourSnapshot, privilegedLocalSql);
       stage = 'IDEA1-prior-to-target';
       await migrateToStage(run, 'idea-prior', 'target');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
       await history('target'); await verifyCiStorageGuard();
+      stage = 'IDEA1-upgrade-verify';
+      await ideaUpgradeVerify(ideaSeed, (label) => { stage = `IDEA1-upgrade-${label}`; });
       stage = 'IDEA1-tryon-idea';
-      const { tryonIdeaProbes } = await import('../tests/integration/tryon-idea.sessions.mjs');
       await tryonIdeaProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `IDEA1-${label}`; }, localService);
       colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }

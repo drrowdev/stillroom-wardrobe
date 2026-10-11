@@ -513,6 +513,24 @@ const stepInput = (step = 1): StepInput => ({ chainId: ID(50), step, requestId: 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('the try-on client transport', () => {
+  it('asks for results without an outfit only on the two result reads', async () => {
+    const client = new TryOnClient(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    const jpeg = btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xd9));
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', results: [] }));
+    await client.results();
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', jpegBase64: jpeg, bytes: 4 }));
+    await client.resultImage(ID(3));
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK' }));
+    await client.deleteResult(ID(3));
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'CANCELLED' }));
+    await client.cancel(ID(4));
+    const sent = fetcher.mock.calls.map(([url, init]) => [String(url).split('/').pop(),
+      new Headers(init?.headers).get('X-Stillroom-TryOn-Results-Contract'), new Headers(init?.headers).get('X-Stillroom-AI-Budget-Contract')]);
+    expect(sent).toEqual([['tryon_results_v1', '2', '2'], ['tryon_result_image_v1', '2', '2'], ['tryon_delete_result', null, '2'],
+      ['tryon_cancel', null, '2']]);
+  });
   it('treats only the missing-function reply as no try-on, and parses the status strictly', async () => {
     const client = new TryOnClient(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });
     const fetcher = vi.fn<typeof fetch>();
@@ -527,6 +545,7 @@ describe('the try-on client transport', () => {
     expect(url).toBe(`${config.url}/rest/v1/rpc/tryon_status`);
     expect(init?.credentials).toBe('omit');
     expect(new Headers(init?.headers).get('X-Stillroom-AI-Budget-Contract')).toBe('2');
+    expect(new Headers(init?.headers).get('X-Stillroom-TryOn-Results-Contract')).toBeNull();
     fetcher.mockResolvedValueOnce(Response.json(statusRaw()));
     await client.consent(true);
     expect(JSON.parse(String(fetcher.mock.calls[3]![1]?.body))).toEqual({ p_enabled: true, p_notice_revision: TRYON_NOTICE_REVISION });

@@ -3,7 +3,7 @@
 // src/data/enhancement.ts. The strict parsers below accept only the closed replies of 20261003090000_try_on.sql; the
 // server's checks stay authoritative, and nothing here decides eligibility on its own.
 import type { OwnerScope } from '../auth/session';
-import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_IDEA_ITEMS, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_REVIEW_EXPIRES_AT, tryOnSlots, type TryOnSlot } from '../domain/tryon';
+import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_IDEA_ITEMS, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_REVIEW_EXPIRES_AT, tryOnResultsHeaders, tryOnSlots, type TryOnSlot } from '../domain/tryon';
 import { aiBudgetHeaders, parseOptionalAiBudget, type AiBudget } from '../domain/ai-budget';
 import { isUuid } from '../domain/wardrobe';
 import type { AppClient } from './client';
@@ -295,7 +295,8 @@ export class TryOnClient {
       const token = await this.bearer(5000, wait);
       const response = await wait(fetch(`${this.config.url}/rest/v1/rpc/${path}`, {
         method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', signal,
-        headers: this.headers(token, { Accept: 'application/json', 'Content-Type': 'application/json' }), body: JSON.stringify(body),
+        headers: this.headers(token, { Accept: 'application/json', 'Content-Type': 'application/json',
+          ...(path === 'tryon_results_v1' || path === 'tryon_result_image_v1' ? tryOnResultsHeaders : {}) }), body: JSON.stringify(body),
       }));
       return { status: response.status, value: await this.json(response, wait, limit) };
     });

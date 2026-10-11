@@ -25,9 +25,11 @@ const EDITS: [string, string][] = [
   ['create function public.tryon_claim(', 'create or replace function public.tryon_claim('],
   ['  p_outfit_id uuid,p_person_sha256 text,p_probe_id uuid,p_item_ids uuid[] default null) returns jsonb',
     '  p_outfit_id uuid,p_person_sha256 text,p_probe_id uuid) returns jsonb'],
-  [`    or (t.chain_id is null and (p_step<>1 or (p_outfit_id is null) = (p_item_ids is null)))
-    or (t.chain_id is not null and ((p_outfit_id is not null and p_outfit_id is distinct from t.outfit_id)
-      or (p_item_ids is not null and p_item_ids is distinct from t.idea_item_ids)))
+  [`    or (t.chain_id is null and p_step<>1)
+    or (p_step=1 and (p_outfit_id is null) = (p_item_ids is null))
+    or (p_step=1 and t.chain_id is not null and (p_outfit_id is distinct from t.outfit_id
+      or p_item_ids is distinct from t.idea_item_ids))
+    or (p_step>1 and (p_item_ids is not null or (p_outfit_id is not null and p_outfit_id is distinct from t.outfit_id)))
     or (p_item_ids is not null and (coalesce(array_ndims(p_item_ids),0)<>1 or cardinality(p_item_ids) not between 1 and 8
       or array_position(p_item_ids,null) is not null
       or (select count(distinct x) from unnest(p_item_ids) x)<>cardinality(p_item_ids))) then
@@ -67,7 +69,8 @@ describe('try-on idea migration (TRYON-IDEA1)', () => {
     expect(at).toBeGreaterThan(0);
     expect(names[at - 1]).toBe(BUDGET);
     expect([...code(sql).matchAll(/create (?:or replace )?function ([a-z0-9_.]+)\(/g)].map((match) => match[1]))
-      .toEqual(['private.tryon_select_idea_steps', 'public.tryon_results_v1', 'public.tryon_result_image_v1', 'public.tryon_claim']);
+      .toEqual(['private.tryon_select_idea_steps', 'private.tryon_results_contract', 'public.tryon_results_v1',
+        'public.tryon_result_image_v1', 'public.tryon_claim']);
     // The claim is the only dropped function, and it is dropped restrict; nothing is granted to the API roles.
     expect([...code(sql).matchAll(/\bdrop\s+function\s+([^;]+);/gi)].map((match) => match[1]))
       .toEqual(['public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid) restrict']);
@@ -107,22 +110,42 @@ describe('try-on idea migration (TRYON-IDEA1)', () => {
     expect(helper).not.toMatch(/outfit/);
   });
 
-  it('lets a result without an outfit be read, and still hides an outfit result whose outfit is gone from view', async () => {
+  it('returns a result without an outfit only to a request that opts in, so an older cached client keeps its list', async () => {
     const sql = await read(MAIN);
+    expect(sql).toContain(`->>'x-stillroom-tryon-results-contract','')='2'`);
+    expect(sql).toContain('revoke all on function private.tryon_results_contract() from public,anon,authenticated,service_role;');
     for (const name of ['tryon_results_v1', 'tryon_result_image_v1']) {
       const text = body(sql, `create or replace function public.${name}(`);
-      expect(text, name).toContain('(r.outfit_id is null or exists(select 1 from public.outfits o where o.owner_id=r.owner_id and o.id=r.outfit_id');
+      expect(text, name).toContain('v_ideas boolean := private.tryon_results_contract();');
+      expect(text, name).toContain('((r.outfit_id is null and v_ideas) or exists(select 1 from public.outfits o where o.owner_id=r.owner_id');
       expect(text, name).toContain('o.deleted_at is null');
       expect(text, name).toContain('r.owner_id=auth.uid()');
       expect(text, name).toContain("r.state='ready' and r.expires_at>v_now");
       expect(text, name).toContain('language plpgsql stable security definer set search_path');
     }
+    // Deleting by id is not header-gated: the delete function is not replaced.
+    expect(code(sql)).not.toContain('tryon_delete_result');
+  });
+
+  it('keeps the claim identity rules: one subject on step 1, both fields compared on a retry, neither after step 1', async () => {
+    const claim = body(await read(MAIN), 'create function public.tryon_claim(');
+    expect(claim).toContain('(p_step=1 and (p_outfit_id is null) = (p_item_ids is null))');
+    expect(claim).toContain('(p_step=1 and t.chain_id is not null and (p_outfit_id is distinct from t.outfit_id\n      or p_item_ids is distinct from t.idea_item_ids))');
+    expect(claim).toContain('(p_step>1 and (p_item_ids is not null or (p_outfit_id is not null and p_outfit_id is distinct from t.outfit_id)))');
+    // One money implementation: the budget precheck, per-step re-check and holds are the single shared body.
+    expect(claim.match(/private\.ai_budget_used\(/g)).toHaveLength(1);
+    expect(claim.match(/insert into private\.ai_usage\(/g)).toHaveLength(1);
   });
 
   it('checks its postconditions and keeps the old signature from surviving', async () => {
     const sql = await read(MAIN);
     expect(sql).toContain("to_regprocedure('public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid)') is not null");
-    expect(sql).toContain("conname='tryon_chains_idea_items' and not convalidated");
+    expect(sql).toContain("pg_get_expr(p.proargdefaults,0) is distinct from 'NULL::uuid[]'");
+    expect(sql).toContain("(select count(*) from pg_catalog.pg_proc where proname='tryon_claim' and pronamespace='public'::regnamespace)<>1");
+    expect(sql).toContain("perform set_config('tryon_idea.claim_owner',p.proowner::regrole::text,true);");
+    expect(sql).toContain("p.proowner::regrole::text is distinct from current_setting('tryon_idea.claim_owner')");
+    expect(sql).toContain('has_function_privilege(\'anon\',f,\'EXECUTE\') or has_function_privilege(\'authenticated\',f,\'EXECUTE\')');
+    expect(sql).toContain("conname='tryon_chains_idea_items' and convalidated");
     expect(sql).toContain('TRYON-IDEA1 precondition');
     expect(sql).toContain('TRYON-IDEA1 postcondition');
   });

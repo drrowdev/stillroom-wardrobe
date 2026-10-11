@@ -7,14 +7,20 @@
 --     foreign keys are MATCH SIMPLE, so a null outfit_id skips the check; outfit-bound rows keep their key and cascade, and
 --     a chain's outfit_id and idea_item_ids are never both set or both null;
 --   NON-ADDITIVE (function replacement): public.tryon_claim gains one trailing defaulted argument p_item_ids (drop restrict
---     + create, FILT1 pattern; the old signature must be gone and the grants are restated), and public.tryon_results_v1 and
---     public.tryon_result_image_v1 keep their signatures and also answer for results that have no outfit.
+--     + create, FILT1 pattern; the old signature must be gone, the owner is the old claim's owner and the grants are
+--     restated), and public.tryon_results_v1 and public.tryon_result_image_v1 keep their signatures and also answer for
+--     results that have no outfit, but ONLY for a request that sends the header X-Stillroom-TryOn-Results-Contract: 2
+--     (PostgREST exposes it as request.headers). Without it, an older cached client sees exactly the outfit rows it always
+--     saw and its strict list parser keeps working; the owner's delete by id needs no header.
 -- No new public function name, no new table, no grant to the API roles. Nothing dispatches: activation and the provider
 -- switch are unchanged. Idea results belong to no outfit: they end by the 7-day expiry, the owner's delete, the profile
 -- cascade, account deletion or tryon_discard_transient(), and never reach outfits, history, suggestions, statistics or exports.
+-- Rollout (see docs/cloud-development.md): apply, then the operator reloads the PostgREST schema cache and runs the old- and
+-- new-shaped non-dispatching claim checks BEFORE the Edge function is deployed. A cached query that still names the old
+-- signature fails closed (function not found: nothing is claimed, held or charged).
 begin;
 
--- Preconditions: the installed claim has the reviewed properties and grants and nothing depends on it.
+-- Preconditions: the installed claim has the reviewed properties and grants and nothing depends on it. Its owner is kept.
 do $$
 declare f regprocedure := 'public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid)'::regprocedure; p pg_catalog.pg_proc;
 begin
@@ -26,6 +32,9 @@ begin
       and x.grantee not in (p.proowner,'service_role'::regrole)) then
     raise exception 'TRYON-IDEA1 precondition: tryon_claim properties not as expected';
   end if;
+  if (select count(*) from pg_catalog.pg_proc where proname='tryon_claim' and pronamespace='public'::regnamespace)<>1 then
+    raise exception 'TRYON-IDEA1 precondition: more than one tryon_claim signature';
+  end if;
   if exists(select 1 from pg_catalog.pg_depend where refclassid='pg_catalog.pg_proc'::regclass and refobjid=f) then
     raise exception 'TRYON-IDEA1 precondition: tryon_claim has dependants';
   end if;
@@ -34,6 +43,7 @@ begin
       raise exception 'TRYON-IDEA1 precondition: a scheduled job calls tryon_claim';
     end if;
   end if;
+  perform set_config('tryon_idea.claim_owner',p.proowner::regrole::text,true);
 end;
 $$;
 
@@ -75,11 +85,17 @@ begin
 end;
 $$;
 
--- Owner reads, same signatures and shape. A result without an outfit is always visible until it expires; an outfit's result
--- still needs its outfit to be live.
+-- The opt-in for results that have no outfit: a client that parses them says so with this request header.
+create function private.tryon_results_contract() returns boolean
+language sql stable set search_path = '' as $$
+  select coalesce(nullif(current_setting('request.headers',true),'')::jsonb->>'x-stillroom-tryon-results-contract','')='2';
+$$;
+
+-- Owner reads, same signatures and shape. An outfit's result still needs its outfit to be live. A result without an outfit
+-- is returned only to a request that sends the results-contract header; any other request sees the outfit rows alone.
 create or replace function public.tryon_results_v1() returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
-declare v_now timestamptz := clock_timestamp();
+declare v_now timestamptz := clock_timestamp(); v_ideas boolean := private.tryon_results_contract();
 begin
   if auth.uid() is null or not private.is_approved() then return jsonb_build_object('code','UNAVAILABLE'); end if;
   return jsonb_build_object('code','OK','results',coalesce((select jsonb_agg(jsonb_build_object('id',r.result_id,
@@ -88,20 +104,20 @@ begin
       'expiresAtMs',floor(extract(epoch from r.expires_at)*1000)::bigint) order by r.completed_at desc,r.result_id)
     from private.tryon_results r
     where r.owner_id=auth.uid() and r.state='ready' and r.expires_at>v_now
-      and (r.outfit_id is null or exists(select 1 from public.outfits o where o.owner_id=r.owner_id and o.id=r.outfit_id
-        and o.deleted_at is null))),'[]'::jsonb));
+      and ((r.outfit_id is null and v_ideas) or exists(select 1 from public.outfits o where o.owner_id=r.owner_id
+        and o.id=r.outfit_id and o.deleted_at is null))),'[]'::jsonb));
 end;
 $$;
 
 create or replace function public.tryon_result_image_v1(p_result_id uuid) returns jsonb
 language plpgsql stable security definer set search_path = '' as $$
-declare v bytea; v_now timestamptz := clock_timestamp();
+declare v bytea; v_now timestamptz := clock_timestamp(); v_ideas boolean := private.tryon_results_contract();
 begin
   if auth.uid() is null or not private.is_approved() then return jsonb_build_object('code','UNAVAILABLE'); end if;
   select r.jpeg into v from private.tryon_results r
     where r.owner_id=auth.uid() and r.result_id=p_result_id and r.state='ready' and r.expires_at>v_now
-      and (r.outfit_id is null or exists(select 1 from public.outfits o where o.owner_id=r.owner_id and o.id=r.outfit_id
-        and o.deleted_at is null));
+      and ((r.outfit_id is null and v_ideas) or exists(select 1 from public.outfits o where o.owner_id=r.owner_id
+        and o.id=r.outfit_id and o.deleted_at is null));
   if v is null then return jsonb_build_object('code','NOT_FOUND'); end if;
   return jsonb_build_object('code','OK','jpegBase64',translate(encode(v,'base64'),E'\n',''),'bytes',octet_length(v));
 end;
@@ -150,9 +166,11 @@ begin
     or p_step is null or p_step not between 1 and 3 or p_manifest_id is null
     or (p_step=1 and p_person_sha256 is not null)
     or (p_step>1 and (p_person_sha256 is null or p_person_sha256 !~ '^[0-9a-f]{64}$'))
-    or (t.chain_id is null and (p_step<>1 or (p_outfit_id is null) = (p_item_ids is null)))
-    or (t.chain_id is not null and ((p_outfit_id is not null and p_outfit_id is distinct from t.outfit_id)
-      or (p_item_ids is not null and p_item_ids is distinct from t.idea_item_ids)))
+    or (t.chain_id is null and p_step<>1)
+    or (p_step=1 and (p_outfit_id is null) = (p_item_ids is null))
+    or (p_step=1 and t.chain_id is not null and (p_outfit_id is distinct from t.outfit_id
+      or p_item_ids is distinct from t.idea_item_ids))
+    or (p_step>1 and (p_item_ids is not null or (p_outfit_id is not null and p_outfit_id is distinct from t.outfit_id)))
     or (p_item_ids is not null and (coalesce(array_ndims(p_item_ids),0)<>1 or cardinality(p_item_ids) not between 1 and 8
       or array_position(p_item_ids,null) is not null
       or (select count(distinct x) from unnest(p_item_ids) x)<>cardinality(p_item_ids))) then
@@ -266,37 +284,71 @@ begin
 end;
 $$;
 
+-- The new function keeps the old claim's owner (the role that owned it when this migration started).
+do $$
+declare f regprocedure := 'public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[])'::regprocedure;
+  v_owner text := current_setting('tryon_idea.claim_owner');
+begin
+  if (select proowner::regrole::text from pg_catalog.pg_proc where oid=f) is distinct from v_owner then
+    execute format('alter function %s owner to %s',f,v_owner);
+  end if;
+end;
+$$;
+
 revoke all on function private.tryon_select_idea_steps(uuid,uuid[]) from public,anon,authenticated,service_role;
+revoke all on function private.tryon_results_contract() from public,anon,authenticated,service_role;
 revoke all on function public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[]) from public,anon,authenticated,service_role;
 grant execute on function public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[]) to service_role;
 
--- Postconditions: the old claim is gone; the new one keeps the reviewed properties, owner and grants; the constraints are valid.
+-- Postconditions: exactly one claim signature (the old one is gone, one null default); it keeps the reviewed properties, the
+-- old owner and service-role-only EXECUTE; the reads keep their properties; the constraints are valid.
 do $$
 declare f regprocedure := 'public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[])'::regprocedure; p pg_catalog.pg_proc;
+  r regprocedure;
 begin
-  if to_regprocedure('public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid)') is not null then
-    raise exception 'TRYON-IDEA1 postcondition: the old tryon_claim signature remains';
+  if to_regprocedure('public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid)') is not null
+    or (select count(*) from pg_catalog.pg_proc where proname='tryon_claim' and pronamespace='public'::regnamespace)<>1 then
+    raise exception 'TRYON-IDEA1 postcondition: the old tryon_claim signature remains or a second one exists';
   end if;
   select * into p from pg_catalog.pg_proc where oid=f;
+  if p.pronargdefaults<>1 or pg_catalog.pg_get_expr(p.proargdefaults,0) is distinct from 'NULL::uuid[]' then
+    raise exception 'TRYON-IDEA1 postcondition: tryon_claim must have exactly one null default';
+  end if;
   if not p.prosecdef or p.prolang is distinct from (select oid from pg_catalog.pg_language where lanname='plpgsql')
     or (select array_agg(x order by x) from unnest(p.proconfig) x) is distinct from array['lock_timeout=2s','search_path=""']
+    or p.proowner::regrole::text is distinct from current_setting('tryon_idea.claim_owner')
     or p.proowner is distinct from (select proowner from pg_catalog.pg_proc where oid='public.tryon_dispatch(uuid,uuid,boolean)'::regprocedure)
     or p.proacl is null or not has_function_privilege('service_role',f,'EXECUTE')
+    or has_function_privilege('anon',f,'EXECUTE') or has_function_privilege('authenticated',f,'EXECUTE')
     or exists(select 1 from aclexplode(p.proacl) x where x.privilege_type='EXECUTE'
       and x.grantee not in (p.proowner,'service_role'::regrole)) then
     raise exception 'TRYON-IDEA1 postcondition: tryon_claim properties not as expected';
   end if;
-  if exists(select 1 from pg_catalog.pg_constraint where conrelid='private.tryon_chains'::regclass
-      and conname='tryon_chains_idea_items' and not convalidated) then
-    raise exception 'TRYON-IDEA1 postcondition: the idea constraint is not validated';
+  foreach r in array array['public.tryon_results_v1()','public.tryon_result_image_v1(uuid)']::regprocedure[] loop
+    select * into p from pg_catalog.pg_proc where oid=r;
+    if not p.prosecdef or p.provolatile<>'s' or p.proowner is distinct from (select proowner from pg_catalog.pg_proc where oid=f)
+      or (select array_agg(x order by x) from unnest(p.proconfig) x) is distinct from array['search_path=""']
+      or not has_function_privilege('authenticated',r,'EXECUTE') or has_function_privilege('anon',r,'EXECUTE') then
+      raise exception 'TRYON-IDEA1 postcondition: % properties not as expected',r;
+    end if;
+  end loop;
+  if exists(select 1 from pg_catalog.pg_constraint where conrelid in ('private.tryon_chains'::regclass,'private.tryon_results'::regclass)
+      and not convalidated) then
+    raise exception 'TRYON-IDEA1 postcondition: a try-on constraint is not validated';
+  end if;
+  if not exists(select 1 from pg_catalog.pg_constraint where conrelid='private.tryon_chains'::regclass
+      and conname='tryon_chains_idea_items' and convalidated) then
+    raise exception 'TRYON-IDEA1 postcondition: the idea constraint is missing';
   end if;
   if exists(select 1 from pg_catalog.pg_attribute where attrelid in ('private.tryon_chains'::regclass,'private.tryon_results'::regclass)
       and attname='outfit_id' and attnotnull) then
     raise exception 'TRYON-IDEA1 postcondition: outfit_id is still required';
   end if;
   if has_function_privilege('authenticated','private.tryon_select_idea_steps(uuid,uuid[])','EXECUTE')
-    or has_function_privilege('service_role','private.tryon_select_idea_steps(uuid,uuid[])','EXECUTE') then
-    raise exception 'TRYON-IDEA1 postcondition: the idea helper is callable by an API role';
+    or has_function_privilege('service_role','private.tryon_select_idea_steps(uuid,uuid[])','EXECUTE')
+    or has_function_privilege('authenticated','private.tryon_results_contract()','EXECUTE')
+    or has_function_privilege('service_role','private.tryon_results_contract()','EXECUTE') then
+    raise exception 'TRYON-IDEA1 postcondition: a private helper is callable by an API role';
   end if;
 end;
 $$;

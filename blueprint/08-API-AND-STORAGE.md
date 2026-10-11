@@ -928,7 +928,10 @@ argument, `p_item_ids uuid[] default null`; step 1 names exactly one of
 else `NOT_FOUND`; `INVALID_INPUT` for any other combination). The chain keeps
 its identity in `private.tryon_chains.idea_item_ids` and a step-1 retry must
 repeat it. `outfit_id` is null on such a chain and its result, and
-`tryon_results_v1` returns `outfitId: null` for it. The `try-on` Edge function
+`tryon_results_v1` returns `outfitId: null` for it, but only to a request that sends
+`X-Stillroom-TryOn-Results-Contract: 2` (also required to read such a picture with
+`tryon_result_image_v1`); without the header the two reads return outfit results only,
+as before. The `try-on` Edge function
 takes `itemIds` (comma-separated UUIDs) instead of `outfitId` on step 1 and sends
 `p_item_ids` only then. Money, holds, Stop, withdrawal and expiry are unchanged.
 

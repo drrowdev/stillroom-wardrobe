@@ -337,7 +337,7 @@ function Idea({ suggestion, number, byId, images, t, list, online, vote, pending
       {more}
     </div>
     <div className="today-quiet">
-      {onTryOn && <button id="today-tryon" type="button" className="text-button" disabled={!online || pairing || locked} onClick={onTryOn}>{t('tryon.open')}</button>}
+      {onTryOn && <button id="today-tryon" type="button" className="text-button" disabled={!online || pairing || locked} onClick={onTryOn}>{t('tryon.ideaOpen')}</button>}
       <button type="button" className="text-button" disabled={!online || pairing} onClick={onSave}>{t('today.save')}</button>
       <button type="button" className="text-button today-like" aria-pressed={vote === 1} disabled={!online || busy} aria-busy={mine && pending.kind === 'like' || undefined} onClick={onLike}>{t('today.like')}</button>
       <MoreMenu label={t('common.moreOptions')} open={menu && !choosing} disabled={!online || busy} toggle={toggle} onOpen={setMenu}>

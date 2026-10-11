@@ -1023,6 +1023,9 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const now = Date.now();
       const live = tryonControl.results.filter(row => row.owner === owner && row.expiresAtMs > now
         && (row.outfitId === null || outfits.some(outfit => outfit.owner_id === owner && outfit.id === row.outfitId && outfit.deleted_at === null)));
+      // A result without an outfit is listed and readable only for a request that opts in, as the database does.
+      const ideasOn = request.headers()['x-stillroom-tryon-results-contract'] === '2';
+      const visible = live.filter(row => row.outfitId !== null || ideasOn);
       if (name === 'tryon_status' || name === 'tryon_set_consent') {
         if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }); return; }
         if (name === 'tryon_set_consent') {
@@ -1057,12 +1060,13 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         await json({ code: chain.state.toUpperCase() }); return;
       }
       if (name === 'tryon_results_v1') {
-        await json({ code: 'OK', results: live.map(row => ({ id: row.id, outfitId: row.outfitId, itemIds: row.itemIds, bytes: row.image.length,
+        await json({ code: 'OK', results: visible.map(row => ({ id: row.id, outfitId: row.outfitId, itemIds: row.itemIds, bytes: row.image.length,
           completedAtMs: row.completedAtMs, expiresAtMs: row.expiresAtMs })) }); return;
       }
       const result = live.find(row => row.id === body.p_result_id);
       if (name === 'tryon_result_image_v1') {
-        await json(result ? { code: 'OK', jpegBase64: result.image.toString('base64'), bytes: result.image.length } : { code: 'NOT_FOUND' }); return;
+        const readable = visible.find(row => row.id === body.p_result_id);
+        await json(readable ? { code: 'OK', jpegBase64: readable.image.toString('base64'), bytes: readable.image.length } : { code: 'NOT_FOUND' }); return;
       }
       if (name === 'tryon_delete_result') {
         tryonControl.deletes.push(String(body.p_result_id));

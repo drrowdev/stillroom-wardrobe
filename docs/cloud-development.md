@@ -977,9 +977,16 @@ chains gain `idea_item_ids` as the idea's immutable request identity, `tryon_cla
 for results that have no outfit. The `try-on` Edge function accepts exactly one of `outfitId` or `itemIds` on step 1.
 Garments are the owner's own items only (a foreign id answers `NOT_FOUND`); layers, outerwear and accessories are not
 tried on. An idea's picture belongs to no outfit: it expires after 7 days, can be deleted by the owner, is listed under
-Today's Try-ons and counts toward the 20-result cap. Deploy in this order, all before try-on activation: database,
-then the Edge function, then Pages. An older Edge (or a database without the migration) refuses an idea before any claim
-or charge, and outfit try-on works in every combination. Generated types: `database.types.ts` changes by the one
+Today's Try-ons and counts toward the 20-result cap. A result without an outfit is returned by `tryon_results_v1` and
+`tryon_result_image_v1` only to a request that sends `X-Stillroom-TryOn-Results-Contract: 2` (the app's results reads send
+it); without the header an older cached client sees outfit results only and its strict parser keeps working. The owner's
+delete by id needs no header, and listing, reading and deleting work while try-on is off or paused. Deploy in this order,
+all before try-on activation: database, then the Edge function, then Pages. After applying the migration the operator
+reloads the PostgREST schema cache (`notify pgrst, 'reload schema'`) and runs the old-shaped (eight-argument) and new-shaped
+(nine-argument) non-dispatching claim checks with a random owner (both must answer `UNAVAILABLE` with no row) BEFORE the Edge
+function is deployed. An older Edge (or a database without the migration) refuses an idea before any claim or charge, a cached
+query that still names the old signature fails closed (function not found: nothing is claimed, held or charged), and outfit
+try-on works in every combination. The BUDGET1 header contract 2 is unchanged. Generated types: `database.types.ts` changes by the one
 `p_item_ids` argument and is taken byte for byte from the exact-head CI `database-types` artifact, never written by hand.
 Try-on activation (G9) and the probe are unchanged separate owner gates.
 
