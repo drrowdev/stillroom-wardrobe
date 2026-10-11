@@ -935,6 +935,26 @@ as before. The `try-on` Edge function
 takes `itemIds` (comma-separated UUIDs) instead of `outfitId` on step 1 and sends
 `p_item_ids` only then. Money, holds, Stop, withdrawal and expiry are unchanged.
 
+Saved reference photo (TRYON-PHOTO1, ADR28 as amended): four new owner-callable
+definer functions, all keyed on `auth.uid()` and taking no owner or photo id.
+`tryon_person_photo_status_v1()` -> `{code:'OK', saved:false}` or
+`{code:'OK', saved:true, bytes, savedAtMs}`; `tryon_person_photo_get_v1()` ->
+`{code:'OK', jpegBase64, sha256, bytes, savedAtMs}` or `NOT_FOUND`;
+`tryon_person_photo_put_v1(p_jpeg_base64, p_sha256)` -> the saved state, or
+`CONSENT_REQUIRED`, `INACTIVE`, `UNCONFIGURED`, `UNAVAILABLE` or `INVALID_INPUT`
+(fixed codes, nothing echoed); `tryon_person_photo_delete_v1()` -> `{code:'OK',
+saved:false}`, idempotent. Status, get and delete need only an approved owner, so
+they work while try-on is off, paused or past review. `put` needs try-on
+activated, consent AND the configured notice at revision 2 on the locked controls
+row, at most 682,668 base64 characters (512,000 bytes), a matching SHA-256 and the
+app's own JPEG shape (baseline 1024x1280, one scan, no APPn/COM metadata other than
+a leading JFIF, no trailing byte). The row is in `private.tryon_person_photos`
+(RLS, no grants, not Storage); one per owner, replaced by a later `put`. A trigger
+on `private.ai_controls` deletes it whenever consent differs from the configured
+notice revision. `tryon_discard_transient()` also deletes every saved photo
+(`photosDeleted`) and `private.deletion_owner_rows_absent` covers the table. It is
+not exported or restored, and no existing function changes signature.
+
 Budget contract (BUDGET1, ADR29): the status, consent, claim, probe, bootstrap
 and admin functions keep their names and signatures. The request header
 `X-Stillroom-AI-Budget-Contract: 2` selects the one-monthly-budget replies:

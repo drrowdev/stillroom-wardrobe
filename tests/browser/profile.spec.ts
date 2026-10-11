@@ -748,7 +748,7 @@ test('synthetic settings visual evidence retains functional assertions in every 
       && api.profiles[owners.a]?.ui_language === capture.language
       && api.requests.filter((request) => request.path.startsWith('/rest/'))
         .every((request) => request.owner === owners.a && (request.ownerFilter === `eq.${owners.a}`
-          || ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/admin_status', '/rest/v1/rpc/tryon_status'].includes(request.path) && request.ownerFilter === null))).toBe(true);
+          || ['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status', '/rest/v1/rpc/admin_status', '/rest/v1/rpc/tryon_status', '/rest/v1/rpc/tryon_person_photo_status_v1'].includes(request.path) && request.ownerFilter === null))).toBe(true);
     await expectIdentity(page, 'Alex');
     expect(await page.evaluate(({ origin, language }) => {
       const visible = (element: Element) => element.getClientRects().length > 0

@@ -85,6 +85,10 @@ export const EXPOSED_RPCS = Object.freeze([
   fn('tryon_results_v1', '', []),
   fn('tryon_result_image_v1', 'uuid', ['p_result_id']),
   fn('tryon_delete_result', 'uuid', ['p_result_id']),
+  fn('tryon_person_photo_status_v1', '', []),
+  fn('tryon_person_photo_get_v1', '', []),
+  fn('tryon_person_photo_put_v1', 'text, text', ['p_jpeg_base64', 'p_sha256']),
+  fn('tryon_person_photo_delete_v1', '', []),
   fn('admin_ai_spending_v2', 'integer', ['p_months']),
   fn('admin_set_ai_limits_v2', 'smallint, text, jsonb, jsonb, text',
     ['p_admission_no', 'p_account_version', 'p_expected', 'p_limits', 'p_reason_code']),
@@ -187,6 +191,7 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'tryon_select_steps(uuid, uuid)', 'tryon_select_idea_steps(uuid, uuid[])', 'tryon_results_contract()',
   'tryon_close_attempt(uuid, uuid, text, timestamp with time zone)',
   'tryon_replay(private.ai_usage_evidence, private.ai_usage)',
+  'tryon_person_photo_admit(bytea)', 'tryon_person_photo_guard()',
   'admin_limits_v2(private.ai_controls)', 'admin_limits_shape_fields(jsonb, text[])',
   'admin_set_limits(smallint, text, jsonb, jsonb, text, boolean)',
   'admin_account_v2(private.approved_accounts, timestamp with time zone, text[])',
@@ -222,7 +227,7 @@ export const PRIVATE_TABLES = Object.freeze([
   'image_change_history', 'item_deletion_operations', 'item_deletion_targets', 'imported_attribution_history',
   'provider_capacity', 'provider_deployments', 'provider_slots', 'image_enhancements', 'enhancement_outputs', 'image_provenance',
   'image_enhancement_bindings', 'restore_image_markers', 'enhancement_probe_authorisations', 'app_admins', 'ai_limit_audit',
-  'tryon_chains', 'tryon_attempts', 'tryon_results', 'tryon_probe_authorisations', 'tryon_chain_stops',
+  'tryon_chains', 'tryon_attempts', 'tryon_results', 'tryon_probe_authorisations', 'tryon_chain_stops', 'tryon_person_photos',
 ]);
 const OWNER_EXPRESSION = '(private.is_approved() AND (owner_id = ( SELECT auth.uid() AS uid)))';
 export const OWNER_POLICIES = Object.freeze([
@@ -541,6 +546,10 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   tryon_results_v1: req([], { ownerOnly: true }),
   tryon_result_image_v1: req([], { unverified: UNREACHABLE_TRYON }),
   tryon_delete_result: req([], { unverified: UNREACHABLE_TRYON }),
+  tryon_person_photo_status_v1: req([], { ownerOnly: true }),
+  tryon_person_photo_get_v1: req([], { ownerOnly: true }),
+  tryon_person_photo_put_v1: req([], { ownerOnly: true }),
+  tryon_person_photo_delete_v1: req([], { ownerOnly: true }),
   admin_ai_spending_v2: req([], { adminOnly: true }),
   admin_set_ai_limits_v2: req([], { adminOnly: true }),
 });

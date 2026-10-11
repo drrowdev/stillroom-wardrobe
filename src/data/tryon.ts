@@ -183,6 +183,50 @@ export function parseResultImage(value: unknown): ResultImage | null {
   return { kind: 'image', bytes };
 }
 
+/**
+ * TRYON-PHOTO1: the one reusable reference photo (20261011100000_tryon_person_photo.sql). `none` and `saved` are the owner's
+ * stored state; the bytes are only ever fetched by `personPhoto` for an explicit try-on and are never cached by this client.
+ */
+export type PersonPhotoState = { kind: 'none' } | { kind: 'saved'; bytes: number; savedAtMs: number };
+export function parsePersonPhotoStatus(value: unknown): PersonPhotoState | 'UNAVAILABLE' | null {
+  if (exactKeys(value, ['code'])) return value.code === 'UNAVAILABLE' ? 'UNAVAILABLE' : null;
+  if (exactKeys(value, ['code', 'saved']) && value.code === 'OK' && value.saved === false) return { kind: 'none' };
+  if (!exactKeys(value, ['code', 'saved', 'bytes', 'savedAtMs']) || value.code !== 'OK' || value.saved !== true
+    || !count(value.bytes) || value.bytes < 1 || value.bytes > TRYON_LIMITS.personBytes || !count(value.savedAtMs)) return null;
+  return { kind: 'saved', bytes: value.bytes, savedAtMs: value.savedAtMs };
+}
+export type PersonPhoto = { kind: 'photo'; bytes: Uint8Array<ArrayBuffer>; sha256: string; savedAtMs: number }
+  | { kind: 'code'; code: 'NOT_FOUND' | 'UNAVAILABLE' };
+/** Parses the `get` reply; the bytes must be a JPEG of the stated length. The hash is checked by the caller (it is async). */
+export function parsePersonPhoto(value: unknown): PersonPhoto | null {
+  if (exactKeys(value, ['code'])) {
+    return value.code === 'NOT_FOUND' || value.code === 'UNAVAILABLE' ? { kind: 'code', code: value.code } : null;
+  }
+  if (!exactKeys(value, ['code', 'jpegBase64', 'sha256', 'bytes', 'savedAtMs']) || value.code !== 'OK'
+    || typeof value.jpegBase64 !== 'string' || typeof value.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(value.sha256)
+    || !count(value.bytes) || value.bytes < 1 || value.bytes > TRYON_LIMITS.personBytes || !count(value.savedAtMs)) return null;
+  const bytes = base64Bytes(value.jpegBase64);
+  if (!bytes || bytes.length !== value.bytes || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  return { kind: 'photo', bytes, sha256: value.sha256, savedAtMs: value.savedAtMs };
+}
+export const personPhotoRefusals = ['CONSENT_REQUIRED', 'INACTIVE', 'UNCONFIGURED', 'UNAVAILABLE', 'INVALID_INPUT'] as const;
+export type PersonPhotoRefusal = (typeof personPhotoRefusals)[number];
+export type PersonPhotoSave = { kind: 'saved'; bytes: number; savedAtMs: number } | { kind: 'refused'; code: PersonPhotoRefusal };
+export function parsePersonPhotoSave(value: unknown): PersonPhotoSave | null {
+  if (exactKeys(value, ['code'])) {
+    const code = personPhotoRefusals.find((entry) => entry === value.code);
+    return code ? { kind: 'refused', code } : null;
+  }
+  if (!exactKeys(value, ['code', 'saved', 'bytes', 'savedAtMs']) || value.code !== 'OK' || value.saved !== true
+    || !count(value.bytes) || value.bytes < 1 || value.bytes > TRYON_LIMITS.personBytes || !count(value.savedAtMs)) return null;
+  return { kind: 'saved', bytes: value.bytes, savedAtMs: value.savedAtMs };
+}
+const base64Of = (bytes: Uint8Array): string => {
+  let text = '';
+  for (let at = 0; at < bytes.length; at += 8192) text += String.fromCharCode(...bytes.subarray(at, at + 8192));
+  return btoa(text);
+};
+
 /** One step's reply: the intermediate picture for the next step, the final result, or a closed code. */
 export type StepResponse = { kind: 'intermediate'; body: Uint8Array<ArrayBuffer>; sha256: string }
   | { kind: 'result'; resultId: string; expiresAtMs: number } | { kind: 'code'; code: Exclude<TryOnCode, 'OK'> };
@@ -198,9 +242,12 @@ const closed = (value: unknown): Exclude<TryOnCode, 'OK'> => {
   return code && code !== 'OK' ? code : 'FAILED';
 };
 type RpcName = 'tryon_status' | 'tryon_set_consent' | 'tryon_chain_status' | 'tryon_cancel' | 'tryon_results_v1'
-  | 'tryon_result_image_v1' | 'tryon_delete_result';
+  | 'tryon_result_image_v1' | 'tryon_delete_result' | 'tryon_person_photo_status_v1' | 'tryon_person_photo_get_v1'
+  | 'tryon_person_photo_put_v1' | 'tryon_person_photo_delete_v1';
 // A result image is at most 512,000 bytes, so its base64 JSON stays under 700,000.
 const RESULT_JSON_BYTES = 700_000;
+// The reference photo moves like a result image: a longer deadline for its up-to-683 KB base64 request or reply.
+const LARGE_TRANSFER_RPCS: readonly RpcName[] = ['tryon_result_image_v1', 'tryon_person_photo_get_v1', 'tryon_person_photo_put_v1'];
 
 type Wait = <R>(work: PromiseLike<R>) => Promise<R>;
 export class TryOnClient {
@@ -291,7 +338,7 @@ export class TryOnClient {
     try { return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(body)); } catch { throw new TryOnError('UNAVAILABLE'); }
   }
   private rpc(path: RpcName, body: object, outer?: AbortSignal, limit = 32768) {
-    return this.bounded(path === 'tryon_result_image_v1' ? 15000 : 5000, outer, async (signal, wait) => {
+    return this.bounded(LARGE_TRANSFER_RPCS.includes(path) ? 15000 : 5000, outer, async (signal, wait) => {
       const token = await this.bearer(5000, wait);
       const response = await wait(fetch(`${this.config.url}/rest/v1/rpc/${path}`, {
         method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', signal,
@@ -333,6 +380,45 @@ export class TryOnClient {
     const parsed = reply.status === 200 ? parseCancel(reply.value) : null;
     if (!parsed) throw new TryOnError('UNAVAILABLE');
     return parsed;
+  }
+  /**
+   * The owner's reference-photo state; `missing` when this backend has none. Needs only an approved owner, so it works while
+   * try-on is off or paused. A thrown error means the state is unknown.
+   */
+  async personPhotoStatus(signal?: AbortSignal): Promise<PersonPhotoState | 'missing'> {
+    const reply = await this.rpc('tryon_person_photo_status_v1', {}, signal);
+    if (reply.status === 404 && record(reply.value) && reply.value.code === 'PGRST202') return 'missing';
+    const parsed = reply.status === 200 ? parsePersonPhotoStatus(reply.value) : null;
+    if (parsed === null || parsed === 'UNAVAILABLE') throw new TryOnError('UNAVAILABLE');
+    return parsed;
+  }
+  /**
+   * Fetches the saved photo for an explicit try-on. The bytes are checked against the server's hash, and the owner scope is
+   * checked again after the async hashing, so a reply that outlives a sign-out or user change is dropped unread.
+   */
+  async personPhoto(signal?: AbortSignal): Promise<PersonPhoto> {
+    const reply = await this.rpc('tryon_person_photo_get_v1', {}, signal, RESULT_JSON_BYTES);
+    const parsed = reply.status === 200 ? parsePersonPhoto(reply.value) : null;
+    if (!parsed) throw new TryOnError('UNAVAILABLE');
+    if (parsed.kind === 'code') return parsed;
+    const hash = await sha256Hex(parsed.bytes).catch(() => '');
+    this.checkIdentity();
+    if (signal?.aborted || hash !== parsed.sha256) throw new TryOnError('UNAVAILABLE');
+    return parsed;
+  }
+  /** Saves or replaces the one reference photo. A thrown error means the outcome is unknown: read the state again. */
+  async savePersonPhoto(photo: { bytes: Uint8Array<ArrayBuffer>; sha256: string }, signal?: AbortSignal): Promise<PersonPhotoSave> {
+    if (photo.bytes.length < 4 || photo.bytes.length > TRYON_LIMITS.personBytes || !/^[0-9a-f]{64}$/.test(photo.sha256)) throw new TryOnError('INVALID_INPUT');
+    const reply = await this.rpc('tryon_person_photo_put_v1', { p_jpeg_base64: base64Of(photo.bytes), p_sha256: photo.sha256 }, signal);
+    const parsed = reply.status === 200 ? parsePersonPhotoSave(reply.value) : null;
+    if (!parsed) throw new TryOnError('UNAVAILABLE');
+    return parsed;
+  }
+  /** Removes the reference photo (idempotent). Always allowed for an approved owner. A thrown error means the outcome is unknown. */
+  async removePersonPhoto(signal?: AbortSignal): Promise<void> {
+    const reply = await this.rpc('tryon_person_photo_delete_v1', {}, signal);
+    if (reply.status === 200 && exactKeys(reply.value, ['code', 'saved']) && reply.value.code === 'OK' && reply.value.saved === false) return;
+    throw new TryOnError('UNAVAILABLE');
   }
   /** The owner's unexpired results; `missing` when this backend has no try-on. */
   async results(signal?: AbortSignal): Promise<TryOnResult[] | 'missing'> {

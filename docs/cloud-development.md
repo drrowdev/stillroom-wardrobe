@@ -990,11 +990,48 @@ try-on works in every combination. The BUDGET1 header contract 2 is unchanged. G
 `p_item_ids` argument and is taken byte for byte from the exact-head CI `database-types` artifact, never written by hand.
 Try-on activation (G9) and the probe are unchanged separate owner gates.
 
+**TRYON-PHOTO1 one saved reference photo (source only; hosted apply, Edge and Pages deploys owner-gated).**
+Owner decision [#84 c6107168563](https://github.com/drrowdev/stillroom-wardrobe/issues/84#issuecomment-6107168563) (11 October 2026):
+the owner can keep ONE full-length photo of themselves so try-on starts from it. This is the single exception to "body photos are
+never stored"; it is added only by an explicit Save photo on the try-on screen. Adds `20261011100000_tryon_person_photo.sql`:
+`private.tryon_person_photos` (one row per owner, RLS, no grants, cascades with the profile; not Storage), four owner-callable
+definer functions (`tryon_person_photo_status_v1`, `_get_v1`, `_put_v1`, `_delete_v1`), a trigger that deletes the photo in the
+same statement unless the owner's consent revision and the configured notice revision are both set and equal (so an administrator
+reset that clears both removes it too), and a structural JPEG admission (`put` accepts only the app's own 1024x1280 baseline
+shape: validated quantisation and Huffman tables, consistent component and table references, no metadata, thumbnail, extra scan
+or trailing byte). `put`
+needs activation, consent AND the configured notice at revision 2 on the locked controls row; reading and removing need only an
+approved owner, so Remove works while try-on is paused, withdrawn or unavailable. The migration moves every configured account's
+notice revision 1 -> 2 and never writes consent, so each owner turns try-on on again; an unconfigured account stays unconfigured.
+The provider path is unchanged: the app reads the photo through `get` and uploads it in the existing step-1 request, and the Edge
+function never reads the table. The shared notice constant moves to 2 and the deployed `try-on` Edge function checks it for
+equality, so it must be redeployed with the migration. Production try-on is inactive; every mismatch below fails closed and changes
+no user's behaviour.
+
+| Database notice | Installed Edge | Pages app | Result |
+| --- | --- | --- | --- |
+| 1 | 1 | 1 | today's behaviour |
+| 2 | 1 | any | the Edge answers `UNCONFIGURED` for every step; a photo can still be saved only with consent 2 |
+| 2 | 2 | 1 | the old app hides Turn on (policy 2 is not its notice); the Edge is fine |
+| 1 | 2 | 2 | the new app hides Turn on and the Edge refuses; no photo can be saved (needs notice 2) |
+| 2 | 2 | 2 | the full feature, after the owner consents to revision 2 |
+
+Rollout, each its own owner-authorised receipt and all before activation: apply the migration (when no chain is running), then
+deploy the `try-on` Edge function, then Pages; the owner then turns try-on on (consent 2). There is no database rollback.
+Generated types: four new public function names, so `database.types.ts` is taken byte for byte from the exact-head CI
+`database-types` artifact (CI uploads it before its expected parity failure), never written by hand. The photo is not exported
+or restored and is not part of the app's own backups: after a restore the owner adds it again. A removed photo can remain in the
+platform's encrypted database backups for up to 7 days (G3), as stated in the notice. Notice revision 2 (five new keys) is pinned
+in `tests/unit/tryon-notice.test.ts`; revision 1, never shown, stays frozen there. Release-gates row TP1 tracks the pending hosted
+steps.
+
 Platform restore: after any database restore and before access reopens, run
 `select public.tryon_discard_transient();` as the database owner and record its
 counts in the restore receipt. It deletes every try-on result, chain and attempt
-(none are in the app's export or restore), never usage or evidence, and settles
-held try-on usage that is already due.
+and (TRYON-PHOTO1) every saved reference photo, so a restore can never bring back
+a photo the owner removed (`photosDeleted`; none of these are in the app's export
+or restore), never usage or evidence, and settles held try-on usage that is
+already due.
 
 **FILT1 provider refusal kind (source only; hosted apply owner-gated as ledger 29).**
 Adds `20261005090000_provider_refusal.sql` after ledger 28, in one transaction:

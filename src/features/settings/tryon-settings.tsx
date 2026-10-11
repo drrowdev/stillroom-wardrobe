@@ -5,6 +5,7 @@ import { featureSwitch } from './ai-features-model';
 import { ConsentSheet, FeatureRow } from './feature-row';
 import { useConsentSheet } from './use-consent-sheet';
 import '../../i18n/tryon';
+import { SavedPhotoCard } from './saved-photo-card';
 import { readTryOnStatus, TRYON_NOTICE_KEYS, tryOnViewOf, writeTryOnConsent, type TryOnStore } from './tryon-store';
 
 type Props = { store: TryOnStore | null; busy: boolean; online: boolean; language: Language; t: Translate };
@@ -13,7 +14,10 @@ type Props = { store: TryOnStore | null; busy: boolean; online: boolean; languag
 // Turn off stays available whenever consent is on, including when try-on is paused, not activated or unavailable.
 export function TryOnSettings({ store, busy, online, language, t }: Props) {
   if (!store) return null;
-  return <Card store={store} busy={busy} online={online} language={language} t={t} />;
+  return <>
+    <Card store={store} busy={busy} online={online} language={language} t={t} />
+    <SavedPhotoCard store={store} online={online} language={language} t={t} />
+  </>;
 }
 function Card({ store, busy, online, language, t }: Props & { store: TryOnStore }) {
   const state = useSyncExternalStore(store.subscribe, store.get);

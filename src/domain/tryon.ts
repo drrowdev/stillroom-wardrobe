@@ -9,7 +9,10 @@ export const TRYON_DEPLOYMENT = 'eval-image25-sunburst-20260908';
 export const TRYON_DEPLOYMENT_KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';
 export const TRYON_ENDPOINT = 'https://stillroom-ai-eval.openai.azure.com/openai/v1/images/edits';
 export const TRYON_PROMPT_VERSION = 1;
-export const TRYON_NOTICE_REVISION = 1;
+// Revision 2 is the notice that states the one reusable reference photo (TRYON-PHOTO1). The deployed Edge function checks the
+// configured revision for equality with this constant, so the Edge function must be redeployed together with the migration
+// that moves the configured revision to 2. Revision 1 (never kept) stays frozen in tests/unit/tryon-notice.test.ts.
+export const TRYON_NOTICE_REVISION = 2;
 export const TRYON_REVIEW_EXPIRES_AT = '2027-01-01T00:00:00Z';
 // Estimated operational envelope, not an invoice ceiling: (15,000 input x 8.00 + 8,000 output x 30.00) per million USD.
 export const TRYON_RESERVATION_MICRO = '360000';
@@ -65,7 +68,9 @@ export const TRYON_SETTINGS = Object.freeze({
   profileId: TRYON_MANIFEST, purpose: 'inactive-virtual-try-on', product: 'Azure OpenAI', deploymentType: 'GlobalStandard',
   region: 'Global', api: 'v1/images/edits', endpoint: TRYON_ENDPOINT, deployment: TRYON_DEPLOYMENT,
   deploymentKey: TRYON_DEPLOYMENT_KEY, expectedModel: TRYON_MODEL, promptVersion: TRYON_PROMPT_VERSION,
-  noticeRevision: TRYON_NOTICE_REVISION, reviewExpiresAt: TRYON_REVIEW_EXPIRES_AT, parameters: TRYON_PARAMETERS,
+  // The provider-facing profile was reviewed against notice revision 1; the provider call is unchanged by the reference photo,
+  // so this stays 1 and the installed manifest's settings hash keeps matching. Consent uses TRYON_NOTICE_REVISION.
+  noticeRevision: 1, reviewExpiresAt: TRYON_REVIEW_EXPIRES_AT, parameters: TRYON_PARAMETERS,
   input: 'person-baseline-jpeg-1024x1280-in-memory-plus-stored-main-garment-jpeg', chaining: 'one-garment-per-call-max-3',
   output: 'admitProviderJpeg-baseline-1024x1280', limits: TRYON_LIMITS,
   capacity: { windowSeconds: 60, maxDispatch: 2, sharedWith: 'azure-global-image25-sunburst-enhance-v1' },

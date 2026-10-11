@@ -7,24 +7,23 @@ import baseMessages from '../../src/i18n/messages.json';
 import messages from '../../src/i18n/tryon.json';
 
 // The owner-approved try-on notice (G5a, #84), revision 1, with the backup retention settled at G3 (7 days, Supabase
-// daily backups; no PITR). Any change to these strings needs a new revision and a new pin.
-const text = (key: (typeof TRYON_NOTICE_KEYS)[number]) => messages[key];
+// daily backups; no PITR). Revision 1 is frozen: literal revision, literal four keys, never edited. Revision 2 (TRYON-PHOTO1)
+// states the one saved reference photo and has its own five keys and pin below.
+const REVISION_1_KEYS = ['tryonC.noticeSent', 'tryonC.noticeResult', 'tryonC.noticeProcessing', 'tryonC.noticeCharges'] as const;
+const text = (key: keyof typeof messages) => messages[key];
 const languages = ['en', 'fi', 'sv'] as const;
 
-describe('try-on notice (revision 1)', () => {
+describe('try-on notice (revision 1, frozen)', () => {
   it('stays out of the startup catalog: the try-on messages load with the try-on screens', () => {
     expect(Object.keys(baseMessages).filter((key) => /^tryonC?\./.test(key))).toEqual([]);
     expect(Object.keys(messages).every((key) => /^tryonC?\./.test(key))).toBe(true);
   });
   it('pins revision 1 over EN, FI and SV', () => {
-    const notice = JSON.stringify({ noticeRevision: TRYON_NOTICE_REVISION,
-      ...Object.fromEntries(TRYON_NOTICE_KEYS.map((key) => [key, messages[key]])) });
-    expect(TRYON_NOTICE_REVISION).toBe(1);
+    const notice = JSON.stringify({ noticeRevision: 1, ...Object.fromEntries(REVISION_1_KEYS.map((key) => [key, messages[key]])) });
     expect(createHash('sha256').update(notice).digest('hex')).toBe('3676041c99e6f91b54dfa6eac0016afed17ff098dddf2ea9b67360d090daf8ac');
   });
   it('has four paragraphs in the order of the clean-up notice, with no placeholder left', () => {
-    expect(TRYON_NOTICE_KEYS).toEqual(['tryonC.noticeSent', 'tryonC.noticeResult', 'tryonC.noticeProcessing', 'tryonC.noticeCharges']);
-    for (const key of TRYON_NOTICE_KEYS) for (const language of languages) expect(text(key)[language], `${key} ${language}`).not.toMatch(/\{\w+\}/);
+    for (const key of REVISION_1_KEYS) for (const language of languages) expect(text(key)[language], `${key} ${language}`).not.toMatch(/\{\w+\}/);
   });
   it('says the photo is sent to Azure and never saved by Stillroom', () => {
     expect(text('tryonC.noticeSent').en).toContain('sent to Microsoft Azure OpenAI');
@@ -54,6 +53,42 @@ describe('try-on notice (revision 1)', () => {
     expect(text('tryonC.noticeCharges').en).toContain('Each garment counts toward your monthly AI limit');
   });
 });
+
+describe('try-on notice (revision 2, TRYON-PHOTO1)', () => {
+  it('is the notice the app asks consent for, in the order sent, saved photo, result, processing, charges', () => {
+    expect(TRYON_NOTICE_REVISION).toBe(2);
+    expect(TRYON_NOTICE_KEYS).toEqual(['tryonC.notice2Sent', 'tryonC.notice2Saved', 'tryonC.notice2Result', 'tryonC.notice2Processing', 'tryonC.notice2Charges']);
+    for (const key of TRYON_NOTICE_KEYS) for (const language of languages) expect(text(key)[language], `${key} ${language}`).not.toMatch(/\{\w+\}/);
+  });
+  it('pins revision 2 over EN, FI and SV', () => {
+    const notice = JSON.stringify({ noticeRevision: 2, ...Object.fromEntries(TRYON_NOTICE_KEYS.map((key) => [key, messages[key]])) });
+    expect(createHash('sha256').update(notice).digest('hex')).toBe('34b6999740a19e5089bc8d9969146c8313755b629bc61cf63bf2ad0c3b453baa');
+  });
+  it('no longer says the photo is never saved, and says exactly what is kept', () => {
+    for (const language of languages) expect(text('tryonC.notice2Sent')[language]).not.toMatch(/never saves|ei koskaan tallenna|sparar aldrig/);
+    const saved = text('tryonC.notice2Saved');
+    expect(saved.en).toContain('only if you choose Save photo, and only one at a time');
+    expect(saved.en).toContain('Only your account can access it in Stillroom');
+    expect(saved.en).toContain('Turning try-on off, removing the photo or deleting your account also deletes it');
+    expect(saved.en).toContain('encrypted database backups for up to 7 days');
+    expect(saved.en).toContain("isn't included in your own backups");
+    expect(saved.fi).toContain('enintään 7 päivää');
+    expect(saved.sv).toContain('i upp till 7 dagar');
+  });
+  it('qualifies the result paragraph so it does not contradict the saved photo', () => {
+    expect(text('tryonC.notice2Result').en).toContain('Of the generated pictures, only the final one is kept');
+    expect(text('tryonC.notice2Result').en).not.toContain('Only the final picture is kept');
+    expect(text('tryonC.notice2Result').fi).toContain('Luoduista kuvista säilytetään vain valmis kuva');
+    expect(text('tryonC.notice2Result').sv).toContain('Av de skapade bilderna behålls bara den färdiga');
+  });
+  it('keeps the reviewed processing and charge statements word for word', () => {
+    for (const language of languages) {
+      expect(text('tryonC.notice2Processing')[language]).toBe(text('tryonC.noticeProcessing')[language]);
+      expect(text('tryonC.notice2Charges')[language]).toBe(text('tryonC.noticeCharges')[language]);
+    }
+  });
+});
+
 
 describe('Turn on (fail closed)', () => {
   const raw = (over: Record<string, unknown> = {}, policy: Record<string, unknown> = {}) => parseTryOnStatus({

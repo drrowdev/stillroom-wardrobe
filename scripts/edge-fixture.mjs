@@ -218,7 +218,7 @@ update private.ai_controls set activated=true,notice_revision=2,model_id='gpt-5.
   stylist_manifest_id='azure-eu-terra-stylist-v2',stylist_max_request_micro=129360,stylist_monthly_allowance_micro=10000000,
   stylist_max_requests_per_hour=50,enhance_activated=true,enhance_notice_revision=2,
   enhance_manifest_id='azure-global-image25-sunburst-cleanup-v1',enhance_max_request_micro=300000,
-  enhance_monthly_allowance_micro=4000000,enhance_max_requests_per_hour=6,tryon_activated=true,tryon_notice_revision=1,
+  enhance_monthly_allowance_micro=4000000,enhance_max_requests_per_hour=6,tryon_activated=true,tryon_notice_revision=2,
   tryon_manifest_id='azure-global-image25-sunburst-tryon-v1',tryon_max_request_micro=360000,
   tryon_monthly_allowance_micro=5000000,tryon_max_requests_per_hour=6 where ${where};
 -- The shared image capacity: sixteen dispatches per window for the fixture (try-on's five, then enhancement's eight);
