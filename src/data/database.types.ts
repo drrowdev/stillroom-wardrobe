@@ -1068,6 +1068,13 @@ export type Database = {
         }
         Returns: Json
       }
+      tryon_person_photo_delete_v1: { Args: never; Returns: Json }
+      tryon_person_photo_get_v1: { Args: never; Returns: Json }
+      tryon_person_photo_put_v1: {
+        Args: { p_jpeg_base64: string; p_sha256: string }
+        Returns: Json
+      }
+      tryon_person_photo_status_v1: { Args: never; Returns: Json }
       tryon_probe_authorise: {
         Args: {
           p_allocation_micro: number
