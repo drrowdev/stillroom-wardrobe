@@ -541,8 +541,8 @@ for (const exit of heldExits) {
     await held.route!.fallback();
     await followed();
     expect(held.count).toBe(1);
-    // Check writes nothing; the page it leads to only reads.
-    expect(urls.slice(before).filter(url => !/^(GET|HEAD|OPTIONS) /.test(url) && !/\/rpc\/[a-z_]*status\b|\/auth\/v1\//.test(url))).toEqual([]);
+    // Check writes nothing; the page it leads to only reads (the status RPCs and the read-only try-on results list are POSTs).
+    expect(urls.slice(before).filter(url => !/^(GET|HEAD|OPTIONS) /.test(url) && !/\/rpc\/(?:[a-z_]*status|tryon_results_v1)\b|\/auth\/v1\//.test(url))).toEqual([]);
     expect(own(api.items)).toHaveLength(0);
   });
 
