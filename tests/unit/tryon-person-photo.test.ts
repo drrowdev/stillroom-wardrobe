@@ -5,7 +5,7 @@ import type { Database } from '../../src/data/database.types';
 import {
   parsePersonPhoto, parsePersonPhotoSave, parsePersonPhotoStatus, TryOnClient, TryOnError,
 } from '../../src/data/tryon';
-import { loadPersonPhoto, readPersonPhoto, removePersonPhoto, savePersonPhoto } from '../../src/features/settings/tryon-photo';
+import { loadPersonPhoto, readPersonPhoto, removePersonPhoto, saveConfirmed, savePersonPhoto, startPersonPhotoSave } from '../../src/features/settings/tryon-photo';
 import { readTryOnStatus, TryOnStore } from '../../src/features/settings/tryon-store';
 import { isUsableBodyPhoto } from '../../src/images/body-photo-profile';
 import { flatJpeg } from '../fixtures/restore-jpeg-fixtures';
@@ -211,6 +211,58 @@ describe('the saved-photo store (ordering and stale bytes)', () => {
     // A consent write bumps the generation (the server removes the photo on withdrawal).
     expect(await run(() => { store.photoGeneration += 1; })).toEqual({ kind: 'stale' });
     expect(await run(() => { store.dispose(); })).toEqual({ kind: 'stale' });
+  });
+  it('does not report an accepted save as saved when a removal or consent write moved the state before the reply', async () => {
+    const fake = server(null);
+    const store = newStore();
+    await readPersonPhoto(store);
+    const original = globalThis.fetch;
+    let release = () => {};
+    const late = new Promise<void>((resolve) => { release = resolve; });
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (url, init) => {
+      const reply = await original(url, init);
+      if (String(url).endsWith('tryon_person_photo_put_v1')) await late;
+      return reply;
+    }));
+    const saving = savePersonPhoto(store, { bytes: PHOTO, sha256: sha(PHOTO) });
+    await vi.waitFor(() => expect(fake.calls).toContain('tryon_person_photo_put_v1'));
+    // Turn off moves the generation (and the server removes the photo) while the accepted reply is still on its way.
+    store.photoGeneration += 1;
+    release();
+    await expect(saving).resolves.toBe('stale');
+    expect(store.getPhoto()).toMatchObject({ busy: null, error: null });
+    expect(fake.calls.at(-1)).toBe('tryon_person_photo_status_v1');
+    store.dispose();
+  });
+  it('never stamps an earlier successful save with a later generation: a withdrawal landing after the store check blocks the confirmation', async () => {
+    server(null);
+    const store = newStore();
+    await readPersonPhoto(store);
+    const attempt = startPersonPhotoSave(store, { bytes: PHOTO, sha256: sha(PHOTO) });
+    expect(attempt.generation).toBe(store.photoGeneration);
+    // The consent withdrawal completes in the interval between the store accepting the reply and the consumer continuing.
+    const stop = store.subscribePhoto(() => { if (store.getPhoto().saved) { stop(); store.photoGeneration += 1; } });
+    // The state read that follows fails, so the retained metadata alone cannot tell the withdrawal happened.
+    const original = globalThis.fetch;
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (url, init) => String(url).endsWith('tryon_person_photo_status_v1')
+      ? Response.json({ message: 'down' }, { status: 503 }) : original(url, init)));
+    const result = await attempt.result;
+    expect(result).toBe('saved');
+    expect(store.photoGeneration).toBeGreaterThan(attempt.generation);
+    expect(saveConfirmed(store, attempt, result)).toBe(false);
+    store.dispose();
+  });
+  it('confirms a save only while its own generation is current', async () => {
+    server(null);
+    const store = newStore();
+    await readPersonPhoto(store);
+    const attempt = startPersonPhotoSave(store, { bytes: PHOTO, sha256: sha(PHOTO) });
+    const result = await attempt.result;
+    expect(saveConfirmed(store, attempt, result)).toBe(true);
+    expect(saveConfirmed(store, attempt, 'failed')).toBe(false);
+    store.photoGeneration += 1;
+    expect(saveConfirmed(store, attempt, result)).toBe(false);
+    store.dispose();
   });
   it('drops a fetch whose caller went away, and returns usable bytes otherwise', async () => {
     server(PHOTO);

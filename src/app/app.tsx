@@ -45,7 +45,9 @@ import {
   recoverySnapshot, subscribeRecovery, type RecoveryCallback,
 } from '../auth/recovery-callback';
 
-const ProfileScreen = lazyNamed(() => import('../features/profile/profile-screen'), 'ProfileScreen');
+// The profile page and its photo block are fetched together, so the block is there on the first paint and nothing below it
+// moves. The photo chunk is only an early fetch: if it fails, the page still opens and the block shows its own failure.
+const ProfileScreen = lazyNamed(() => Promise.all([import('../features/profile/profile-screen'), import('../features/settings/profile-photo').catch(() => undefined)]).then(([screen]) => screen), 'ProfileScreen');
 const Trash = lazyNamed(() => import('../features/settings/trash-screen'), 'Trash');
 const OutfitsScreen = lazyNamed(() => import('../features/outfits/outfits-screen'), 'OutfitsScreen');
 const NewOutfit = lazyNamed(() => import('../features/outfits/detail'), 'NewOutfit');

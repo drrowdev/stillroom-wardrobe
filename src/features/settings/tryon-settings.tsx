@@ -5,7 +5,7 @@ import { featureSwitch } from './ai-features-model';
 import { ConsentSheet, FeatureRow } from './feature-row';
 import { useConsentSheet } from './use-consent-sheet';
 import '../../i18n/tryon';
-import { SavedPhotoCard } from './saved-photo-card';
+import { goToSettings } from './go-to-settings';
 import { readTryOnStatus, TRYON_NOTICE_KEYS, tryOnViewOf, writeTryOnConsent, type TryOnStore } from './tryon-store';
 
 type Props = { store: TryOnStore | null; busy: boolean; online: boolean; language: Language; t: Translate };
@@ -14,13 +14,11 @@ type Props = { store: TryOnStore | null; busy: boolean; online: boolean; languag
 // Turn off stays available whenever consent is on, including when try-on is paused, not activated or unavailable.
 export function TryOnSettings({ store, busy, online, language, t }: Props) {
   if (!store) return null;
-  return <>
-    <Card store={store} busy={busy} online={online} language={language} t={t} />
-    <SavedPhotoCard store={store} online={online} language={language} t={t} />
-  </>;
+  return <Card store={store} busy={busy} online={online} language={language} t={t} />;
 }
 function Card({ store, busy, online, language, t }: Props & { store: TryOnStore }) {
   const state = useSyncExternalStore(store.subscribe, store.get);
+  const photo = useSyncExternalStore(store.subscribePhoto, store.getPhoto);
   useEffect(() => { store.setBusy(busy); }, [store, busy]);
   useEffect(() => {
     void readTryOnStatus(store, 'passive');
@@ -56,6 +54,7 @@ function Card({ store, busy, online, language, t }: Props & { store: TryOnStore 
   const noticeList = <div className="ai-notice fine">{TRYON_NOTICE_KEYS.map((key) => <p key={key}>{t(key)}</p>)}</div>;
   const line = view.kind === 'loadFailed' ? 'tryonC.loadFailed' : view.kind === 'unresolved' ? 'stylist.unresolved'
     : view.kind === 'paused' ? 'tryonC.pausedText' : view.kind === 'renew' ? 'tryonC.changed' : null;
+  const pointer = photo.saved !== null || photo.read === 'failed';
   return <FeatureRow id="tryon-heading" headingRef={heading} switchRef={switchButton} title={t('tryonC.settings')} description={t('tryonC.offSummary')}
     value={value} busy={state.writing} control={control} switchDisabled={disabled}
     onSwitch={() => { if (control.checked) void change(false, switchButton.current); else sheet.show(); }}
@@ -63,12 +62,13 @@ function Card({ store, busy, online, language, t }: Props & { store: TryOnStore 
       {line && <p>{t(line)}</p>}
       {state.writing && <p>{t('common.saving')}</p>}
     </>}
-    actions={(view.turnOn && view.turnOff || view.kind === 'loadFailed' || view.kind === 'unresolved') && <div className="settings-actions">
+    actions={(view.turnOn && view.turnOff || view.kind === 'loadFailed' || view.kind === 'unresolved' || pointer) && <div className="settings-actions">
       {view.turnOn && view.turnOff && <button id="tryon-turn-off" type="button" className="text-button" disabled={disabled}
         onClick={(event) => { void change(false, event.currentTarget); }}>{t(state.writing ? 'common.saving' : 'aiC.disable')}</button>}
       {(view.kind === 'loadFailed' || view.kind === 'unresolved') && <button type="button" className="button button-secondary"
         disabled={!online || busy || state.reading || state.writing}
         onClick={(event) => { pressed.current = event.currentTarget; void readTryOnStatus(store, 'active'); }}>{t('common.retry')}</button>}
+      {pointer && <button id="tryon-photo-link" type="button" className="text-button" onClick={() => goToSettings('profile-photo-heading')}>{t('tryonC.photoGoTo')}</button>}
     </div>}
     error={state.settingsError && !(state.settingsError === 'tryonC.changed' && view.kind === 'renew')
       && <p role="alert" className="notice notice-error">{t(state.settingsError)}</p>}

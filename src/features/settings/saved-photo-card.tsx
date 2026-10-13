@@ -9,9 +9,10 @@ import type { TryOnStore } from './tryon-store';
 type Props = { store: TryOnStore; online: boolean; language: Language; t: Translate };
 
 /**
- * The owner's saved reference photo (TRYON-PHOTO1): when it exists, when it was saved, and Remove. It needs only an approved
- * owner, so it stays reachable while try-on is off, paused, past review or not supported, and it renders outside every
- * readiness check. After a removal it stays as a one-line confirmation so focus has somewhere to go.
+ * The owner's saved reference photo (TRYON-PHOTO1) as the try-on screen shows it when try-on can't start: when it was saved, and
+ * Remove. In Settings the photo is managed under Profile (PHOTO2). It needs only an approved owner, so it stays reachable while
+ * try-on is off, paused, past review or not supported, and it renders outside every readiness check. After a removal it stays
+ * as a one-line confirmation so focus has somewhere to go.
  */
 export function SavedPhotoCard({ store, online, language, t }: Props) {
   const photo = useSyncExternalStore(store.subscribePhoto, store.getPhoto);

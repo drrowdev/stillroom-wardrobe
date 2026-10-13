@@ -742,6 +742,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     photoDeletes: 0,
     photoFaults: { status: [], get: [], put: [], delete: [] } as Record<'status' | 'get' | 'put' | 'delete', ('fail' | 'abort')[]>,
     photoHolds: [] as Promise<void>[],
+    putReplyHolds: [] as Promise<void>[],
     /** Every status read fails while this is true (an existing server photo stays in `photos`). */
     photoStatusDown: false,
   };
@@ -1061,6 +1062,9 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
           || size?.width !== 1024 || size.height !== 1280) { await json({ code: 'INVALID_INPUT' }); return; }
         const savedAtMs = Date.now();
         tryonControl.photos[owner] = { jpeg, sha256: String(body.p_sha256), savedAtMs };
+        // A held reply is released after the photo was stored: the server executed the save, the answer is still on its way.
+        const late = tryonControl.putReplyHolds.shift();
+        if (late) await late;
         await json({ code: 'OK', saved: true, bytes: jpeg.length, savedAtMs }); return;
       }
       if (name === 'tryon_status' || name === 'tryon_set_consent') {

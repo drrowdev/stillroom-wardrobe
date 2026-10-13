@@ -19,17 +19,41 @@ export function readPersonPhoto(store: TryOnStore): Promise<void> {
   return enqueue(store, async () => { if (!store.disposed) await readAgain(store); });
 }
 
-export type SavePhotoResult = 'saved' | PersonPhotoRefusal | 'failed';
-/** Saves or replaces the one photo. An unknown outcome (thrown) is read again before anything is claimed. */
+export type SavePhotoResult = 'saved' | PersonPhotoRefusal | 'failed' | 'stale';
+/** One save with the generation it ran under, read synchronously at the call (never after an await). */
+export type PhotoSave = { readonly generation: number; readonly result: Promise<SavePhotoResult> };
+/**
+ * Starts a save and returns its own generation with the result. A consumer confirms the save with `saveConfirmed`, which checks that
+ * generation against the current one, so a removal or consent write that lands between the store's check and the consumer's
+ * continuation can never be stamped onto an earlier successful save.
+ */
+export function startPersonPhotoSave(store: TryOnStore, photo: { bytes: Uint8Array<ArrayBuffer>; sha256: string }): PhotoSave {
+  const result = savePersonPhoto(store, photo);
+  return { generation: store.photoGeneration, result };
+}
+/** True only for a `saved` result whose own generation is still the store's current one. */
+export const saveConfirmed = (store: TryOnStore, save: PhotoSave, result: SavePhotoResult): boolean =>
+  result === 'saved' && !store.disposed && store.photoGeneration === save.generation;
+/**
+ * Saves or replaces the one photo. An unknown outcome (thrown) is read again before anything is claimed. A save that the
+ * server accepted is only reported as `saved` while nothing else changed meanwhile (a removal, a newer save, a consent write
+ * such as Turn off, or disposal): otherwise the reply says nothing about what is stored now, so the state is read again
+ * and the result is `stale`.
+ */
 export function savePersonPhoto(store: TryOnStore, photo: { bytes: Uint8Array<ArrayBuffer>; sha256: string }): Promise<SavePhotoResult> {
   store.photoGeneration += 1;
+  const generation = store.photoGeneration;
   return enqueue(store, async (): Promise<SavePhotoResult> => {
     if (store.disposed) return 'failed';
     store.updatePhoto({ busy: 'save', error: null });
     try {
       const reply = await store.api.savePersonPhoto(photo);
       if (store.disposed) return 'failed';
-      if (reply.kind === 'saved') { store.updatePhoto({ busy: null, read: 'ready', saved: { bytes: reply.bytes, savedAtMs: reply.savedAtMs } }); return 'saved'; }
+      if (reply.kind === 'saved') {
+        if (store.photoGeneration !== generation) { store.updatePhoto({ busy: null }); await readAgain(store); return 'stale'; }
+        store.updatePhoto({ busy: null, read: 'ready', saved: { bytes: reply.bytes, savedAtMs: reply.savedAtMs } });
+        return 'saved';
+      }
       store.updatePhoto({ busy: null, error: 'save' });
       return reply.code;
     } catch (error) {

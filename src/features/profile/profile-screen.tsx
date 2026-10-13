@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppClient } from '../../data/client';
 import type { OwnerScope, SessionController, SessionState } from '../../auth/session';
 import type { ProfileRow } from '../../data/rows';
@@ -7,6 +7,8 @@ import { errorKey, isAborted } from '../../data/errors';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import { LanguageSettings } from '../settings/language-settings';
 import { AiFeatures } from '../settings/ai-features';
+import { ChunkLoadError, lazyNamed } from '../../app/lazy-load';
+import { tryOnStoreFor } from '../settings/tryon-store';
 import { SettingsNav, type SettingsSection } from '../settings/settings-nav';
 import type { StylistStore } from '../stylist/stylist-store';
 import { WeatherSettings } from '../settings/weather-settings';
@@ -20,6 +22,27 @@ import type { AiClient } from '../../data/ai';
 import { currencyOptions, timeZoneOptions } from './profile-options';
 import { DataHub, type DataTask } from '../settings/data-hub';
 import '../../styles/data-flow.css';
+
+// The photo block pulls in the crop editor and the photo picker, so it loads as its own chunk and keeps this one within budget.
+const ProfilePhoto = lazyNamed(() => import('../settings/profile-photo'), 'ProfilePhoto');
+
+// A photo chunk that fails to load only replaces the photo block: the rest of Settings, including the try-on switch (turning try-on off
+// also removes the saved photo), stays usable.
+class PhotoChunkBoundary extends Component<{ t: Translate; children: ReactNode }, { error: unknown }> {
+  state: { error: unknown } = { error: null };
+  static getDerivedStateFromError(error: unknown) { return { error }; }
+  render() {
+    if (this.state.error === null) return this.props.children;
+    if (!(this.state.error instanceof ChunkLoadError)) throw this.state.error;
+    const { t } = this.props;
+    return <section className="settings-card profile-photo" aria-labelledby="profile-photo-heading">
+      <h3 id="profile-photo-heading" tabIndex={-1}>{t('tryonC.photoHeading')}</h3>
+      <p role="alert" className="notice notice-error">{t('tryonC.photoBlockFailed')}</p>
+      <p className="muted fine">{t('tryonC.photoBlockRemove')}</p>
+      <div className="settings-actions"><button type="button" className="button button-secondary" onClick={() => location.reload()}>{t('chunk.reload')}</button></div>
+    </section>;
+  }
+}
 
 // Style preferences stay stored but are not shown until suggestions use them (ADR20).
 type Props = { client: AppClient; ai: AiClient; stylist: StylistStore; images: PrivateImages; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; version: string; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void; onSignOut: () => void };
@@ -150,6 +173,7 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
                 {saved && <p className="settings-success" role="status">{t('settings.profileSaved')}</p>}
               </form>
             </div>
+            <PhotoChunkBoundary t={t}><Suspense fallback={null}><ProfilePhoto store={tryOnStoreFor(client, scope)} online={online} language={language} t={t} /></Suspense></PhotoChunkBoundary>
             <div className="settings-card" aria-labelledby="settings-language-heading" role="group">
               <h3 id="settings-language-heading">{t('language.label')}</h3>
               <LanguageSettings controller={controller} scope={scope} profile={profile} language={language} busy={busy || reading} online={online} t={t} />

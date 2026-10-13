@@ -1025,6 +1025,13 @@ platform's encrypted database backups for up to 7 days (G3), as stated in the no
 in `tests/unit/tryon-notice.test.ts`; revision 1, never shown, stays frozen there. Release-gates row TP1 tracks the pending hosted
 steps.
 
+**PHOTO2 manage the saved photo in Settings (source only; Pages deploy owner-gated).**
+Settings > Profile has a "Photo of you" block: add, replace and remove the one saved reference photo without opening a try-on.
+It reuses the try-on screen's choose, crop and encode flow (`useBodyPhotoPicker`) and the same four RPCs, with an explicit
+Save photo; nothing is added to the database, the Edge function or the notice. The saved photo is fetched only when the owner
+chooses Show photo, so opening Settings makes no new request. Add and Replace need try-on to be on (the server still decides);
+otherwise the block offers a way to turn try-on on, and Remove stays available. The Try-on card keeps only a pointer to the block.
+
 Platform restore: after any database restore and before access reopens, run
 `select public.tryon_discard_transient();` as the database owner and record its
 counts in the restore receipt. It deletes every try-on result, chain and attempt

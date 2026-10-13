@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { translate, type Language } from '../../src/i18n/all';
+import '../../src/i18n/tryon';
 import { mockBackend, signIn } from './mock-backend';
 import { aiFixture, addAiPhoto, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { codePreloaded } from './lazy-support';
@@ -48,6 +49,20 @@ test.describe('lazy routes', () => {
       await expectRoute(page, '#wardrobe-title');
     });
   }
+
+  test('Settings still opens when the photo block code fails to load, and says so only in that block', async ({ page }) => {
+    await page.route(/\/src\/features\/settings\/profile-photo\.tsx/, route => route.abort());
+    await start(page);
+    await go(page, '#/settings');
+    await expect(page.locator('#settings-title')).toBeVisible();
+    await expect(page.locator('#profile-display_name')).toBeVisible();
+    await expect(page.locator('#settings-ai-heading')).toBeVisible();
+    await expect(page.locator('.chunk-error')).toHaveCount(0);
+    const block = page.locator('section[aria-labelledby="profile-photo-heading"]');
+    await expect(block.getByRole('alert')).toHaveText(translate('en', 'tryonC.photoBlockFailed'));
+    await expect(block).toContainText(translate('en', 'tryonC.photoBlockRemove'));
+    await expect(block.getByRole('button', { name: translate('en', 'chunk.reload'), exact: true })).toBeVisible();
+  });
 
   test('a lazy route opens directly from its link', async ({ page }) => {
     const api = await mockBackend(page);
