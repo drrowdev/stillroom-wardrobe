@@ -20,6 +20,20 @@ export function readPersonPhoto(store: TryOnStore): Promise<void> {
 }
 
 export type SavePhotoResult = 'saved' | PersonPhotoRefusal | 'failed' | 'stale';
+/** One save with the generation it ran under, read synchronously at the call (never after an await). */
+export type PhotoSave = { readonly generation: number; readonly result: Promise<SavePhotoResult> };
+/**
+ * Starts a save and returns its own generation with the result. A consumer confirms the save with `saveConfirmed`, which checks that
+ * generation against the current one, so a removal or consent write that lands between the store's check and the consumer's
+ * continuation can never be stamped onto an earlier successful save.
+ */
+export function startPersonPhotoSave(store: TryOnStore, photo: { bytes: Uint8Array<ArrayBuffer>; sha256: string }): PhotoSave {
+  const result = savePersonPhoto(store, photo);
+  return { generation: store.photoGeneration, result };
+}
+/** True only for a `saved` result whose own generation is still the store's current one. */
+export const saveConfirmed = (store: TryOnStore, save: PhotoSave, result: SavePhotoResult): boolean =>
+  result === 'saved' && !store.disposed && store.photoGeneration === save.generation;
 /**
  * Saves or replaces the one photo. An unknown outcome (thrown) is read again before anything is claimed. A save that the
  * server accepted is only reported as `saved` while nothing else changed meanwhile (a removal, a newer save, a consent write

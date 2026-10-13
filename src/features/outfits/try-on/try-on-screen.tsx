@@ -9,7 +9,7 @@ import '../../../i18n/tryon';
 import { BODY_ASPECT, type BodyPhoto } from '../../../images/body-photo';
 import { CropEditor } from '../../../images/crop-editor';
 import { tryOnStoreFor, type TryOnStore } from '../../settings/tryon-store';
-import { loadPersonPhoto, readPersonPhoto, removePersonPhoto, savePersonPhoto, type LoadedPersonPhoto } from '../../settings/tryon-photo';
+import { loadPersonPhoto, readPersonPhoto, removePersonPhoto, saveConfirmed, startPersonPhotoSave, type LoadedPersonPhoto } from '../../settings/tryon-photo';
 import { SavedPhotoCard } from '../../settings/saved-photo-card';
 import { useOutfit } from '../use-outfits';
 import { browserEnvironment, deletionDate, failureAction, ideaSelection, itemName, slotKey, TryOnRun, tryOnSelection, useTryOnStatus, type FailureKind, type RunPhase } from '../use-try-on';
@@ -157,8 +157,8 @@ function Setup({ store, selection, components, online, language, t, onStart }: S
   const apply = picker.apply, cancelEdit = picker.cancelEdit;
   async function keepPhoto() {
     if (!photo) return;
-    const result = await savePersonPhoto(store, photo);
-    if (result === 'saved') setSavedThis(true);
+    const attempt = startPersonPhotoSave(store, photo);
+    if (saveConfirmed(store, attempt, await attempt.result)) setSavedThis(true);
   }
   async function removeSaved() {
     setRemoving(false);

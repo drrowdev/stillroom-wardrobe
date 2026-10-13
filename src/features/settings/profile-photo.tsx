@@ -8,7 +8,7 @@ import { ConfirmDialog } from '../outfits/try-on/try-on-parts';
 import { useBodyPhotoPicker } from '../outfits/try-on/use-body-photo';
 import { deletionDate } from '../outfits/use-try-on';
 import { goToSettings } from './go-to-settings';
-import { loadPersonPhoto, readPersonPhoto, removePersonPhoto, savePersonPhoto } from './tryon-photo';
+import { loadPersonPhoto, readPersonPhoto, removePersonPhoto, saveConfirmed, startPersonPhotoSave } from './tryon-photo';
 import { readTryOnStatus, tryOnViewOf, type TryOnStore } from './tryon-store';
 
 type Props = { store: TryOnStore | null; online: boolean; language: Language; t: Translate };
@@ -120,11 +120,13 @@ function Block({ store, online, language, t }: Props & { store: TryOnStore }) {
   async function save() {
     if (!chosen) return;
     setRefused(false);
-    const result = await savePersonPhoto(store, chosen);
-    if (result === 'saved') {
+    const attempt = startPersonPhotoSave(store, chosen);
+    const result = await attempt.result;
+    // The confirmation carries this save's own generation and is only made while it is still current.
+    if (saveConfirmed(store, attempt, result)) {
       const at = store.getPhoto().saved?.savedAtMs;
       picker.clear();
-      setNote(at === undefined ? null : { kind: 'saved', at, generation: store.photoGeneration });
+      setNote(at === undefined ? null : { kind: 'saved', at, generation: attempt.generation });
       return;
     }
     if (refusals.includes(result)) { setRefused(true); void readTryOnStatus(store, 'active'); }
