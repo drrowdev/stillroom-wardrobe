@@ -41,6 +41,8 @@
   "tryonC.photoGoTo": {"en":"Go to your photo","fi":"Siirry kuvaasi","sv":"Gå till din bild"},
   "tryonC.photoSaveFailed": {"en":"Couldn't save the photo. Try again.","fi":"Kuvaa ei voitu tallentaa. Yritä uudelleen.","sv":"Det gick inte att spara bilden. Försök igen."},
   "tryonC.photoSaveRefused": {"en":"Couldn't save the photo. Try-on isn't available.","fi":"Kuvaa ei voitu tallentaa. Sovitus ei ole käytettävissä.","sv":"Det gick inte att spara bilden. Provning är inte tillgänglig."},
+  "tryonC.photoBlockFailed": {"en":"Couldn't load this section. Reload to try again.","fi":"Osiota ei voitu ladata. Lataa sivu uudelleen.","sv":"Det här avsnittet kunde inte läsas in. Ladda om sidan och försök igen."},
+  "tryonC.photoBlockRemove": {"en":"Turning off try-on in Settings also removes your saved photo.","fi":"Kun otat sovituksen pois käytöstä asetuksissa, myös tallennettu kuva poistetaan.","sv":"Om du stänger av provning i Inställningar tas den sparade bilden också bort."},
   "tryon.open": {"en":"Try on","fi":"Sovita","sv":"Prova"},
   "tryon.title": {"en":"Try on: {name}","fi":"Sovita: {name}","sv":"Prova: {name}"},
   "tryon.slot.top": {"en":"Top","fi":"Yläosa","sv":"Överdel"},

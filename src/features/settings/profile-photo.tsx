@@ -31,7 +31,7 @@ function Block({ store, online, language, t }: Props & { store: TryOnStore }) {
   const state = useSyncExternalStore(store.subscribe, store.get);
   const view = tryOnViewOf(store, state);
   const ready = state.read.kind === 'ready' && tryOnReady(state.read.status);
-  const [note, setNote] = useState<{ kind: 'saved'; at: number } | { kind: 'removed' } | null>(null);
+  const [note, setNote] = useState<{ kind: 'saved'; at: number; generation: number } | { kind: 'removed' } | null>(null);
   const [refused, setRefused] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [show, setShow] = useState(false);
@@ -103,8 +103,9 @@ function Block({ store, online, language, t }: Props & { store: TryOnStore }) {
     return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
   }, [store, show, savedAt, attempt]);
 
-  // "Photo saved." belongs to the photo that save confirmed: a removal, replacement or consent withdrawal ends it.
-  const confirmed = note?.kind === 'saved' && photo.saved?.savedAtMs === note.at;
+  // "Photo saved." belongs to the photo that save confirmed: a removal, replacement, consent withdrawal or newer save (the store's
+  // photo generation) ends it, even when the state read that follows fails.
+  const confirmed = note?.kind === 'saved' && photo.saved?.savedAtMs === note.at && store.photoGeneration === note.generation;
   const removedNote = note?.kind === 'removed';
   const wanted = photo.saved !== null || unknown || confirmed || removedNote || chosen !== null || editing || ready || view.turnOn;
   if (!wanted) return null;
@@ -123,7 +124,7 @@ function Block({ store, online, language, t }: Props & { store: TryOnStore }) {
     if (result === 'saved') {
       const at = store.getPhoto().saved?.savedAtMs;
       picker.clear();
-      setNote(at === undefined ? null : { kind: 'saved', at });
+      setNote(at === undefined ? null : { kind: 'saved', at, generation: store.photoGeneration });
       return;
     }
     if (refusals.includes(result)) { setRefused(true); void readTryOnStatus(store, 'active'); }

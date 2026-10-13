@@ -19,17 +19,27 @@ export function readPersonPhoto(store: TryOnStore): Promise<void> {
   return enqueue(store, async () => { if (!store.disposed) await readAgain(store); });
 }
 
-export type SavePhotoResult = 'saved' | PersonPhotoRefusal | 'failed';
-/** Saves or replaces the one photo. An unknown outcome (thrown) is read again before anything is claimed. */
+export type SavePhotoResult = 'saved' | PersonPhotoRefusal | 'failed' | 'stale';
+/**
+ * Saves or replaces the one photo. An unknown outcome (thrown) is read again before anything is claimed. A save that the
+ * server accepted is only reported as `saved` while nothing else changed meanwhile (a removal, a newer save, a consent write
+ * such as Turn off, or disposal): otherwise the reply says nothing about what is stored now, so the state is read again
+ * and the result is `stale`.
+ */
 export function savePersonPhoto(store: TryOnStore, photo: { bytes: Uint8Array<ArrayBuffer>; sha256: string }): Promise<SavePhotoResult> {
   store.photoGeneration += 1;
+  const generation = store.photoGeneration;
   return enqueue(store, async (): Promise<SavePhotoResult> => {
     if (store.disposed) return 'failed';
     store.updatePhoto({ busy: 'save', error: null });
     try {
       const reply = await store.api.savePersonPhoto(photo);
       if (store.disposed) return 'failed';
-      if (reply.kind === 'saved') { store.updatePhoto({ busy: null, read: 'ready', saved: { bytes: reply.bytes, savedAtMs: reply.savedAtMs } }); return 'saved'; }
+      if (reply.kind === 'saved') {
+        if (store.photoGeneration !== generation) { store.updatePhoto({ busy: null }); await readAgain(store); return 'stale'; }
+        store.updatePhoto({ busy: null, read: 'ready', saved: { bytes: reply.bytes, savedAtMs: reply.savedAtMs } });
+        return 'saved';
+      }
       store.updatePhoto({ busy: null, error: 'save' });
       return reply.code;
     } catch (error) {

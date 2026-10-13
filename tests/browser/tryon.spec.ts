@@ -977,6 +977,34 @@ test.describe('photo of you under Settings > Profile (PHOTO2)', () => {
     expect(api.tryonControl.photos[owners.a]).toBeUndefined();
   });
 
+  for (const readAfter of ['fails', 'succeeds'] as const) {
+    test(`a save the server accepted is never confirmed when its reply arrives after Turn off (the state read then ${readAfter})`, async ({ page }) => {
+      engineOnly();
+      const { api } = await start(page, { route: 'settings' });
+      const card = page.locator('section[aria-labelledby="tryon-heading"]');
+      await chooseProfilePhoto(page);
+      const held = gate();
+      api.tryonControl.putReplyHolds.push(held.hold);
+      await page.locator('#profile-photo-save').click();
+      // The server has stored the photo; only its answer is held back.
+      await expect.poll(() => api.tryonControl.photos[owners.a] !== undefined).toBe(true);
+      await card.locator('[role="switch"][aria-checked="true"]').click();
+      await expect(card.locator('[role="switch"][aria-checked="false"]')).toBeVisible();
+      expect(api.tryonControl.photos[owners.a]).toBeUndefined();
+      if (readAfter === 'fails') api.tryonControl.photoStatusDown = true;
+      const reads = api.tryonControl.photoCalls.status;
+      held.release();
+      // The chosen photo stays as a draft; nothing says it is saved, and the state is read again either way.
+      await expect.poll(() => api.tryonControl.photoCalls.status).toBeGreaterThan(reads);
+      if (readAfter === 'fails') await expect(profilePhoto(page).getByRole('alert')).toHaveText(text('tryon.photoStatusFailed'));
+      else await expect(profilePhoto(page)).toContainText(text('tryonC.photoNeedsOn'));
+      await expect(profilePhoto(page)).not.toContainText(text('tryon.photoSaved'));
+      await expect(profilePhoto(page)).not.toContainText(text('tryonC.photoPrivate'));
+      await expect(profilePhoto(page)).not.toContainText('Saved ');
+      expect(api.tryonControl.photos[owners.a]).toBeUndefined();
+    });
+  }
+
   test('a photo or a crop that is too small shows its error inside the crop editor', async ({ page }) => {
     engineOnly();
     await start(page, { route: 'settings' });

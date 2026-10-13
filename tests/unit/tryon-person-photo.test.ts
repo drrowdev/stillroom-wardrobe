@@ -212,6 +212,28 @@ describe('the saved-photo store (ordering and stale bytes)', () => {
     expect(await run(() => { store.photoGeneration += 1; })).toEqual({ kind: 'stale' });
     expect(await run(() => { store.dispose(); })).toEqual({ kind: 'stale' });
   });
+  it('does not report an accepted save as saved when a removal or consent write moved the state before the reply', async () => {
+    const fake = server(null);
+    const store = newStore();
+    await readPersonPhoto(store);
+    const original = globalThis.fetch;
+    let release = () => {};
+    const late = new Promise<void>((resolve) => { release = resolve; });
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (url, init) => {
+      const reply = await original(url, init);
+      if (String(url).endsWith('tryon_person_photo_put_v1')) await late;
+      return reply;
+    }));
+    const saving = savePersonPhoto(store, { bytes: PHOTO, sha256: sha(PHOTO) });
+    await vi.waitFor(() => expect(fake.calls).toContain('tryon_person_photo_put_v1'));
+    // Turn off moves the generation (and the server removes the photo) while the accepted reply is still on its way.
+    store.photoGeneration += 1;
+    release();
+    await expect(saving).resolves.toBe('stale');
+    expect(store.getPhoto()).toMatchObject({ busy: null, error: null });
+    expect(fake.calls.at(-1)).toBe('tryon_person_photo_status_v1');
+    store.dispose();
+  });
   it('drops a fetch whose caller went away, and returns usable bytes otherwise', async () => {
     server(PHOTO);
     const store = newStore();
