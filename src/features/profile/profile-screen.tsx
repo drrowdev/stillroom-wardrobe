@@ -7,7 +7,8 @@ import { errorKey, isAborted } from '../../data/errors';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import { LanguageSettings } from '../settings/language-settings';
 import { AiFeatures } from '../settings/ai-features';
-import { ProfilePhoto } from '../settings/profile-photo';
+import { LazyBoundary } from '../../app/lazy';
+import { lazyNamed } from '../../app/lazy-load';
 import { tryOnStoreFor } from '../settings/tryon-store';
 import { SettingsNav, type SettingsSection } from '../settings/settings-nav';
 import type { StylistStore } from '../stylist/stylist-store';
@@ -22,6 +23,9 @@ import type { AiClient } from '../../data/ai';
 import { currencyOptions, timeZoneOptions } from './profile-options';
 import { DataHub, type DataTask } from '../settings/data-hub';
 import '../../styles/data-flow.css';
+
+// The photo block pulls in the crop editor and the photo picker, so it loads as its own chunk and keeps this one within budget.
+const ProfilePhoto = lazyNamed(() => import('../settings/profile-photo'), 'ProfilePhoto');
 
 // Style preferences stay stored but are not shown until suggestions use them (ADR20).
 type Props = { client: AppClient; ai: AiClient; stylist: StylistStore; images: PrivateImages; unresolved: boolean; controller: SessionController; scope: OwnerScope; profile: ProfileRow; change: SessionState['profileChange']; busy: boolean; language: Language; online: boolean; t: Translate; version: string; onDirty: (dirty: boolean, incomplete: boolean, busy: boolean) => void; onBack: () => void; onSignOut: () => void };
@@ -152,7 +156,7 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
                 {saved && <p className="settings-success" role="status">{t('settings.profileSaved')}</p>}
               </form>
             </div>
-            <ProfilePhoto store={tryOnStoreFor(client, scope)} online={online} language={language} t={t} />
+            <LazyBoundary t={t}><ProfilePhoto store={tryOnStoreFor(client, scope)} online={online} language={language} t={t} /></LazyBoundary>
             <div className="settings-card" aria-labelledby="settings-language-heading" role="group">
               <h3 id="settings-language-heading">{t('language.label')}</h3>
               <LanguageSettings controller={controller} scope={scope} profile={profile} language={language} busy={busy || reading} online={online} t={t} />

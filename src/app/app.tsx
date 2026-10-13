@@ -45,7 +45,8 @@ import {
   recoverySnapshot, subscribeRecovery, type RecoveryCallback,
 } from '../auth/recovery-callback';
 
-const ProfileScreen = lazyNamed(() => import('../features/profile/profile-screen'), 'ProfileScreen');
+// The profile page and its photo block are fetched together, so the block is there on the first paint and nothing below it moves.
+const ProfileScreen = lazyNamed(() => Promise.all([import('../features/profile/profile-screen'), import('../features/settings/profile-photo')]).then(([screen]) => screen), 'ProfileScreen');
 const Trash = lazyNamed(() => import('../features/settings/trash-screen'), 'Trash');
 const OutfitsScreen = lazyNamed(() => import('../features/outfits/outfits-screen'), 'OutfitsScreen');
 const NewOutfit = lazyNamed(() => import('../features/outfits/detail'), 'NewOutfit');
