@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { OwnerScope } from '../../../auth/session';
 import type { AppClient } from '../../../data/client';
 import { tryOnReady } from '../../../data/tryon';
@@ -6,8 +6,7 @@ import type { OutfitComponent } from '../../../domain/outfits';
 import type { TryOnSelection, TryOnStep } from '../../../domain/tryon';
 import type { Language, MessageKey, Translate } from '../../../i18n';
 import '../../../i18n/tryon';
-import { BODY_ASPECT, BodyPhotoError, admitBodySource, prepareBodyPhoto, type BodyPhoto, type BodySource } from '../../../images/body-photo';
-import { largestAspectCrop, type PhotoEdit } from '../../../images/crop';
+import { BODY_ASPECT, type BodyPhoto } from '../../../images/body-photo';
 import { CropEditor } from '../../../images/crop-editor';
 import { tryOnStoreFor, type TryOnStore } from '../../settings/tryon-store';
 import { loadPersonPhoto, readPersonPhoto, removePersonPhoto, savePersonPhoto, type LoadedPersonPhoto } from '../../settings/tryon-photo';
@@ -15,15 +14,12 @@ import { SavedPhotoCard } from '../../settings/saved-photo-card';
 import { useOutfit } from '../use-outfits';
 import { browserEnvironment, deletionDate, failureAction, ideaSelection, itemName, slotKey, TryOnRun, tryOnSelection, useTryOnStatus, type FailureKind, type RunPhase } from '../use-try-on';
 import { ConfirmDialog, TryOnPicture } from './try-on-parts';
+import { useBodyPhotoPicker } from './use-body-photo';
 
 type Common = { client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; onBack: () => void };
 type Props = Common & { id: string | null };
 
 const focus = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
-const photoMessage = (error: unknown): MessageKey | null => {
-  if (error instanceof DOMException && error.name === 'AbortError') return null;
-  return error instanceof BodyPhotoError && error.code === 'small' ? 'tryon.photoSmall' : 'tryon.photoUnusable';
-};
 
 /** Route `#/outfits/<id>/try-on`: the garments, a photo of the owner, then one try-on chain. */
 export function TryOnScreen(props: Props) {
@@ -108,22 +104,19 @@ type Stored = { kind: 'idle' | 'loading' | 'none' | 'unknown' | 'unusable' | 'fa
 
 function Setup({ store, selection, components, online, language, t, onStart }: SetupProps) {
   const input = useRef<HTMLInputElement>(null);
-  const preparation = useRef<AbortController | null>(null);
   const focusStart = useRef(false);
-  const [source, setSource] = useState<BodySource | null>(null);
-  const [sourceUrl, setSourceUrl] = useState<string | null>(null);
-  const [edit, setEdit] = useState<PhotoEdit | null>(null);
-  const [editing, setEditing] = useState(false);
-  const [preparing, setPreparing] = useState(false);
-  const [photo, setPhoto] = useState<BodyPhoto | null>(null);
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [error, setError] = useState<MessageKey | null>(null);
+  const [savedThis, setSavedThis] = useState(false);
+  const picker = useBodyPhotoPicker({
+    onFocus: (target) => focus(target === 'edit' ? 'tryon-edit' : 'tryon-choose'),
+    onPrepared: () => { setSavedThis(false); focusStart.current = true; },
+    onReset: () => setSavedThis(false),
+  });
+  const { source, sourceUrl, edit, editing, preparing, photo, photoUrl, error } = picker;
   // TRYON-PHOTO1: the saved reference photo. Its bytes are fetched here for this screen only and dropped with it.
   const saved = useSyncExternalStore(store.subscribePhoto, store.getPhoto);
   const savedAt = saved.saved?.savedAtMs ?? null;
   const [stored, setStored] = useState<Stored>({ kind: 'idle' });
   const [attempt, setAttempt] = useState(0);
-  const [savedThis, setSavedThis] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [removedNote, setRemovedNote] = useState(false);
   const removeButton = useRef<HTMLButtonElement>(null);
@@ -152,9 +145,6 @@ function Setup({ store, selection, components, online, language, t, onStart }: S
     });
     return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
   }, [store, savedAt, readKnown, statusUnknown, photoChosen, attempt]);
-  useEffect(() => () => { if (sourceUrl) URL.revokeObjectURL(sourceUrl); }, [sourceUrl]);
-  useEffect(() => () => { if (photoUrl) URL.revokeObjectURL(photoUrl); }, [photoUrl]);
-  useEffect(() => () => preparation.current?.abort(), []);
   const active: BodyPhoto | null = photo ?? (stored.kind === 'ready' ? stored.photo : null);
   // The start button is enabled only once preparation has finished, so focus moves there after that render.
   useEffect(() => {
@@ -162,55 +152,9 @@ function Setup({ store, selection, components, online, language, t, onStart }: S
     focusStart.current = false;
     document.getElementById('tryon-start')?.focus();
   }, [preparing, active]);
-  const clear = useCallback(() => {
-    preparation.current?.abort();
-    setSource(null); setSourceUrl(null); setEdit(null); setEditing(false); setPreparing(false); setPhoto(null); setPhotoUrl(null);
-    setSavedThis(false);
-  }, []);
-  async function choose(file: File | undefined) {
-    if (!file) return;
-    clear(); setError(null); setRemovedNote(false);
-    const controller = new AbortController();
-    preparation.current = controller;
-    setPreparing(true);
-    try {
-      const admitted = await admitBodySource(file, controller.signal);
-      if (controller.signal.aborted) return;
-      setSource(admitted);
-      setSourceUrl(URL.createObjectURL(admitted.blob));
-      setEdit({ turns: 0, crop: largestAspectCrop(admitted.width, admitted.height, 0, BODY_ASPECT) });
-      setEditing(true);
-    } catch (failure) {
-      const message = photoMessage(failure);
-      if (message && !controller.signal.aborted) { setError(message); focus('tryon-choose'); }
-    } finally {
-      if (preparation.current === controller) setPreparing(false);
-    }
-  }
-  async function apply(next: PhotoEdit) {
-    if (!source) return;
-    preparation.current?.abort();
-    const controller = new AbortController();
-    preparation.current = controller;
-    setPreparing(true); setError(null);
-    try {
-      const prepared = await prepareBodyPhoto(source, next, controller.signal);
-      if (controller.signal.aborted) return;
-      setEdit(next); setPhoto(prepared); setEditing(false); setSavedThis(false);
-      setPhotoUrl(URL.createObjectURL(new Blob([prepared.bytes], { type: 'image/jpeg' })));
-      focusStart.current = true;
-    } catch (failure) {
-      const message = photoMessage(failure);
-      if (message && !controller.signal.aborted) setError(message);
-    } finally {
-      if (preparation.current === controller) setPreparing(false);
-    }
-  }
-  function cancelEdit() {
-    setEditing(false);
-    if (!photo) clear();
-    focus(photo ? 'tryon-edit' : 'tryon-choose');
-  }
+  const { clear } = picker;
+  const choose = (file: File | undefined) => { if (file) setRemovedNote(false); return picker.choose(file); };
+  const apply = picker.apply, cancelEdit = picker.cancelEdit;
   async function keepPhoto() {
     if (!photo) return;
     const result = await savePersonPhoto(store, photo);
@@ -246,7 +190,7 @@ function Setup({ store, selection, components, online, language, t, onStart }: S
         {!editing && <div className="photo-actions">
           <button id="tryon-choose" type="button" className="button button-secondary" disabled={preparing} aria-describedby={shownUrl ? undefined : 'tryon-photo-tip'}
             onClick={() => input.current?.click()}>{t(active ? 'tryon.changePhoto' : 'tryon.choosePhoto')}</button>
-          {photo && source && <button id="tryon-edit" type="button" className="button button-quiet" disabled={preparing} onClick={() => setEditing(true)}>{t('tryon.editCrop')}</button>}
+          {photo && source && <button id="tryon-edit" type="button" className="button button-quiet" disabled={preparing} onClick={() => picker.startEditing()}>{t('tryon.editCrop')}</button>}
           {photo && !savedThis && readKnown && !statusUnknown && <button id="tryon-save-photo" type="button" className="button button-quiet" disabled={!online || preparing || saved.busy !== null}
             onClick={() => { void keepPhoto(); }}>{t(saved.busy === 'save' ? 'common.saving' : savedAt !== null ? 'tryon.replacePhoto' : 'tryon.savePhoto')}</button>}
           {!photo && (saved.saved || statusUnknown) && <button ref={removeButton} id="tryon-remove-photo" type="button" className="button button-quiet" disabled={!online || saved.busy !== null}

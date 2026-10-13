@@ -7,6 +7,8 @@ import { errorKey, isAborted } from '../../data/errors';
 import type { Language, MessageKey, Translate } from '../../i18n';
 import { LanguageSettings } from '../settings/language-settings';
 import { AiFeatures } from '../settings/ai-features';
+import { ProfilePhoto } from '../settings/profile-photo';
+import { tryOnStoreFor } from '../settings/tryon-store';
 import { SettingsNav, type SettingsSection } from '../settings/settings-nav';
 import type { StylistStore } from '../stylist/stylist-store';
 import { WeatherSettings } from '../settings/weather-settings';
@@ -150,6 +152,7 @@ export function ProfileScreen({ client, ai, stylist, images, unresolved, control
                 {saved && <p className="settings-success" role="status">{t('settings.profileSaved')}</p>}
               </form>
             </div>
+            <ProfilePhoto store={tryOnStoreFor(client, scope)} online={online} language={language} t={t} />
             <div className="settings-card" aria-labelledby="settings-language-heading" role="group">
               <h3 id="settings-language-heading">{t('language.label')}</h3>
               <LanguageSettings controller={controller} scope={scope} profile={profile} language={language} busy={busy || reading} online={online} t={t} />
