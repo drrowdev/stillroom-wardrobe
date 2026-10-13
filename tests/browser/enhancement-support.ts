@@ -71,11 +71,21 @@ export const held = (reply: EnhanceReply) => {
   return { reply: wrapped, release: () => release() };
 };
 
-export type Start = { language?: Language; setup?: Partial<EnhanceSetup>; consent?: boolean; background?: BackgroundTestHook; lost?: 'reservation' };
+type Seeded = ReturnType<Awaited<ReturnType<typeof aiFixture>>['seedSavedItem']>;
+/** A saved garment in place before the first navigation, so the app's own first wardrobe read lists it and setup never reloads. */
+export type SavedSeed = { title?: string; edited?: boolean };
+export type Start = { language?: Language; setup?: Partial<EnhanceSetup>; consent?: boolean; background?: BackgroundTestHook; lost?: 'reservation'; saved?: readonly SavedSeed[] };
 export async function start(page: Page, options: Start = {}) {
   await hook(page, options.background ?? { mask: 'left' });
-  const api = await aiFixture(page, options.language ?? 'en', true, options.lost);
+  const prepared: Seeded[] = [];
+  const api = await aiFixture(page, options.language ?? 'en', true, options.lost, false, undefined, '/', (backend) => {
+    for (const seed of options.saved ?? []) {
+      const saved = backend.seedSavedItem('a', seed.title);
+      if (seed.edited) backend.provenance.push({ image_id: saved.image.id, kind: 'ai_edited', origin: 'recorded' });
+      prepared.push(saved);
+    }
+  });
   api.enhanceControl.setup[owners.a] = { activated: true, ...options.setup };
   api.enhanceControl.consent[owners.a] = options.consent === false ? null : CLEANUP_NOTICE_REVISION;
-  return api;
+  return Object.assign(api, { prepared });
 }

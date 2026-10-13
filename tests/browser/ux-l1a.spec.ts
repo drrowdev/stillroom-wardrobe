@@ -40,6 +40,25 @@ async function openSaved(page: Page, api: Api, warmth?: number) {
   await expect(page.locator('#detail-edit')).toBeEnabled();
   return saved;
 }
+// For a test that opens a saved item straight after sign-in: the item is seeded before the first navigation, so the
+// app's own first wardrobe read lists it and setup never reloads (a reload is where WebKit on CI intermittently lost the page).
+async function signedInWithSaved(page: Page, warmth?: number) {
+  let seeded: ReturnType<Api['seedSavedItem']> | undefined;
+  const api = await aiFixture(page, 'en', true, undefined, false, undefined, '/', (backend) => {
+    seeded = backend.seedSavedItem();
+    if (warmth !== undefined) (seeded.item as Record<string, unknown>).warmth = warmth;
+  });
+  if (!seeded) throw new Error('The saved item fixture was not prepared.');
+  return { api, saved: seeded };
+}
+async function openPrepared(page: Page, saved: ReturnType<Api['seedSavedItem']>) {
+  await expect(page.locator('.item-card')).toHaveCount(1);
+  expect(await page.evaluate(() => (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming).type), 'setup must not reload').toBe('navigate');
+  await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
+  await expect(page.locator('#item-detail-title')).toHaveText(saved.item.title);
+  await expect(page.locator('#detail-edit')).toBeEnabled();
+  return saved;
+}
 function recordPatches(page: Page) {
   const patches: Array<{ url: URL; body: Record<string, unknown> }> = [];
   page.on('request', (request) => {
@@ -102,9 +121,9 @@ test('L1a AI off shows one short line and no internals', async ({ page }) => {
 });
 
 test('L1a warmth keeps a stored 4, sends no warmth key when untouched and 2 for Medium', async ({ page }) => {
-  const api = await aiFixture(page);
+  const { saved } = await signedInWithSaved(page, 4);
   const patches = recordPatches(page);
-  const { item } = await openSaved(page, api, 4);
+  const { item } = await openPrepared(page, saved);
   await editItem(page);
   await page.locator('details.optional-details > summary').click();
   await expect(page.locator('#detail-warmth')).toHaveValue('4');
@@ -776,9 +795,9 @@ test.describe('UX2 add item steps and the item view card', () => {
   });
 
   test('UX2 item view card: no form controls; Edit, Cancel, a dirty Cancel and Save move focus as planned', async ({ page }) => {
-    const api = await aiFixture(page);
+    const { saved } = await signedInWithSaved(page);
     const patches = recordPatches(page);
-    await openSaved(page, api);
+    await openPrepared(page, saved);
     await expect(page.locator('.detail-page form, .detail-page input, .detail-page select, .detail-page textarea')).toHaveCount(0);
     await expect(page.locator('.item-facts .item-fact')).not.toHaveCount(0);
     await page.locator('#photo-menu').focus();
@@ -810,8 +829,8 @@ test.describe('UX2 add item steps and the item view card', () => {
   });
 
   test('UX2 an unknown save result stays in edit with Cancel disabled and offers Check', async ({ page }) => {
-    const api = await aiFixture(page);
-    await openSaved(page, api);
+    const { saved } = await signedInWithSaved(page);
+    await openPrepared(page, saved);
     await editItem(page);
     let patches = 0;
     await page.route('**/rest/v1/items?*', async (route) => {
@@ -828,8 +847,8 @@ test.describe('UX2 add item steps and the item view card', () => {
   });
 
   test('UX2 a lost Archive reply keeps Check and Reload on the view card, locks Edit and sends once', async ({ page }) => {
-    const api = await aiFixture(page);
-    const { item } = await openSaved(page, api);
+    const { saved } = await signedInWithSaved(page);
+    const { item } = await openPrepared(page, saved);
     let archives = 0;
     await page.route('**/rest/v1/items?*', async (route) => {
       if (route.request().method() !== 'PATCH') { await route.fallback(); return; }

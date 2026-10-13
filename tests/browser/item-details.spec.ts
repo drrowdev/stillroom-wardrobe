@@ -148,13 +148,21 @@ test('diagnostic collector: editor teardown bounds stalled samples and seals lat
 });
 
 async function imageChangeSetup(page: Page, language: Language = 'en', loss?: 'reservation' | 'finalizer') {
-  const api = await aiFixture(page, language, true, undefined, false, loss);
-  const saved = api.seedSavedItem(), foreign = api.seedSavedItem('b', 'Robin private');
-  Object.assign(saved.item, { brand: 'Legacy brand', sleeve_length: 'short' });
-  saved.item.field_provenance = { subcategory: { kind: 'user', revision: 3 }, material: { kind: 'unknown', revision: 2 },
-    sleeve_length: { kind: 'user', revision: 3 } };
-  await page.reload();
+  // Seeded before the first navigation, so the app's own first wardrobe read lists them and setup never reloads.
+  let seeded: { saved: ReturnType<ReplaceFixture['seedSavedItem']>; foreign: ReturnType<ReplaceFixture['seedSavedItem']> } | undefined;
+  let documents = 0;
+  page.on('request', (request) => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents++; });
+  const api = await aiFixture(page, language, true, undefined, false, loss, '/', (backend) => {
+    const saved = backend.seedSavedItem(), foreign = backend.seedSavedItem('b', 'Robin private');
+    Object.assign(saved.item, { brand: 'Legacy brand', sleeve_length: 'short' });
+    saved.item.field_provenance = { subcategory: { kind: 'user', revision: 3 }, material: { kind: 'unknown', revision: 2 },
+      sleeve_length: { kind: 'user', revision: 3 } };
+    seeded = { saved, foreign };
+  });
+  if (!seeded) throw new Error('The saved item fixture was not prepared.');
+  const { saved, foreign } = seeded;
   await expect(page.locator('.item-card')).toHaveCount(1);
+  expect(documents, 'setup must not reload').toBe(1);
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
   await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);

@@ -1,10 +1,10 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Request } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { CLEANUP_NOTICE_REVISION } from '../../src/domain/enhancement';
 import { messages, type Language } from '../../src/i18n/all';
-import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
+import { editItem, openPhotoMenu } from './ai-photo-first-support';
 import { enhanceServerNow, owners, type EnhanceReply } from './mock-backend';
 import { openAccountMenu } from './shell-support';
 import { removals, syntheticPhoto, redraw, enhanced, held, start, type Start } from './enhancement-support';
@@ -14,7 +14,7 @@ import { removals, syntheticPhoto, redraw, enhanced, held, start, type Start } f
 // and H1 (the cut-out) stays the fallback. Every assertion is text: request counts,
 // SHA-256 digests of the bytes analysed, sent and saved, visible copy and axe results. No image is looked at by the
 // test author or the model; captures are written to ignored buffers for the coordinator's review.
-type Fixture = Awaited<ReturnType<typeof aiFixture>>;
+type Fixture = Awaited<ReturnType<typeof start>>;
 const text = (key: keyof typeof messages, language: Language = 'en') => messages[key][language];
 const engineOnly = () => test.skip(test.info().project.name === 'mobile', 'Behaviour is covered by the chromium and webkit-photo projects.');
 
@@ -23,14 +23,17 @@ const flows = {
   replace: { photo: '.image-change .capture-photo img', edit: '#image-change-edit', scope: '.image-change' },
 } as const;
 type Flow = keyof typeof flows;
+// The replace flow starts from a saved garment that is already in the app's first wardrobe read: a setup reload is
+// where WebKit on the CI runners intermittently lost the page, so no test reloads to reach its starting state.
+const begin = (page: Page, flow: Flow, options: Start = {}) => start(page, { ...options, saved: flow === 'replace' ? [{}] : [] });
 async function openFlow(page: Page, api: Fixture, flow: Flow, language: Language = 'en') {
   if (flow === 'add') {
     await page.getByRole('button', { name: text('wardrobe.add', language), exact: true }).first().click();
     await expect(page.locator('.capture-photo')).toBeVisible();
     return null;
   }
-  const saved = api.seedSavedItem();
-  await page.reload();
+  const saved = api.prepared[0];
+  if (!saved) throw new Error('The replace flow needs start() to prepare a saved item.');
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
   await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue(saved.item.title);
@@ -187,10 +190,32 @@ const storedDigests = (page: Page) => page.evaluate(async () => {
   return digests;
 });
 
+test('replace: the saved item is in the first wardrobe read, so setup needs no reload', async ({ page }) => {
+  engineOnly();
+  const documents: string[] = [];
+  // The first collection GET itself: its own response is awaited, and a failed request or a non-success status is
+  // reported, never replaced by a later successful retry.
+  let first: Request | undefined;
+  page.on('request', (request) => {
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents.push(request.url());
+    const url = new URL(request.url());
+    if (!first && url.origin === 'http://127.0.0.1:54321' && url.pathname === '/rest/v1/items' && !url.searchParams.has('id') && request.method() === 'GET') first = request;
+  });
+  const api = await begin(page, 'replace');
+  const saved = api.prepared[0]!;
+  expect(first, 'the app made a first collection read').toBeDefined();
+  const response = await first!.response();
+  expect(response, 'the first collection read received a response').not.toBeNull();
+  expect(response!.status()).toBe(200);
+  expect((await response!.json() as Array<{ id: string }>).map((row) => row.id)).toContain(saved.item.id);
+  await expect(page.locator(`a[href="#/items/${saved.item.id}"]`)).toBeVisible();
+  expect(documents).toHaveLength(1);
+});
+
 for (const flow of ['add', 'replace'] as const) {
   test(`${flow}: review, then an unchanged Done sends H0 once; the cleaned-up photo is analysed once and labelled, and the cut-out comes back with one new analysis`, async ({ page }) => {
     engineOnly();
-    const api = await start(page);
+      const api = await begin(page, flow);
     api.enhanceControl.replies.push(enhanced(page));
     const saved = await openFlow(page, api, flow);
     await choose(page, flow, await syntheticPhoto(page));
@@ -241,7 +266,7 @@ for (const flow of ['add', 'replace'] as const) {
 
   test(`${flow}: a changed crop in the review is prepared again and sent once`, async ({ page }) => {
     engineOnly();
-    const api = await start(page);
+      const api = await begin(page, flow);
     api.enhanceControl.replies.push(enhanced(page));
     await openFlow(page, api, flow);
     await choose(page, flow, await syntheticPhoto(page));
@@ -258,7 +283,7 @@ for (const flow of ['add', 'replace'] as const) {
   test(`${flow}: after a changed crop is accepted in the review, a later edit still crops the whole photo and H0 holds only the region shown`, async ({ page }) => {
     engineOnly();
     test.slow();
-    const api = await start(page, { background: { mask: 'centre' } });
+      const api = await begin(page, flow, { background: { mask: 'centre' } });
     const h0: Buffer[] = [];
     api.enhanceControl.replies.push(recording(page, h0), recording(page, h0));
     await openFlow(page, api, flow);
@@ -291,7 +316,7 @@ for (const flow of ['add', 'replace'] as const) {
   test(`${flow}: a rotation accepted in the review is applied once, and a later crop of the rotated photo sends only that region`, async ({ page }) => {
     engineOnly();
     test.slow();
-    const api = await start(page, { background: { mask: 'centre' } });
+      const api = await begin(page, flow, { background: { mask: 'centre' } });
     const h0: Buffer[] = [];
     api.enhanceControl.replies.push(recording(page, h0), recording(page, h0));
     await openFlow(page, api, flow);
@@ -323,7 +348,7 @@ for (const flow of ['add', 'replace'] as const) {
 
   test(`${flow}: Cancel while an accepted changed crop is still being prepared keeps the first pass, with nothing sent`, async ({ page }) => {
     engineOnly();
-    const api = await start(page, { background: { mask: 'centre' } });
+      const api = await begin(page, flow, { background: { mask: 'centre' } });
     api.enhanceControl.replies.push(enhanced(page));
     await openFlow(page, api, flow);
     await choose(page, flow, await bandPhoto(page));
@@ -352,7 +377,7 @@ for (const flow of ['add', 'replace'] as const) {
     test(`${flow}: a failed accepted crop keeps the review open; then ${after} works and a later edit still has the whole photo`, async ({ page }) => {
       engineOnly();
       test.slow();
-      const api = await start(page, { background: { mask: 'centre' } });
+          const api = await begin(page, flow, { background: { mask: 'centre' } });
       const h0: Buffer[] = [];
       api.enhanceControl.replies.push(recording(page, h0), recording(page, h0));
       await openFlow(page, api, flow);
@@ -402,7 +427,7 @@ for (const flow of ['add', 'replace'] as const) {
 
   test(`${flow}: Cancel in the review keeps the new photo's cut-out with one analysis and sends nothing`, async ({ page }) => {
     engineOnly();
-    const api = await start(page);
+      const api = await begin(page, flow);
     api.enhanceControl.replies.push(enhanced(page));
     const saved = await openFlow(page, api, flow);
     await choose(page, flow, await syntheticPhoto(page));
@@ -423,7 +448,7 @@ for (const flow of ['add', 'replace'] as const) {
 
   test(`${flow}: "Use original background" in the review sends nothing and analyses the original once`, async ({ page }) => {
     engineOnly();
-    const api = await start(page);
+      const api = await begin(page, flow);
     await openFlow(page, api, flow);
     await choose(page, flow, await syntheticPhoto(page));
     await inReview(page);
@@ -446,7 +471,7 @@ for (const flow of ['add', 'replace'] as const) {
 
   test(`${flow}: two garments in the crop send nothing and say to crop to one`, async ({ page }) => {
     engineOnly();
-    const api = await start(page, { background: { mask: 'two' } });
+      const api = await begin(page, flow, { background: { mask: 'two' } });
     await openFlow(page, api, flow);
     await choose(page, flow, await syntheticPhoto(page));
     await expect(line(page, 'enhance.ambiguous')).toBeVisible({ timeout: 45_000 });
@@ -460,7 +485,7 @@ for (const flow of ['add', 'replace'] as const) {
 
   test(`${flow}: a later edit of the cleaned-up photo, cancelled or with an unchanged Done, keeps it with no new request or analysis`, async ({ page }) => {
     engineOnly();
-    const api = await start(page);
+      const api = await begin(page, flow);
     api.enhanceControl.replies.push(enhanced(page));
     await openFlow(page, api, flow);
     await choose(page, flow, await syntheticPhoto(page));
@@ -487,7 +512,7 @@ for (const flow of ['add', 'replace'] as const) {
 
   test(`${flow}: an enhanced analysed Save stores the enhanced bytes, and nothing of them is cached after sign-out`, async ({ page }) => {
     engineOnly();
-    const api = await start(page);
+      const api = await begin(page, flow);
     api.enhanceControl.replies.push(enhanced(page));
     const saved = await openFlow(page, api, flow);
     await choose(page, flow, await syntheticPhoto(page));
@@ -509,7 +534,7 @@ for (const flow of ['add', 'replace'] as const) {
 
   test(`${flow}: cancelling a changed crop while it is being enhanced keeps the accepted photo, which is then saved`, async ({ page }) => {
     engineOnly();
-    const api = await start(page);
+      const api = await begin(page, flow);
     api.enhanceControl.replies.push(enhanced(page));
     const saved = await openFlow(page, api, flow);
     await choose(page, flow, await syntheticPhoto(page));
@@ -551,7 +576,7 @@ for (const flow of ['add', 'replace'] as const) {
 
   test(`${flow}: "Skip" keeps the cut-out for one analysis, and a late result is never shown or analysed`, async ({ page }) => {
     engineOnly();
-    const api = await start(page);
+      const api = await begin(page, flow);
     const late = held(enhanced(page));
     api.enhanceControl.replies.push(late.reply);
     await openFlow(page, api, flow);
@@ -605,7 +630,7 @@ for (const [name, reply, key] of fallbacks) {
 }
 test('replace: a failed enhancement keeps the cut-out and says so', async ({ page }) => {
   engineOnly();
-  const api = await start(page);
+  const api = await begin(page, 'replace');
   api.enhanceControl.replies.push({ status: 502, body: { code: 'FAILED' } });
   await openFlow(page, api, 'replace');
   await choose(page, 'replace', await syntheticPhoto(page));
@@ -849,10 +874,8 @@ test('add: a Save whose request never arrived, retried after the server evidence
 
 test('item details show "Photo edited with AI" only for an image with that provenance', async ({ page }) => {
   engineOnly();
-  const api = await start(page);
-  const edited = api.seedSavedItem('a', 'Edited shirt'), plain = api.seedSavedItem('a', 'Plain shirt');
-  api.provenance.push({ image_id: edited.image.id, kind: 'ai_edited', origin: 'recorded' });
-  await page.reload();
+  const api = await start(page, { saved: [{ title: 'Edited shirt', edited: true }, { title: 'Plain shirt' }] });
+  const edited = api.prepared[0]!, plain = api.prepared[1]!;
   await page.locator(`a[href="#/items/${edited.item.id}"]`).click();
   await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue('Edited shirt');
@@ -868,9 +891,8 @@ test('item details show "Photo edited with AI" only for an image with that prove
 
 test('item details: a failed provenance read says so with Retry, and a replaced photo never shows the old label', async ({ page }) => {
   engineOnly();
-  const api = await start(page, { consent: false });
-  const saved = api.seedSavedItem('a', 'Edited shirt');
-  api.provenance.push({ image_id: saved.image.id, kind: 'ai_edited', origin: 'recorded' });
+  const api = await start(page, { consent: false, saved: [{ title: 'Edited shirt', edited: true }] });
+  const saved = api.prepared[0]!;
   let failing = 1, release = () => {};
   let hold: Promise<void> | null = null;
   await page.route('**/rest/v1/rpc/image_provenance_v1', async (route) => {
@@ -878,7 +900,6 @@ test('item details: a failed provenance read says so with Retry, and a replaced 
     if (hold) await hold;
     await route.fallback();
   });
-  await page.reload();
   await page.locator(`a[href="#/items/${saved.item.id}"]`).click();
   await editItem(page);
   await expect(page.locator('#detail-title')).toHaveValue('Edited shirt');
