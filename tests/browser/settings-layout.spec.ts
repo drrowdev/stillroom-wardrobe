@@ -333,6 +333,16 @@ test.describe('UI1 spending summary and admin entry', () => {
     await noViolations(page);
   });
 
+  test('a feature row with consent off shows no amount of its own; the budget is the one shared figure', async ({ page }) => {
+    await start(page);
+    await expect(page.locator('.ai-spend-figure')).toBeVisible();
+    for (const feature of features) {
+      await expect(toggle(page, feature)).toHaveAttribute('aria-checked', 'false');
+      await expect(toggle(page, feature)).toHaveAttribute('aria-describedby', `${heading[feature]}-description`);
+      await expect(row(page, feature).locator('.feature-text')).not.toContainText('$');
+    }
+  });
+
   test('an admin with no spending source still gets the admin link', async ({ page }) => {
     const { api } = await start(page, { admin: true, aiStatus: 'fail', missing: ['enhance', 'tryon'], stylistSetup: false });
     await expect(page.locator('.ai-features').getByRole('link', { name: text('admin.title'), exact: true })).toBeVisible();

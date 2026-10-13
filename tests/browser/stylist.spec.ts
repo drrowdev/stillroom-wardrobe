@@ -117,7 +117,8 @@ test.describe('ST1b stylist', () => {
     await expect(page.locator('#stylist-heading')).toBeFocused();
     await expect(page.locator('#stylist-heading')).toHaveText(text('stylistC.settings'));
     await expect(toggle(page, false)).toBeVisible();
-    await expect(card(page)).toContainText(text('aiF.upTo', 'en', { limit: '$17.94' }));
+    await expect(toggle(page, false)).toHaveAttribute('aria-describedby', 'stylist-heading-description');
+    await expect(card(page).locator('.feature-text')).not.toContainText('$');
     await card(page).getByText(text('aiF.about'), { exact: true }).click();
     for (const key of ['stylistC.fields', 'stylistC.azureNotice', 'stylistC.trainingNotice', 'stylistC.retention', 'stylistC.chargeNotice',
       'stylistC.usageNotice', 'stylistC.optOut'] as const) await expect(card(page)).toContainText(text(key));

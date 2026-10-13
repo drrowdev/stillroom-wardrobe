@@ -31,7 +31,6 @@
   "settings.sectionAccount": {"en":"Account","fi":"Tili","sv":"Konto"},
   "aiF.spending": {"en":"AI use this month","fi":"Tekoälyn käyttö tässä kuussa","sv":"AI-användning den här månaden"},
   "aiF.spent": {"en":"{used} of {limit}","fi":"{used} / {limit}","sv":"{used} av {limit}"},
-  "aiF.upTo": {"en":"Up to {limit} a month","fi":"Enintään {limit} kuukaudessa","sv":"Upp till {limit} i månaden"},
   "aiF.about": {"en":"How it works and privacy","fi":"Toiminta ja yksityisyys","sv":"Så fungerar det och integritet"},
   "aiC.description": {"en":"Fills in the name, category and colours when you add a photo.","fi":"Täyttää nimen, luokan ja värit, kun lisäät kuvan.","sv":"Fyller i namn, kategori och färger när du lägger till ett foto."},
   "stylistC.description": {"en":"Chat about outfit ideas from your own clothes.","fi":"Keskustele asuideoista omista vaatteistasi.","sv":"Chatta om klädförslag med dina egna plagg."},

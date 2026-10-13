@@ -27,18 +27,18 @@ export function ConsentSheet({ id, title, summary, notice, writing, disabled, on
 
 type RowProps = {
   id: string; headingRef: RefObject<HTMLHeadingElement | null>; switchRef: RefObject<HTMLButtonElement | null>;
-  title: string; description: string; value: string | null; busy: boolean;
+  title: string; description: string; busy: boolean;
   control: FeatureSwitch; switchDisabled: boolean; onSwitch: () => void;
   status: ReactNode; actions: ReactNode; error: ReactNode; notice: ReactNode | null; sheet: ReactNode | null; t: Translate;
 };
 /**
- * One feature row: title, one-line description, this month's figure, the switch, the state lines and the notice under
+ * One feature row: title, one-line description, the switch, the state lines and the notice under
  * "How it works and privacy". When the sheet closes, focus returns to the switch, or to the title if the switch is gone.
  * If a passive read removes the whole row while it held focus, focus moves to its section's heading, which stays mounted;
  * nothing is focused when the section has gone too (sign-out, another screen) or focus has already moved elsewhere.
  * A busy switch is aria-disabled rather than disabled, so it keeps focus while its write runs.
  */
-export function FeatureRow({ id, headingRef, switchRef, title, description, value, busy, control, switchDisabled, onSwitch, status, actions, error, notice, sheet, t }: RowProps) {
+export function FeatureRow({ id, headingRef, switchRef, title, description, busy, control, switchDisabled, onSwitch, status, actions, error, notice, sheet, t }: RowProps) {
   const sheetOpen = sheet !== null;
   const wasOpen = useRef(false);
   useEffect(() => {
@@ -61,16 +61,14 @@ export function FeatureRow({ id, headingRef, switchRef, title, description, valu
       }, 0);
     };
   }, []);
-  const described = [`${id}-description`, ...(value ? [`${id}-value`] : [])].join(' ');
   return <section ref={rowRef} className="settings-card feature-row" aria-labelledby={id} aria-busy={busy}>
     <div className="feature-main">
       <div className="feature-text">
         <h3 id={id} ref={headingRef} tabIndex={-1}>{title}</h3>
         <p id={`${id}-description`} className="feature-description">{description}</p>
-        {value && <p id={`${id}-value`} className="feature-value">{value}</p>}
       </div>
       {control.present && <button ref={switchRef} type="button" role="switch" className="switch" aria-checked={control.checked}
-        aria-labelledby={id} aria-describedby={described} aria-disabled={switchDisabled || undefined}
+        aria-labelledby={id} aria-describedby={`${id}-description`} aria-disabled={switchDisabled || undefined}
         onClick={switchDisabled ? undefined : onSwitch}>
         <span className="switch-thumb" aria-hidden="true" />
       </button>}

@@ -37,7 +37,6 @@ export function StylistSettings({ store, busy, online, language, t }: Props) {
   const details = view.kind === 'off' || view.kind === 'renew' || view.kind === 'on' || view.kind === 'paused';
   const control = featureSwitch(view.turnOn, view.turnOff);
   const change = (enabled: boolean, button: HTMLElement | null) => { pressed.current = button; return writeConsent(store, enabled); };
-  const value = (view.kind === 'off' || view.kind === 'renew') && budget ? t('aiF.upTo', { limit }) : null;
   const noticeList = <dl className="ai-notice fine">
     <dt>{t('stylistC.fieldsTitle')}</dt>
     <dd>{t('stylistC.fields')}</dd>
@@ -53,7 +52,7 @@ export function StylistSettings({ store, busy, online, language, t }: Props) {
   const limitLine = view.kind !== 'on' || !budget || !policy ? null : limits?.reached ? 'stylist.limitShared'
     : limits?.warning ? 'stylist.sharedWarning' : null;
   return <FeatureRow id="stylist-heading" headingRef={heading} switchRef={switchButton} title={t('stylistC.settings')}
-    description={t('stylistC.description')} value={value} busy={state.writing} control={control} switchDisabled={disabled}
+    description={t('stylistC.description')} busy={state.writing} control={control} switchDisabled={disabled}
     onSwitch={() => { if (control.checked) void change(false, switchButton.current); else sheet.show(); }}
     status={<>
       {line && <p>{t(line)}</p>}
