@@ -129,7 +129,7 @@ export function AiSettings({ ai, controller, scope, profile, busy, unresolved, o
   const state: MessageKey | null = card.state === 'unconfirmed' ? 'aiC.reconcile' : card.state === 'loadFailed' ? 'aiC.loadFailed'
     : card.state === 'unavailable' ? 'aiC.inactive' : card.state === 'renew' ? 'aiC.changed' : null;
   return <FeatureRow id="ai-consent-title" headingRef={heading} switchRef={switchButton} title={t('aiC.settings')}
-    description={t('aiC.description')} value={null} busy={card.state === 'loading' || pending !== null}
+    description={t('aiC.description')} busy={card.state === 'loading' || pending !== null}
     control={control} switchDisabled={disabled}
     onSwitch={() => { if (control.checked) void change(false, switchButton.current); else sheet.show(); }}
     status={<>

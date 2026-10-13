@@ -1,21 +1,20 @@
 import { useEffect, useRef, useSyncExternalStore } from 'react';
-import { usdCents } from '../../domain/ai-presentation';
-import type { Language, Translate } from '../../i18n';
+import type { Translate } from '../../i18n';
 import { featureSwitch } from './ai-features-model';
 import { ConsentSheet, FeatureRow } from './feature-row';
 import { useConsentSheet } from './use-consent-sheet';
 import { ENHANCE_NOTICE_KEYS, enhanceViewOf, readEnhanceStatus, writeEnhanceConsent, type EnhanceStore } from './enhance-store';
 
-type Props = { store: EnhanceStore | null; busy: boolean; online: boolean; language: Language; t: Translate };
+type Props = { store: EnhanceStore | null; busy: boolean; online: boolean; t: Translate };
 
 
 // Status is read on arrival, focus, visibility and reconnect, never while the profile is being saved; reads never write.
 // Turn off stays available whenever consent is on, including when enhancement is paused, not activated or unavailable.
-export function EnhanceSettings({ store, busy, online, language, t }: Props) {
+export function EnhanceSettings({ store, busy, online, t }: Props) {
   if (!store) return null;
-  return <Card store={store} busy={busy} online={online} language={language} t={t} />;
+  return <Card store={store} busy={busy} online={online} t={t} />;
 }
-function Card({ store, busy, online, language, t }: Props & { store: EnhanceStore }) {
+function Card({ store, busy, online, t }: Props & { store: EnhanceStore }) {
   const state = useSyncExternalStore(store.subscribe, store.get);
   useEffect(() => { store.setBusy(busy); }, [store, busy]);
   useEffect(() => {
@@ -42,18 +41,15 @@ function Card({ store, busy, online, language, t }: Props & { store: EnhanceStor
   const view = enhanceViewOf(store, state);
   const sheet = useConsentSheet(view.turnOn, state.writing);
   if (view.kind === 'hidden') return null;
-  const status = state.read.kind === 'ready' ? state.read.status : null;
   const disabled = !online || busy || state.writing;
   const details = view.kind === 'off' || view.kind === 'renew' || view.kind === 'on' || view.kind === 'paused';
   const control = featureSwitch(view.turnOn, view.turnOff);
   const change = (enabled: boolean, button: HTMLElement | null) => { pressed.current = button; return writeEnhanceConsent(store, enabled); };
-  const budget = status?.budget ?? null;
-  const value = (view.kind === 'off' || view.kind === 'renew') && budget ? t('aiF.upTo', { limit: usdCents(budget.monthlyAllowanceMicro, language, 'limit') }) : null;
   const noticeList = <div className="ai-notice fine">{ENHANCE_NOTICE_KEYS.map((key) => <p key={key}>{t(key)}</p>)}</div>;
   const line = view.kind === 'loadFailed' ? 'enhanceC.loadFailed' : view.kind === 'unresolved' ? 'stylist.unresolved'
     : view.kind === 'paused' ? 'enhanceC.pausedText' : view.kind === 'renew' ? 'enhanceC.changed' : null;
   return <FeatureRow id="enhance-heading" headingRef={heading} switchRef={switchButton} title={t('enhanceC.settings')} description={t('enhanceC.offSummary')}
-    value={value} busy={state.writing} control={control} switchDisabled={disabled}
+    busy={state.writing} control={control} switchDisabled={disabled}
     onSwitch={() => { if (control.checked) void change(false, switchButton.current); else sheet.show(); }}
     status={<>
       {line && <p>{t(line)}</p>}

@@ -32,8 +32,8 @@ export function AiFeatures({ client, ai, controller, scope, profile, stylist, bu
     </div>
     <AiSettings ai={ai} controller={controller} scope={scope} profile={profile} busy={busy} unresolved={unresolved}
       language={language} online={online} t={t} onSpend={spend.analysis} />
-    <EnhanceSettings store={enhance} busy={busy} language={language} online={online} t={t} />
-    <TryOnSettings store={tryOn} busy={busy} language={language} online={online} t={t} />
+    <EnhanceSettings store={enhance} busy={busy} online={online} t={t} />
+    <TryOnSettings store={tryOn} busy={busy} online={online} t={t} />
     <StylistSettings store={stylist} busy={busy} language={language} online={online} t={t} />
   </div>;
 }
