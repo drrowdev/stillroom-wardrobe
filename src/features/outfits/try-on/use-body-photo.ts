@@ -39,7 +39,7 @@ export function useBodyPhotoPicker(options: Options) {
   useEffect(() => () => preparation.current?.abort(), []);
   const clear = useCallback(() => {
     preparation.current?.abort();
-    setSource(null); setSourceUrl(null); setEdit(null); setEditing(false); setPreparing(false); setPhoto(null); setPhotoUrl(null);
+    setSource(null); setSourceUrl(null); setEdit(null); setEditing(false); setPreparing(false); setPhoto(null); setPhotoUrl(null); setError(null);
     latest.current.onReset?.();
   }, []);
   async function choose(file: File | undefined) {
@@ -82,7 +82,7 @@ export function useBodyPhotoPicker(options: Options) {
     }
   }
   function cancelEdit() {
-    setEditing(false);
+    setEditing(false); setError(null);
     if (!photo) clear();
     latest.current.onFocus(photo ? 'edit' : 'choose');
   }

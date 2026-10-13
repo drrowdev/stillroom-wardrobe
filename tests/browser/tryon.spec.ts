@@ -70,17 +70,17 @@ async function start(page: Page, options: Start = {}) {
   await expectSignedIn(page);
   return { api, clothes, outfitId };
 }
-async function syntheticPerson(page: Page, shirt = '#3d5a80'): Promise<Buffer> {
-  return Buffer.from(await page.evaluate(async (shirtColour) => {
-    const canvas = Object.assign(document.createElement('canvas'), { width: 800, height: 1000 });
+async function syntheticPerson(page: Page, shirt = '#3d5a80', size = { width: 800, height: 1000 }): Promise<Buffer> {
+  return Buffer.from(await page.evaluate(async ({ shirtColour, width, height }) => {
+    const canvas = Object.assign(document.createElement('canvas'), { width, height });
     const context = canvas.getContext('2d')!;
-    context.fillStyle = '#e4e1da'; context.fillRect(0, 0, 800, 1000);
+    context.fillStyle = '#e4e1da'; context.fillRect(0, 0, width, height);
     context.fillStyle = '#8a6f5a'; context.beginPath(); context.arc(400, 170, 80, 0, Math.PI * 2); context.fill();
     context.fillStyle = shirtColour; context.fillRect(290, 260, 220, 330);
     context.fillStyle = '#293241'; context.fillRect(300, 590, 90, 330); context.fillRect(410, 590, 90, 330);
     const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('encode')), 'image/png'));
     return [...new Uint8Array(await blob.arrayBuffer())];
-  }, shirt));
+  }, { shirtColour: shirt, ...size }));
 }
 async function openTryOn(page: Page, language: Language = 'en', title = 'Weekend') {
   await expect(page.locator('#outfit-detail-title')).toBeVisible();
@@ -848,6 +848,8 @@ test.describe('photo of you under Settings > Profile (PHOTO2)', () => {
     await chooseProfilePhoto(page);
     expect(api.tryonControl.photoCalls.put).toBe(0);
     await expect(page.locator('#profile-photo-add')).toHaveCount(0);
+    // Nothing is stored yet, so nothing says it is.
+    await expect(profilePhoto(page)).not.toContainText(text('tryonC.photoPrivate'));
     await axe(page);
     await page.locator('#profile-photo-save').click();
     await expect(profilePhoto(page)).toContainText(text('tryon.photoSaved'));
@@ -918,6 +920,7 @@ test.describe('photo of you under Settings > Profile (PHOTO2)', () => {
     await chooseProfilePhoto(page);
     await page.locator('#profile-photo-save').click();
     await expect(profilePhoto(page).getByRole('alert')).toHaveText(text('tryonC.photoSaveFailed'));
+    await expect(profilePhoto(page)).not.toContainText(text('tryonC.photoPrivate'));
     await expect(page.locator('#profile-photo-save')).toBeFocused();
     await expect(page.locator('.profile-photo-preview')).toBeVisible();
     expect(api.tryonControl.photos[owners.a]).toBeUndefined();
@@ -935,11 +938,71 @@ test.describe('photo of you under Settings > Profile (PHOTO2)', () => {
     await page.locator('#profile-photo-save').click();
     await expect(profilePhoto(page).getByRole('alert')).toHaveText(text('tryonC.photoSaveRefused'));
     await expect(profilePhoto(page)).not.toContainText(text('tryon.photoSaved'));
+    await expect(profilePhoto(page)).not.toContainText(text('tryonC.photoPrivate'));
     expect(api.tryonControl.photos[owners.a]).toBeUndefined();
     await expect(page.locator('#profile-photo-save')).toHaveCount(0);
     await expect(profilePhoto(page)).toContainText(text('tryonC.photoNeedsOn'));
     await expect(page.locator('#profile-photo-turn-on')).toBeVisible();
     await axe(page);
+  });
+
+  test('Turn off after Save ends the confirmation with the photo, also when the save reply arrives late', async ({ page }) => {
+    engineOnly();
+    const { api } = await start(page, { route: 'settings' });
+    const card = page.locator('section[aria-labelledby="tryon-heading"]');
+    await chooseProfilePhoto(page);
+    await saveProfilePhoto(page);
+    await card.locator('[role="switch"][aria-checked="true"]').click();
+    await expect(card.locator('[role="switch"][aria-checked="false"]')).toBeVisible();
+    expect(api.tryonControl.photos[owners.a]).toBeUndefined();
+    await expect(profilePhoto(page)).toContainText(text('tryonC.photoEmpty'));
+    await expect(profilePhoto(page)).not.toContainText(text('tryon.photoSaved'));
+    await expect(profilePhoto(page)).not.toContainText(text('tryonC.photoPrivate'));
+    // Turned on again, then Turn off while the save is still on its way: the late reply is a refusal and nothing claims a save.
+    api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION;
+    await page.reload();
+    await expect(card.locator('[role="switch"][aria-checked="true"]')).toBeVisible();
+    await chooseProfilePhoto(page);
+    const held = gate();
+    let reached = false;
+    await page.route('**/rest/v1/rpc/tryon_person_photo_put_v1', async (route) => { reached = true; await held.hold; await route.fallback(); });
+    await page.locator('#profile-photo-save').click();
+    await expect.poll(() => reached).toBe(true);
+    await card.locator('[role="switch"][aria-checked="true"]').click();
+    await expect(card.locator('[role="switch"][aria-checked="false"]')).toBeVisible();
+    held.release();
+    await expect(profilePhoto(page).getByRole('alert')).toHaveText(text('tryonC.photoSaveRefused'));
+    await expect(profilePhoto(page)).not.toContainText(text('tryon.photoSaved'));
+    await expect(profilePhoto(page)).not.toContainText(text('tryonC.photoPrivate'));
+    expect(api.tryonControl.photos[owners.a]).toBeUndefined();
+  });
+
+  test('a photo or a crop that is too small shows its error inside the crop editor', async ({ page }) => {
+    engineOnly();
+    await start(page, { route: 'settings' });
+    const input = page.locator('#profile-photo-input');
+    const problem = profilePhoto(page).getByRole('alert');
+    await input.setInputFiles({ name: 'small.png', mimeType: 'image/png', buffer: await syntheticPerson(page, undefined, { width: 400, height: 500 }) });
+    await expect(page.locator('#crop-editor-title')).toBeVisible({ timeout: 20_000 });
+    await button(page, 'photo.applyCrop').click();
+    await expect(problem).toHaveText(text('tryon.photoSmall'));
+    await expect(page.locator('#crop-editor-title')).toBeVisible();
+    await expect(problem).toBeInViewport();
+    await axe(page);
+    await page.locator('#crop-cancel').click();
+    await expect(problem).toHaveCount(0);
+    await input.setInputFiles({ name: 'large.png', mimeType: 'image/png', buffer: await syntheticPerson(page) });
+    await expect(page.locator('#crop-editor-title')).toBeVisible({ timeout: 20_000 });
+    await page.locator('.crop-exact summary').click();
+    await page.locator('#crop-width').fill('50');
+    await button(page, 'photo.applyCrop').click();
+    await expect(problem).toHaveText(text('tryon.photoSmall'));
+    await expect(page.locator('#crop-editor-title')).toBeVisible();
+    await axe(page);
+    await page.locator('#crop-width').fill('100');
+    await button(page, 'photo.applyCrop').click();
+    await expect(page.locator('#profile-photo-save')).toBeFocused({ timeout: 20_000 });
+    await expect(problem).toHaveCount(0);
   });
 
   test('with try-on off, Add is replaced by a way to turn it on, and a saved photo can still be removed', async ({ page }) => {

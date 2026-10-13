@@ -31,7 +31,7 @@ function Block({ store, online, language, t }: Props & { store: TryOnStore }) {
   const state = useSyncExternalStore(store.subscribe, store.get);
   const view = tryOnViewOf(store, state);
   const ready = state.read.kind === 'ready' && tryOnReady(state.read.status);
-  const [note, setNote] = useState<'saved' | 'removed' | null>(null);
+  const [note, setNote] = useState<{ kind: 'saved'; at: number } | { kind: 'removed' } | null>(null);
   const [refused, setRefused] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [show, setShow] = useState(false);
@@ -41,6 +41,7 @@ function Block({ store, online, language, t }: Props & { store: TryOnStore }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const focusSave = useRef(false);
   const removeButton = useRef<HTMLButtonElement>(null);
+  const problem = useRef<HTMLParagraphElement>(null);
   const picker = useBodyPhotoPicker({
     onFocus: (target) => focus(target === 'edit' ? 'profile-photo-edit' : 'profile-photo-add'),
     onPrepared: () => { focusSave.current = true; },
@@ -69,6 +70,8 @@ function Block({ store, online, language, t }: Props & { store: TryOnStore }) {
     return () => store.scope.signal.removeEventListener('abort', drop);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `clear` is stable
   }, [store]);
+  // A refused file or crop is announced as an alert; keep it in view even when the crop editor is taller than the screen.
+  useEffect(() => { if (picker.error) problem.current?.scrollIntoView({ block: 'nearest' }); }, [picker.error]);
   useEffect(() => {
     if (preparing || !chosen || !focusSave.current) return;
     focusSave.current = false;
@@ -100,7 +103,10 @@ function Block({ store, online, language, t }: Props & { store: TryOnStore }) {
     return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
   }, [store, show, savedAt, attempt]);
 
-  const wanted = photo.saved !== null || unknown || note !== null || chosen !== null || editing || ready || view.turnOn;
+  // "Photo saved." belongs to the photo that save confirmed: a removal, replacement or consent withdrawal ends it.
+  const confirmed = note?.kind === 'saved' && photo.saved?.savedAtMs === note.at;
+  const removedNote = note?.kind === 'removed';
+  const wanted = photo.saved !== null || unknown || confirmed || removedNote || chosen !== null || editing || ready || view.turnOn;
   if (!wanted) return null;
   const canChoose = ready && photo.read !== 'unknown' && !unknown;
   const hasSaved = photo.saved !== null;
@@ -114,19 +120,25 @@ function Block({ store, online, language, t }: Props & { store: TryOnStore }) {
     if (!chosen) return;
     setRefused(false);
     const result = await savePersonPhoto(store, chosen);
-    if (result === 'saved') { picker.clear(); setNote('saved'); return; }
+    if (result === 'saved') {
+      const at = store.getPhoto().saved?.savedAtMs;
+      picker.clear();
+      setNote(at === undefined ? null : { kind: 'saved', at });
+      return;
+    }
     if (refusals.includes(result)) { setRefused(true); void readTryOnStatus(store, 'active'); }
     requestAnimationFrame(() => document.getElementById('profile-photo-save')?.focus());
   }
   async function remove() {
     setConfirming(false);
-    if (await removePersonPhoto(store)) { setNote('removed'); setShow(false); picker.clear(); }
+    if (await removePersonPhoto(store)) { setNote({ kind: 'removed' }); setShow(false); picker.clear(); }
     else requestAnimationFrame(() => removeButton.current?.focus());
   }
   const saveError = photo.error === 'save' ? (refused ? 'tryonC.photoSaveRefused' : 'tryonC.photoSaveFailed') : null;
   const noRoom = !ready && !view.turnOn && state.read.kind !== 'unknown';
   return <section className="settings-card profile-photo" aria-labelledby="profile-photo-heading" aria-busy={busy || preparing}>
     <h3 id="profile-photo-heading" ref={heading} tabIndex={-1}>{t('tryonC.photoHeading')}</h3>
+    {picker.error && <p ref={problem} role="alert" className="notice notice-error">{t(picker.error)}</p>}
     <input ref={input} id="profile-photo-input" className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1}
       aria-label={t('tryon.choosePhoto')} onChange={(event) => { choose(event.target.files?.[0]); event.target.value = ''; }} />
     {editing && source && sourceUrl && edit
@@ -136,21 +148,20 @@ function Block({ store, online, language, t }: Props & { store: TryOnStore }) {
         {picker.photoUrl ? <img className="profile-photo-preview" src={picker.photoUrl} alt={t('tryon.photoReady')} width={1024} height={1280} />
           : shown.kind === 'ready' && <img className="profile-photo-preview" src={shown.url} alt={t('tryon.savedPhoto')} width={1024} height={1280} />}
         {hasSaved && !chosen && <p className="muted">{t('tryon.photoSavedOn', { date: deletionDate(photo.saved!.savedAtMs, language) })}</p>}
-        {!hasSaved && !unknown && !chosen && note !== 'removed' && photo.read !== 'unknown' && <p className="muted">{t('tryonC.photoEmpty')}</p>}
-        {(hasSaved || chosen) && <p className="muted fine">{t('tryonC.photoPrivate')}</p>}
+        {!hasSaved && !unknown &&         !chosen && !removedNote && photo.read !== 'unknown' && <p className="muted">{t('tryonC.photoEmpty')}</p>}
+                {hasSaved && !chosen && <p className="muted fine">{t('tryonC.photoPrivate')}</p>}
         {!ready && view.turnOn && <p className="muted">{t('tryonC.photoNeedsOn')}</p>}
         {noRoom && <p className="muted">{t('tryon.failure.unavailable')}</p>}
         <div role="status" className="ai-state">
           {busy && <p>{t('common.saving')}</p>}
           {preparing && <p>{t('tryon.preparing')}</p>}
           {shown.kind === 'loading' && <p>{t('common.loading')}</p>}
-          {note === 'saved' && !chosen && <p>{t('tryon.photoSaved')}</p>}
-          {note === 'removed' && !hasSaved && !unknown && <p>{t('tryon.photoRemoved')}</p>}
+          {confirmed && !chosen && <p>{t('tryon.photoSaved')}</p>}
+          {removedNote && !hasSaved && !unknown && <p>{t('tryon.photoRemoved')}</p>}
         </div>
         {unknown && <p role="alert" className="notice notice-error">{t('tryon.photoStatusFailed')}</p>}
         {saveError && <p role="alert" className="notice notice-error">{t(saveError)}</p>}
         {photo.error === 'remove' && <p role="alert" className="notice notice-error">{t('tryon.removePhotoFailed')}</p>}
-        {picker.error && <p role="alert" className="notice notice-error">{t(picker.error)}</p>}
         {shown.kind === 'failed' && <p role="alert" className="notice notice-error">{t('tryon.photoLoadFailed')}</p>}
         {shown.kind === 'unusable' && <p role="alert" className="notice notice-error">{t('tryon.photoUnusableSaved')}</p>}
         <div className="settings-actions">
