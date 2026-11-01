@@ -571,7 +571,7 @@ export type TryOnSetup = { configured: boolean; activated: boolean; providerAvai
 export type TryOnReply = { code?: string; status?: number; abort?: boolean; commit?: boolean; hold?: Promise<void> };
 export type TryOnChain = { id: string; owner: string; outfitId: string | null; steps: TryOnStep[]; nextStep: number;
   state: 'running' | 'complete' | 'cancelled' | 'withdrawn' | 'expired' | 'stale'; resultId: string | null; expiresAtMs: number };
-export type TryOnStored = { id: string; owner: string; outfitId: string | null; itemIds: string[]; image: Buffer; completedAtMs: number; expiresAtMs: number };
+export type TryOnStored = { id: string; owner: string; outfitId: string | null; itemIds: string[]; image: Buffer; completedAtMs: number };
 export type TryOnRequest = { owner: string; chainId: string; step: number; requestId: string; outfitId: string | null;
   itemIds: string[] | null; bytes: number; width: number | null; height: number | null; soi: boolean };
 const tryOnDefaults: TryOnSetup = { configured: true, activated: false, providerAvailable: true, noticeRevision: TRYON_NOTICE_REVISION };
@@ -592,7 +592,7 @@ export function jpegSize(bytes: Buffer): { width: number; height: number } | nul
 function tryOnStatusReply(setup: TryOnSetup, consent: number | null, results: number) {
   const code = !setup.configured ? 'UNCONFIGURED' : !setup.activated ? 'INACTIVE' : consent !== setup.noticeRevision ? 'CONSENT_REQUIRED' : 'OK';
   const policy = setup.configured ? { activated: setup.activated, noticeRevision: setup.noticeRevision, manifestId: TRYON_MANIFEST,
-    modelId: TRYON_MODEL, maxRequestMicro: '360000', maxSteps: 3, maxResults: 20, resultDays: 7, providerAvailable: setup.providerAvailable } : null;
+    modelId: TRYON_MODEL, maxRequestMicro: '360000', maxSteps: 6, maxResults: 200, providerAvailable: setup.providerAvailable } : null;
   const now = tryOnServerNow();
   return { code, period: new Date(now).toISOString().slice(0, 7), serverTimeMs: now,
     consent: { enabled: consent !== null, noticeRevision: consent, consentedAt: consent === null ? null : '2026-10-01T00:00:00Z' },
@@ -1028,8 +1028,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const name = url.pathname.slice('/rest/v1/rpc/'.length);
       const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
       const setup = { ...tryOnDefaults, ...tryonControl.setup[owner] };
-      const now = Date.now();
-      const live = tryonControl.results.filter(row => row.owner === owner && row.expiresAtMs > now
+      const live = tryonControl.results.filter(row => row.owner === owner
         && (row.outfitId === null || outfits.some(outfit => outfit.owner_id === owner && outfit.id === row.outfitId && outfit.deleted_at === null)));
       // A result without an outfit is listed and readable only for a request that opts in, as the database does.
       const ideasOn = request.headers()['x-stillroom-tryon-results-contract'] === '2';
@@ -1053,7 +1052,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         const consent = tryonControl.consent[owner] ?? null;
         if (!setup.configured) { await json({ code: 'UNCONFIGURED' }); return; }
         if (!setup.activated) { await json({ code: 'INACTIVE' }); return; }
-        if (consent !== 2 || setup.noticeRevision !== 2) { await json({ code: 'CONSENT_REQUIRED' }); return; }
+        if (setup.noticeRevision < 2 || consent !== setup.noticeRevision) { await json({ code: 'CONSENT_REQUIRED' }); return; }
         const text = typeof body.p_jpeg_base64 === 'string' ? body.p_jpeg_base64 : '';
         const jpeg = Buffer.from(text, 'base64');
         const size = jpegSize(jpeg);
@@ -1103,7 +1102,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       }
       if (name === 'tryon_results_v1') {
         await json({ code: 'OK', results: visible.map(row => ({ id: row.id, outfitId: row.outfitId, itemIds: row.itemIds, bytes: row.image.length,
-          completedAtMs: row.completedAtMs, expiresAtMs: row.expiresAtMs })) }); return;
+          completedAtMs: row.completedAtMs })) }); return;
       }
       const result = live.find(row => row.id === body.p_result_id);
       if (name === 'tryon_result_image_v1') {
@@ -1163,7 +1162,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         chain.nextStep = step + 1;
         if (step < chain.steps.length) return { kind: 'picture' };
         const row: TryOnStored = { id: randomUUID(), owner, outfitId: chain.outfitId, itemIds: chain.steps.map(entry => entry.itemId), image: picture,
-          completedAtMs: Date.now(), expiresAtMs: Date.now() + 7 * 86_400_000 };
+          completedAtMs: Date.now() };
         tryonControl.results.push(row);
         chain.state = 'complete'; chain.resultId = row.id;
         return { kind: 'result', row };
@@ -1174,7 +1173,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         if (reply.abort) { await route.abort('failed'); return; }
         if (!outcome) return;
         if (outcome.kind === 'code') { await json({ code: outcome.code }, outcome.status); return; }
-        if (outcome.kind === 'result') { await json({ code: 'OK', resultId: outcome.row.id, expiresAtMs: outcome.row.expiresAtMs }); return; }
+        if (outcome.kind === 'result') { await json({ code: 'OK', resultId: outcome.row.id }); return; }
         await route.fulfill({ status: 200, body: picture, headers: { 'content-type': 'image/jpeg', 'content-length': String(picture.length),
           'cache-control': 'no-store', 'x-stillroom-tryon-sha256': createHash('sha256').update(picture).digest('hex'),
           'access-control-expose-headers': 'x-stillroom-tryon-sha256' } });

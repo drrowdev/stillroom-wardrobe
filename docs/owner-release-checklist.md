@@ -101,11 +101,15 @@ Each step is on both phones unless it says otherwise.
    - Before activation: report `NOT ACTIVE`. O13 stays **BLOCKED**.
 
 5. **Try-on first use.** After activation only. One saved outfit with your own
-   photo: progress, Stop, the result with "Made with AI" and its keep-until date,
-   Delete, and the monthly figure in Settings. With revision 2 of the notice you
-   can also press **Save photo** once and check that the next try-on starts from
-   it, that **Remove saved photo** works on the try-on screen and in Settings,
-   and that turning try-on off removes it.
+   photo: progress, Stop, the result with "Made with AI" (no date: it stays until
+   you delete it), Delete, and the monthly figure in Settings. After the
+   TRYON-LIMITS1 update you consent to revision 3 of the notice again, and the
+   saved reference photo is cleared at that change, so press **Save photo** once
+   more and check that the next try-on starts from it, that **Remove saved photo**
+   works on the try-on screen and in Settings, and that turning try-on off
+   removes it. Try an outfit with a layer, outerwear and an accessory (up to six
+   garments, about five minutes) and report whether the three new garment kinds
+   look right; the prompts for them have not been tried on a real provider.
    - Before activation: report `NOT ACTIVE`. Try-on acceptance stays **BLOCKED**.
 
 6. **P1: suggestions with 500 items.** From a clean checkout of C, run:

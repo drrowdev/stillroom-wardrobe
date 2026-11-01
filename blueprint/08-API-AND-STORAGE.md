@@ -860,14 +860,14 @@ not exist yet.
 - `tryon_status()`: `code` (`OK`, `UNAVAILABLE`, `UNCONFIGURED`, `INACTIVE`,
   `CONSENT_REQUIRED`), `period`, `serverTimeMs`, `consent`, `policy` (null until
   configured; activation, notice revision, manifest and model, limits as micro
-  strings, `maxSteps` 3, `maxResults` 20, `resultDays` 7, `providerAvailable`),
-  the owner's live `results` count and try-on/total `usage`.
+  strings, `maxSteps` 6, `maxResults` 200, `providerAvailable`; TRYON-LIMITS1 removed
+  `resultDays`), the owner's stored or reserved `results` count and try-on/total `usage`.
 - `tryon_set_consent(boolean, integer)`: consent needs the current notice
   revision (`CONFIG_CHANGED` otherwise). Turn off is accepted whenever controls
   exist and ends every running chain as withdrawn in the same transaction.
 - `tryon_chain_status(uuid)`: `state` (`running`, `complete`, `cancelled`,
-  `withdrawn`, `expired`, `stale`), `nextStep`, the slots and item IDs,
-  `activeAttempt`, `resultId` and `expiresAtMs`.
+  `withdrawn`, `expired`, `stale`), `nextStep` (up to 7), the slots and item IDs (up to
+  six), `activeAttempt`, `resultId` and the chain's own `expiresAtMs` (its 30 minutes).
 - `tryon_cancel(uuid)`: `CANCELLED` for a running chain (its reserved slot is
   freed, a late finish never publishes); `COMPLETED` with the `resultId` when
   the last step already committed; otherwise the terminal state. VTO-3a
@@ -877,9 +877,13 @@ not exist yet.
   of the same ID reuses its marker. At most 60 new markers per owner per hour:
   beyond that it answers `UNAVAILABLE` and the client does not report stopped.
   Stopping an existing chain or re-stopping a marked ID is never capped.
-- `tryon_results_v1()`, `tryon_result_image_v1(uuid)` (`jpegBase64`, `bytes`)
-  and `tryon_delete_result(uuid)`: ready pictures only, filtered on the exact
-  7-day `expires_at`, whatever the purge has done.
+- `tryon_results_v1()` (up to 200 entries of `id`, `outfitId`, `itemIds`, `bytes`,
+  `completedAtMs`; no expiry), `tryon_result_image_v1(uuid)` (`jpegBase64`, `bytes`)
+  and `tryon_delete_result(uuid)`: ready pictures only. TRYON-LIMITS1 (owner direction of
+  1 November 2026): a picture has no lifetime and stays until the owner deletes it; the
+  job `stillroom-tryon-expire` no longer deletes results by age. The client reads the
+  list within a 131,072-byte response allowance (200 results of six items measure about
+  80 KB). The final step reply is `{code:'OK', resultId}`.
 
 Service-role only (the `try-on` Edge function with the verified owner):
 

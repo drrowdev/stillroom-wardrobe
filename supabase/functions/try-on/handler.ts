@@ -67,7 +67,7 @@ async function readIngress(request: Request, signal: AbortSignal): Promise<Ingre
   const keys = [...form.keys()];
   const text = (name: string) => { const all = form.getAll(name); return all.length === 1 && typeof all[0] === 'string' ? all[0] : null; };
   const stepText = text('step');
-  const step = stepText !== null && /^[1-3]$/.test(stepText) ? Number(stepText) : 0;
+  const step = stepText !== null && /^[1-6]$/.test(stepText) ? Number(stepText) : 0;
   const subject = step === 1 ? (keys.includes('itemIds') ? 'itemIds' : 'outfitId') : null;
   const expected = subject === null ? FIELDS : [...FIELDS, subject];
   if (step === 0 || step > TRYON_MAX_STEPS || keys.length !== expected.length || !expected.every((name) => form.getAll(name).length === 1)) {
@@ -208,7 +208,7 @@ export function createTryOnHandler(config: TryOnConfig, registrar: TryOnRegistra
       // Delivery only: the settlement has already run whether or not the browser is still there.
       if (request.signal.aborted) return error('TIMEOUT');
       if (outcome.code !== 'OK') return error(outcome.code);
-      if (outcome.result) return reply({ code: 'OK', resultId: outcome.result.resultId, expiresAtMs: outcome.result.expiresAtMs }, 200);
+      if (outcome.result) return reply({ code: 'OK', resultId: outcome.result.resultId }, 200);
       if (!outcome.output) return error('FAILED');
       headers.set('Content-Type', 'image/jpeg');
       headers.set('Content-Length', String(outcome.output.bytes.length));
@@ -227,7 +227,7 @@ export type TryOnRegistrar = (work: Promise<unknown>) => void;
 export type ClaimedOutcome = {
   code: string;
   output: { bytes: Uint8Array<ArrayBuffer>; sha256: string } | null;
-  result: { resultId: string; expiresAtMs: number } | null;
+  result: { resultId: string } | null;
 };
 type ClaimedWork = {
   config: TryOnConfig; bearer: string; owner: string; requestId: string; person: Uint8Array<ArrayBuffer>; slot: TryOnSlot; last: boolean;
@@ -344,10 +344,10 @@ function runClaimed(work: ClaimedWork): Promise<ClaimedOutcome> {
       if (finished.last !== work.last) throw new ProtocolError('FAILED');
       if (!work.last) return { code: 'OK', output: { bytes: output.bytes, sha256: output.sha256 }, result: null };
       if (finished.deleted === true) return none('NOT_FOUND');
-      if (typeof finished.resultId !== 'string' || !UUID.test(finished.resultId) || !safeMs(finished.expiresAtMs)) {
+      if (typeof finished.resultId !== 'string' || !UUID.test(finished.resultId)) {
         throw new ProtocolError('FAILED');
       }
-      return { code: 'OK', output: null, result: { resultId: finished.resultId, expiresAtMs: finished.expiresAtMs } };
+      return { code: 'OK', output: null, result: { resultId: finished.resultId } };
     } catch (failure) {
       // A provider or finish that misses its deadline is left held for provisional expiry; nothing else is retried. Every
       // other failure after the claim is FAILED, so it never reads as a pre-claim refusal.

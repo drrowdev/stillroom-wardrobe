@@ -19,7 +19,7 @@ const ID = (n: number) => `20000000-0000-4000-8000-${String(n).padStart(12, '0')
 const policy = (over: Record<string, unknown> = {}) => ({
   activated: true, noticeRevision: TRYON_NOTICE_REVISION, manifestId: TRYON_MANIFEST, modelId: TRYON_MODEL,
   maxRequestMicro: '400000',
-  maxSteps: 3, maxResults: 20, resultDays: 7, providerAvailable: true, ...over,
+  maxSteps: 6, maxResults: 200, providerAvailable: true, ...over,
 });
 const statusRaw = (over: Record<string, unknown> = {}, policyOver: Record<string, unknown> = {}) => ({
   code: 'OK', period: '2026-10', serverTimeMs: SERVER,
@@ -70,15 +70,26 @@ describe('closed try-on replies', () => {
       resultId: null, expiresAtMs: SERVER };
     expect(parseChainStatus(chain)).toMatchObject({ kind: 'chain', state: 'running', nextStep: 2 });
     expect(parseChainStatus({ ...chain, state: 'paused' })).toBeNull();
-    expect(parseChainStatus({ ...chain, steps: [{ slot: 'layer', itemId: ID(1) }] })).toBeNull();
+    expect(parseChainStatus({ ...chain, steps: [{ slot: 'sock', itemId: ID(1) }] })).toBeNull();
+    // Six steps and a next step of seven are the longest chain; one more of either is refused.
+    const six = ['top', 'bottom', 'layer', 'outerwear', 'footwear', 'accessory'].map((slot, at) => ({ slot, itemId: ID(at + 1) }));
+    expect(parseChainStatus({ ...chain, steps: six, nextStep: 7 })).toMatchObject({ kind: 'chain', nextStep: 7 });
+    expect(parseChainStatus({ ...chain, steps: six, nextStep: 8 })).toBeNull();
+    expect(parseChainStatus({ ...chain, steps: [...six, { slot: 'top', itemId: ID(7) }] })).toBeNull();
+    expect(parseChainStatus({ ...chain, steps: [] })).toBeNull();
     expect(parseChainStatus({ code: 'NOT_FOUND' })).toEqual({ kind: 'code', code: 'NOT_FOUND' });
     expect(parseCancel({ code: 'COMPLETED', resultId: ID(2) })).toEqual({ code: 'COMPLETED', resultId: ID(2) });
     expect(parseCancel({ code: 'CANCELLED', resultId: null })).toBeNull();
     expect(parseCancel({ code: 'OTHER' })).toBeNull();
-    const result = { id: ID(3), outfitId: OUTFIT, itemIds: [ID(1)], bytes: 100, completedAtMs: SERVER, expiresAtMs: SERVER + 1 };
+    const result = { id: ID(3), outfitId: OUTFIT, itemIds: [ID(1)], bytes: 100, completedAtMs: SERVER };
     expect(parseResults({ code: 'OK', results: [result] })).toHaveLength(1);
     expect(parseResults({ code: 'OK', results: [{ ...result, bytes: 600_000 }] })).toBeNull();
     expect(parseResults({ code: 'OK', results: [{ ...result, itemIds: [] }] })).toBeNull();
+    expect(parseResults({ code: 'OK', results: [{ ...result, itemIds: [1, 2, 3, 4, 5, 6].map(ID) }] })).toHaveLength(1);
+    expect(parseResults({ code: 'OK', results: [{ ...result, itemIds: [1, 2, 3, 4, 5, 6, 7].map(ID) }] })).toBeNull();
+    expect(parseResults({ code: 'OK', results: [{ ...result, expiresAtMs: SERVER }] })).toBeNull();
+    expect(parseResults({ code: 'OK', results: Array.from({ length: 200 }, () => result) })).toHaveLength(200);
+    expect(parseResults({ code: 'OK', results: Array.from({ length: 201 }, () => result) })).toBeNull();
     // An unsaved idea's result has no outfit; anything else in that place is refused.
     expect(parseResults({ code: 'OK', results: [{ ...result, outfitId: null }] })).toEqual([{ ...result, outfitId: null }]);
     expect(parseResults({ code: 'OK', results: [{ ...result, outfitId: 'not-an-id' }] })).toBeNull();
@@ -150,20 +161,21 @@ const chain = (over: Partial<Extract<ChainStatus, { kind: 'chain' }>>): ChainSta
   steps: plan, activeAttempt: false, resultId: null, expiresAtMs: 0, ...over });
 
 describe('the try-on run (rev4 §2.3-§3.2)', () => {
-  it('selects an idea\'s garments in the idea\'s order and lists the layers it leaves out', () => {
+  it('selects an idea\'s garments in the idea\'s order and lists the extra layers it leaves out', () => {
     const piece = (id: string, category: OutfitComponent['category'], extra: Partial<OutfitComponent> = {}): [string, OutfitComponent] =>
       [id, { id, state: 'current', title: id, category, colour: null, lifecycle: 'active', thumbPath: `${id}.jpg`, altText: '', ...extra }];
     const components = new Map([piece('polo', 'top'), piece('grey', 'bottom'), piece('jacket', 'outerwear'), piece('shoes', 'footwear'),
-      piece('gone', 'top', { state: 'trashed' }), piece('plain', 'top', { thumbPath: null })]);
-    expect(ideaSelection(['polo', 'grey', 'jacket', 'shoes'], components)).toEqual({
-      steps: [{ slot: 'top', itemId: 'polo' }, { slot: 'bottom', itemId: 'grey' }, { slot: 'footwear', itemId: 'shoes' }],
-      notIncluded: ['jacket'],
+      piece('gone', 'top', { state: 'trashed' }), piece('plain', 'top', { thumbPath: null }), piece('coat', 'outerwear')]);
+    expect(ideaSelection(['polo', 'grey', 'jacket', 'shoes', 'coat'], components)).toEqual({
+      steps: [{ slot: 'top', itemId: 'polo' }, { slot: 'bottom', itemId: 'grey' }, { slot: 'outerwear', itemId: 'jacket' },
+        { slot: 'footwear', itemId: 'shoes' }],
+      notIncluded: ['coat'],
     });
-    expect(ideaSelection(['gone', 'plain', 'unknown', 'jacket'], components).steps).toEqual([]);
+    expect(ideaSelection(['gone', 'plain', 'unknown'], components).steps).toEqual([]);
   });
   it('starts an idea chain by naming its garments, not an outfit, and only on the first step', async () => {
     const h = new Harness();
-    h.stepReplies = [picture(20), picture(30), { kind: 'result', resultId: ID(9), expiresAtMs: 5 }];
+    h.stepReplies = [picture(20), picture(30), { kind: 'result', resultId: ID(9) }];
     const run = new TryOnRun(h.api, h.session, h.env, { itemIds: plan.map((step) => step.itemId) }, plan, new Uint8Array(new ArrayBuffer(10)));
     run.start();
     await flush();
@@ -174,14 +186,14 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
   });
   it('sends each step once, chains the previous picture and drops everything at the result', async () => {
     const h = new Harness();
-    h.stepReplies = [picture(20), picture(30), { kind: 'result', resultId: ID(9), expiresAtMs: 5 }];
+    h.stepReplies = [picture(20), picture(30), { kind: 'result', resultId: ID(9) }];
     const run = h.run();
     run.start();
     await flush();
     expect(h.steps.map((step) => [step.step, step.person.length, step.outfitId ?? null, step.chainId]))
       .toEqual([[1, 10, OUTFIT, run.id], [2, 20, null, run.id], [3, 30, null, run.id]]);
     expect(new Set(h.steps.map((step) => step.requestId)).size).toBe(3);
-    expect(run.get()).toEqual({ kind: 'result', resultId: ID(9), expiresAtMs: 5, alreadyFinished: false });
+    expect(run.get()).toEqual({ kind: 'result', resultId: ID(9), alreadyFinished: false });
     expect(run.holdsPicture()).toBe(false);
     expect(h.recorded).toEqual(['ok', 'ok', 'ok']);
   });
@@ -198,7 +210,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
     expect(h.steps).toHaveLength(1);
     expect(run.holdsPicture()).toBe(false);
     const early = new Harness();
-    early.stepReplies = [{ kind: 'result', resultId: ID(9), expiresAtMs: 5 }];
+    early.stepReplies = [{ kind: 'result', resultId: ID(9) }];
     early.chainReplies = [chain({ nextStep: 1 })];
     const second = early.run();
     second.start();
@@ -217,7 +229,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
       run.start();
       await flush();
       expect(h.chainReads).toBe(1);
-      expect(run.get()).toEqual({ kind: 'result', resultId: ID(9), expiresAtMs: null, alreadyFinished: false });
+      expect(run.get()).toEqual({ kind: 'result', resultId: ID(9), alreadyFinished: false });
       expect(h.steps).toHaveLength(3);
       expect(run.holdsPicture()).toBe(false);
     }
@@ -319,7 +331,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
   });
   it('Try again sends exactly one more request for the failed step, with the same picture', async () => {
     const h = new Harness();
-    h.stepReplies = [picture(20), { kind: 'code', code: 'BUSY' }, picture(30), { kind: 'result', resultId: ID(9), expiresAtMs: 5 }];
+    h.stepReplies = [picture(20), { kind: 'code', code: 'BUSY' }, picture(30), { kind: 'result', resultId: ID(9) }];
     const run = h.run();
     run.start();
     await flush();
@@ -341,7 +353,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
     expect(run.get()).toEqual({ kind: 'checking', index: 2, offline: false });
     expect(h.chainReads).toBe(1);
     await h.advance(RECONCILE_EVERY_MS);
-    expect(run.get()).toEqual({ kind: 'result', resultId: ID(9), expiresAtMs: null, alreadyFinished: false });
+    expect(run.get()).toEqual({ kind: 'result', resultId: ID(9), alreadyFinished: false });
     expect(h.steps).toHaveLength(3);
   });
   it('reports a picture that went through but never arrived as lost, and gives up after 4 minutes', async () => {
@@ -415,7 +427,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
     second.start();
     await flush();
     await second.stop();
-    expect(second.get()).toEqual({ kind: 'result', resultId: ID(9), expiresAtMs: null, alreadyFinished: true });
+    expect(second.get()).toEqual({ kind: 'result', resultId: ID(9), alreadyFinished: true });
   });
   it('Stop without the server\'s CANCELLED or EXPIRED is never shown as stopped', async () => {
     for (const reply of [{ code: 'NOT_FOUND' }, { code: 'UNAVAILABLE' }, { code: 'STALE' }, null] as (CancelResult | null)[]) {
@@ -429,7 +441,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
       await run.stop();
       expect(run.get(), String(reply?.code)).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
       // A step reply that arrives after Stop changes nothing.
-      h.held[0]!.resolve({ kind: 'result', resultId: ID(9), expiresAtMs: 5 });
+      h.held[0]!.resolve({ kind: 'result', resultId: ID(9) });
       await flush();
       expect(run.get(), String(reply?.code)).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
     }
@@ -441,7 +453,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
       run.start();
       await flush();
       await run.stop();
-      h.held[0]!.resolve({ kind: 'result', resultId: ID(9), expiresAtMs: 5 });
+      h.held[0]!.resolve({ kind: 'result', resultId: ID(9) });
       await flush();
       expect(run.get(), code).toEqual({ kind: 'stopped' });
       expect(h.steps).toHaveLength(1);
@@ -487,11 +499,13 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
     expect(h.steps).toHaveLength(0);
     expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
   });
-  it('refuses chains with no steps or more than three', () => {
+  it('refuses chains with no steps or more than six', () => {
     const h = new Harness();
     expect(() => h.run([])).toThrow(TryOnError);
-    expect(() => h.run([{ slot: 'top', itemId: ID(1) }, { slot: 'bottom', itemId: ID(2) }, { slot: 'footwear', itemId: ID(3) },
-      { slot: 'top', itemId: ID(4) }])).toThrow(TryOnError);
+    const slots = ['top', 'bottom', 'layer', 'outerwear', 'footwear', 'accessory'] as const;
+    const plan = (count: number) => Array.from({ length: count }, (_, at) => ({ slot: slots[at % 6]!, itemId: ID(at + 1) }));
+    expect(() => h.run(plan(6))).not.toThrow();
+    expect(() => h.run(plan(7))).toThrow(TryOnError);
   });
 });
 
@@ -531,6 +545,26 @@ describe('the try-on client transport', () => {
     expect(sent).toEqual([['tryon_results_v1', '2', '2'], ['tryon_result_image_v1', '2', '2'], ['tryon_delete_result', null, '2'],
       ['tryon_cancel', null, '2']]);
   });
+  it('reads the largest result list the server can send: 200 results of six items, in Postgres JSON spacing', async () => {
+    const client = new TryOnClient(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    const entry = (at: number, items: number) => ({ id: ID(at), outfitId: OUTFIT, itemIds: Array.from({ length: items }, (_, n) => ID(n + 1)),
+      bytes: TRYON_LIMITS.outputBytes, completedAtMs: 1_900_000_000_000 + at });
+    // jsonb text puts a space after every colon and comma, which is what PostgREST relays.
+    const spaced = (value: unknown) => JSON.stringify(value).replace(/("[^"]*":|,)(?=["[{0-9])/g, '$1 ');
+    for (const items of [1, 6]) {
+      const body = spaced({ code: 'OK', results: Array.from({ length: 200 }, (_, at) => entry(at + 1, items)) });
+      expect(body.length).toBeGreaterThan(items === 6 ? 60_000 : 30_000);
+      expect(body.length).toBeLessThan(131_072);
+      fetcher.mockResolvedValueOnce(new Response(body, { headers: { 'content-type': 'application/json' } }));
+      const list = await client.results();
+      expect(list === 'missing' ? 0 : list.length).toBe(200);
+    }
+    // A reply past the bounded allowance is still refused, however it parses.
+    fetcher.mockResolvedValueOnce(new Response(' '.repeat(131_073), { headers: { 'content-type': 'application/json' } }));
+    await expect(client.results()).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+  });
   it('treats only the missing-function reply as no try-on, and parses the status strictly', async () => {
     const client = new TryOnClient(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });
     const fetcher = vi.fn<typeof fetch>();
@@ -565,8 +599,14 @@ describe('the try-on client transport', () => {
     await expect(client.step(stepInput(2), new AbortController().signal)).resolves.toEqual({ kind: 'code', code: 'OUTPUT_REJECTED' });
     fetcher.mockResolvedValueOnce(new Response(jpegBody(TRYON_LIMITS.outputBytes + 1), { headers: { 'content-type': 'image/jpeg', 'X-Stillroom-TryOn-Sha256': hash } }));
     await expect(client.step(stepInput(2), new AbortController().signal)).resolves.toEqual({ kind: 'code', code: 'OUTPUT_REJECTED' });
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', resultId: ID(9) }));
+    await expect(client.step(stepInput(3), new AbortController().signal)).resolves.toEqual({ kind: 'result', resultId: ID(9) });
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', resultId: ID(9) }));
+    await expect(client.step(stepInput(6), new AbortController().signal)).resolves.toEqual({ kind: 'result', resultId: ID(9) });
+    await expect(client.step(stepInput(7), new AbortController().signal)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
+    // A reply that still carries the retired expiry is not the closed shape: it proves nothing.
     fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', resultId: ID(9), expiresAtMs: 5 }));
-    await expect(client.step(stepInput(3), new AbortController().signal)).resolves.toEqual({ kind: 'result', resultId: ID(9), expiresAtMs: 5 });
+    await expect(client.step(stepInput(6), new AbortController().signal)).rejects.toMatchObject({ code: 'UNAVAILABLE' });
     fetcher.mockResolvedValueOnce(Response.json({ code: 'FILTERED' }, { status: 422 }));
     await expect(client.step(stepInput(2), new AbortController().signal)).resolves.toEqual({ kind: 'code', code: 'FILTERED' });
     fetcher.mockResolvedValueOnce(Response.json({ code: 'SOMETHING_NEW' }));
@@ -579,7 +619,7 @@ describe('the try-on client transport', () => {
     await expect(client.step({ ...stepInput(2), outfitId: OUTFIT }, new AbortController().signal)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     await expect(client.step({ ...stepInput(), person: jpegBody(TRYON_LIMITS.personBytes + 1) }, new AbortController().signal))
       .rejects.toMatchObject({ code: 'INVALID_INPUT' });
-    expect(fetcher).toHaveBeenCalledTimes(8);
+    expect(fetcher).toHaveBeenCalledTimes(10);
   });
   it('sends an idea\'s items as one comma-separated field, and refuses any other combination', async () => {
     const client = new TryOnClient(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });
@@ -587,13 +627,14 @@ describe('the try-on client transport', () => {
     vi.stubGlobal('fetch', fetcher);
     const idea = (extra: Partial<StepInput> = {}, step = 1): StepInput => ({ chainId: ID(50), step, requestId: ID(51), person: jpegBody(100),
       ...(step === 1 ? { itemIds: [ID(1), ID(2)] } : {}), ...extra });
-    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', resultId: ID(9), expiresAtMs: 5 }));
+    fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', resultId: ID(9) }));
     await client.step(idea(), new AbortController().signal);
     const form = fetcher.mock.calls[0]![1]!.body as FormData;
     expect([...form.keys()].sort()).toEqual(['chainId', 'itemIds', 'manifestId', 'person', 'requestId', 'step']);
     expect(form.get('itemIds')).toBe(`${ID(1)},${ID(2)}`);
     for (const bad of [idea({ outfitId: OUTFIT }), idea({ itemIds: [] }), idea({ itemIds: [ID(1), ID(1)] }), idea({ itemIds: ['x'] }),
-      idea({ itemIds: Array.from({ length: 9 }, (_, index) => ID(index + 1)) }), idea({ itemIds: undefined }), idea({ itemIds: [ID(1)] }, 2)]) {
+      idea({ itemIds: Array.from({ length: 9 }, (_, index) => ID(index + 1)) }), idea({ itemIds: undefined }), idea({ itemIds: [ID(1)] }, 2),
+      idea({}, 7)]) {
       await expect(client.step(bad, new AbortController().signal)).rejects.toMatchObject({ code: 'INVALID_INPUT' });
     }
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -610,6 +651,24 @@ describe('the try-on client transport', () => {
     await vi.advanceTimersByTimeAsync(TRYON_LIMITS.clientStepMs - 1);
     await vi.advanceTimersByTimeAsync(1);
     await settled;
+  });
+  it('treats an older or newer server as unavailable until the app is reloaded, then recovers', async () => {
+    const store = new TryOnStore(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    // A database from before TRYON-LIMITS1 (three steps, 20 results, a result lifetime) and a manifest or notice this app does not know.
+    const older = statusRaw({}, { maxSteps: 3, maxResults: 20, resultDays: 7 });
+    fetcher.mockResolvedValueOnce(Response.json(older));
+    await readTryOnStatus(store, 'active');
+    expect(store.get().read.kind).toBe('failed');
+    expect(tryOnViewOf(store, store.get())).toMatchObject({ turnOn: false });
+    expect(tryOnReady(parseTryOnStatus(statusRaw({}, { manifestId: 'azure-global-image25-sunburst-tryon-v1' })))).toBe(false);
+    expect(tryOnReady(parseTryOnStatus(statusRaw({}, { noticeRevision: TRYON_NOTICE_REVISION - 1 })))).toBe(false);
+    // After the deploys, a later read (a reloaded app) parses and Try on is offered again.
+    fetcher.mockResolvedValueOnce(Response.json(statusRaw()));
+    await readTryOnStatus(store, 'active');
+    expect(tryOnViewOf(store, store.get())).toMatchObject({ kind: 'on' });
+    store.dispose();
   });
   it('keeps known consent and Turn off through an unavailable status, and recovers', async () => {
     const store = new TryOnStore(supabase(), config, { ownerId: owner, epoch: 1, signal: new AbortController().signal });

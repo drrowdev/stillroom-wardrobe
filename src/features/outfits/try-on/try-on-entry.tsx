@@ -3,7 +3,7 @@ import type { OwnerScope } from '../../../auth/session';
 import type { AppClient } from '../../../data/client';
 import { tryOnReady } from '../../../data/tryon';
 import type { OutfitComponent, OutfitRecord } from '../../../domain/outfits';
-import type { Language, Translate } from '../../../i18n';
+import type { Translate } from '../../../i18n';
 import '../../../i18n/tryon';
 import { tryOnStoreFor } from '../../settings/tryon-store';
 import { tryOnSelection, useOutfitTryOns, useTryOnStatus } from '../use-try-on';
@@ -25,14 +25,18 @@ export function TryOnButton({ client, scope, record, components, disabled, t, on
  * when opened. The ideas' metadata list is read whenever the device is online, whatever the try-on status says (the status
  * read may fail, and saved pictures must not vanish with it); a failed read is shown with Retry.
  */
-export function SavedTryOns({ client, scope, outfitId, online, language, t }: {
-  client: AppClient; scope: OwnerScope; outfitId: string | null; online: boolean; language: Language; t: Translate;
+/** Saved pictures load one by one, so a long list shows its newest few and the rest on request. */
+const SAVED_PAGE = 6;
+
+export function SavedTryOns({ client, scope, outfitId, online, t }: {
+  client: AppClient; scope: OwnerScope; outfitId: string | null; online: boolean; t: Translate;
 }) {
   const store = tryOnStoreFor(client, scope);
   const status = useTryOnStatus(store);
   const { state, retry } = useOutfitTryOns(store?.api ?? null, outfitId, outfitId === null ? online : status !== null && status.results > 0);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [open, setOpen] = useState(false);
+  const [limit, setLimit] = useState(SAVED_PAGE);
   // Idempotent: reporting the same removal again changes nothing and renders nothing.
   const remove = useCallback((id: string) => setRemoved(current => current.has(id) ? current : new Set(current).add(id)), []);
   if (!store) return null;
@@ -48,11 +52,13 @@ export function SavedTryOns({ client, scope, outfitId, online, language, t }: {
   const body = <>
     {removed.size > 0 && <p role="status">{t('tryon.deleted')}</p>}
     {shown.length > 0 && <ul className="tryon-saved-list">
-      {shown.map(result => <li key={result.id}>
-        <TryOnPicture api={store.api} result={result} language={language} t={t} online={online} idPrefix={`tryon-${result.id}`}
+      {shown.slice(0, limit).map(result => <li key={result.id}>
+        <TryOnPicture api={store.api} result={result} t={t} online={online} idPrefix={`tryon-${result.id}`}
           onDeleted={() => remove(result.id)} />
       </li>)}
     </ul>}
+    {shown.length > limit && <button id="tryon-saved-more" type="button" className="button button-secondary"
+      onClick={() => setLimit(value => value + SAVED_PAGE)}>{t('tryon.showMore')}</button>}
   </>;
   if (outfitId === null) {
     if (!shown.length && !removed.size) return null;

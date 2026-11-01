@@ -218,7 +218,7 @@ test.describe('try on an unsaved Today idea', () => {
     const stored = (api: Api, itemId: string, completedAgo: number) => {
       const id = randomUUID();
       api.tryonControl.results.push({ id, owner: owners.a, outfitId: null, itemIds: [itemId], image: api.fixture,
-        completedAtMs: Date.now() - completedAgo, expiresAtMs: Date.now() + 3_600_000 });
+        completedAtMs: Date.now() - completedAgo });
       return id;
     };
     const ids: string[] = [];
@@ -249,7 +249,7 @@ test.describe('try on an unsaved Today idea', () => {
       const id = randomUUID();
       ids.push(id);
       api.tryonControl.results.push({ id, owner: owners.a, outfitId: null, itemIds: [clothes.top.id], image: api.fixture,
-        completedAtMs: Date.now() - 1000, expiresAtMs: Date.now() + 3_600_000 });
+        completedAtMs: Date.now() - 1000 });
     } });
     const saved = page.locator('#tryon-ideas');
     await expect(saved.locator('summary')).toHaveText(text('tryon.savedCount', 'en', { count: 1 }));
@@ -272,7 +272,7 @@ test.describe('try on an unsaved Today idea', () => {
         await route.fallback();
       });
       api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId: null, itemIds: [clothes.top.id], image: api.fixture,
-        completedAtMs: Date.now() - 1000, expiresAtMs: Date.now() + 3_600_000 });
+        completedAtMs: Date.now() - 1000 });
     } });
     await expect(page.locator('.tryon-saved [role=alert]')).toContainText(text('tryon.savedFailed'), { timeout: 10_000 });
     await axe(page);
@@ -285,7 +285,7 @@ test.describe('try on an unsaved Today idea', () => {
     engineOnly();
     const { api } = await start(page, { preload: (api, clothes) => {
       api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId: null, itemIds: [clothes.top.id], image: api.fixture,
-        completedAtMs: Date.now() - 1000, expiresAtMs: Date.now() + 3_600_000 });
+        completedAtMs: Date.now() - 1000 });
     } });
     const seen = await page.evaluate(async () => {
       const call = async (headers: Record<string, string>) => {
@@ -352,7 +352,7 @@ test.describe('bounded TRYON-IDEA1 Today visual evidence', () => {
         await start(page, { language, preload: (api, clothes) => {
           for (const [ago, itemId] of [[1000, clothes.top.id], [2000, clothes.trousers.id]] as const) {
             api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId: null, itemIds: [itemId], image: api.fixture,
-              completedAtMs: Date.now() - ago, expiresAtMs: Date.now() + 3 * 86_400_000 });
+              completedAtMs: Date.now() - ago });
           }
         } });
         const saved = page.locator('#tryon-ideas');

@@ -31,6 +31,7 @@ function seed(api: Api) {
   return {
     top: add('Olive overshirt', 'top'), trousers: add('Navy trousers', 'bottom'), shoes: add('White trainers', 'footwear'),
     coat: add('Grey coat', 'outerwear'), dress: add('Green dress', 'one_piece'), peer: add('Robin private shirt', 'top', 'b'),
+    cardigan: add('Beige cardigan', 'layer'), watch: add('Silver watch', 'accessory'), belt: add('Brown belt', 'accessory'),
   };
 }
 function seedOutfit(api: Api, itemIds: string[], title: string, account: 'a' | 'b' = 'a') {
@@ -39,7 +40,7 @@ function seedOutfit(api: Api, itemIds: string[], title: string, account: 'a' | '
   itemIds.forEach((itemId, position) => api.outfitItems.push({ owner_id: owner, outfit_id: id, item_id: itemId, position }));
   return id;
 }
-type Start = { language?: Language; setup?: Partial<TryOnSetup> | null; consent?: boolean; route?: 'detail' | 'try-on' | 'settings'; outfit?: 'full' | 'dress' };
+type Start = { language?: Language; setup?: Partial<TryOnSetup> | null; consent?: boolean; route?: 'detail' | 'try-on' | 'settings'; outfit?: 'full' | 'dress' | 'long' };
 async function start(page: Page, options: Start = {}) {
   const language = options.language ?? 'en';
   // Playwright's WebKit route interception reports an empty body for Blob uploads, so on that engine the try-on POST is
@@ -64,7 +65,8 @@ async function start(page: Page, options: Start = {}) {
   if (options.setup !== null) api.tryonControl.setup[owners.a] = { activated: true, ...options.setup };
   if (options.consent !== false) api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION;
   const outfitId = options.outfit === 'dress' ? seedOutfit(api, [clothes.dress.id, clothes.shoes.id], 'Summer party')
-    : seedOutfit(api, [clothes.coat.id, clothes.top.id, clothes.trousers.id, clothes.shoes.id], 'Weekend');
+    : options.outfit === 'long' ? seedOutfit(api, [clothes.coat.id, clothes.cardigan.id, clothes.top.id, clothes.trousers.id, clothes.shoes.id, clothes.watch.id, clothes.belt.id], 'Weekend')
+      : seedOutfit(api, [clothes.top.id, clothes.trousers.id, clothes.shoes.id], 'Weekend');
   const hash = options.route === 'settings' ? '#/settings' : options.route === 'try-on' ? `#/outfits/${outfitId}/try-on` : `#/outfits/${outfitId}`;
   await page.goto(`/${hash}`); await signIn(page);
   await expectSignedIn(page);
@@ -122,7 +124,6 @@ test.describe('try-on happy paths', () => {
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.top'), name: 'Olive overshirt' }),
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.bottom'), name: 'Navy trousers' }),
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.footwear'), name: 'White trainers' })]);
-    await expect(page.getByText(text('tryon.notIncluded', 'en', { names: 'Grey coat' }), { exact: true })).toBeVisible();
     await expect(page.locator('#tryon-start')).toHaveCount(0);
     await preparePhoto(page);
     await expect(page.locator('#tryon-start')).toHaveText(text('tryon.startMany', 'en', { count: 3 }));
@@ -137,10 +138,31 @@ test.describe('try-on happy paths', () => {
     expect(api.tryonControl.cancels).toEqual([]);
     await page.locator('#tryon-done').click();
     await expect(page.locator('#outfit-detail-title')).toBeVisible();
-    // The saved try-on is listed on the outfit until it expires or is deleted.
+    // The saved try-on is listed on the outfit until it is deleted.
     await expect(page.locator('#tryon-saved-title')).toHaveText(text('tryon.saved'));
     await expect(page.locator('.tryon-saved-list img')).toBeVisible();
     expect(api.tryonControl.requests).toHaveLength(3);
+  });
+  test('a six-garment outfit sends six requests in a fixed order and leaves the second accessory out', async ({ page }) => {
+    engineOnly();
+    const { api } = await start(page, { outfit: 'long' });
+    await openTryOn(page);
+    await expect(page.locator('.tryon-garments li')).toHaveText([
+      text('tryon.slotLine', 'en', { slot: text('tryon.slot.top'), name: 'Olive overshirt' }),
+      text('tryon.slotLine', 'en', { slot: text('tryon.slot.bottom'), name: 'Navy trousers' }),
+      text('tryon.slotLine', 'en', { slot: text('tryon.slot.layer'), name: 'Beige cardigan' }),
+      text('tryon.slotLine', 'en', { slot: text('tryon.slot.outerwear'), name: 'Grey coat' }),
+      text('tryon.slotLine', 'en', { slot: text('tryon.slot.footwear'), name: 'White trainers' }),
+      text('tryon.slotLine', 'en', { slot: text('tryon.slot.accessory'), name: 'Silver watch' })]);
+    await expect(page.getByText(text('tryon.notIncluded', 'en', { names: 'Brown belt' }), { exact: true })).toBeVisible();
+    await preparePhoto(page);
+    await expect(page.locator('#tryon-start')).toHaveText(text('tryon.startMany', 'en', { count: 6 }));
+    await page.locator('#tryon-start').click();
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 40_000 });
+    checkRequests(api, 6);
+    expect(api.tryonControl.chains[0]!.steps.map((step) => step.slot)).toEqual(['top', 'bottom', 'layer', 'outerwear', 'footwear', 'accessory']);
+    expect(api.tryonControl.results[0]!.itemIds).toHaveLength(6);
+    await expect(page.locator('.tryon-result figcaption')).toHaveText('Made with AI');
   });
   test('a one-piece outfit takes two steps', async ({ page }) => {
     engineOnly();
@@ -204,12 +226,12 @@ test.describe('try-on is offered only when it is on', () => {
     await expect(page.locator('#tryon-heading')).toHaveText(text('tryonC.settings'));
     await expect(toggle(false)).toBeVisible();
     await card.getByText(text('aiF.about'), { exact: true }).click();
-    await expect(card).toContainText(text('tryonC.notice2Sent'));
-    await expect(card).toContainText(text('tryonC.notice2Result'));
+    await expect(card).toContainText(text('tryonC.notice3Sent'));
+    await expect(card).toContainText(text('tryonC.notice3Result'));
     await axe(page);
     await toggle(false).click();
-    await expect(sheet).toContainText(text('tryonC.notice2Sent'));
-    await expect(sheet).toContainText(text('tryonC.notice2Saved'));
+    await expect(sheet).toContainText(text('tryonC.notice3Sent'));
+    await expect(sheet).toContainText(text('tryonC.notice3Saved'));
     expect(api.tryonControl.consentWrites).toEqual([]);
     await axe(page);
     await sheet.getByRole('button', { name: text('aiC.enable'), exact: true }).click();
@@ -440,7 +462,7 @@ test.describe('Stop and Delete', () => {
     await expect.poll(() => api.tryonControl.requests.length).toBe(3);
     const chain = api.tryonControl.chains[0]!;
     const row = { id: randomUUID(), owner: owners.a, outfitId: chain.outfitId, itemIds: chain.steps.map((step) => step.itemId),
-      image: api.fixture, completedAtMs: Date.now(), expiresAtMs: Date.now() + 7 * 86_400_000 };
+      image: api.fixture, completedAtMs: Date.now() };
     api.tryonControl.results.push(row);
     Object.assign(chain, { state: 'complete', resultId: row.id, nextStep: 4 });
     await page.locator('#tryon-stop').click();
@@ -470,7 +492,7 @@ test.describe('Stop and Delete', () => {
     expect(api.tryonControl.deletes).toEqual([api.tryonControl.chains[0]!.resultId]);
     expect(api.tryonControl.results).toHaveLength(0);
   });
-  test('a saved try-on leaves the outfit when it expires', async ({ page }) => {
+  test('a saved try-on stays on the outfit, without a date, until it is deleted', async ({ page }) => {
     engineOnly();
     const api = await mockBackend(page);
     const clothes = seed(api);
@@ -478,14 +500,35 @@ test.describe('Stop and Delete', () => {
     api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION;
     const outfitId = seedOutfit(api, [clothes.top.id], 'Weekend');
     api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId, itemIds: [clothes.top.id], image: api.fixture,
-      completedAtMs: Date.now() - 1000, expiresAtMs: Date.now() + 12_000 });
+      completedAtMs: Date.now() - 400 * 86_400_000 });
     await page.goto(`/#/outfits/${outfitId}`); await signIn(page);
     await expect(page.locator('.tryon-saved-list img')).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator('.tryon-saved figcaption')).toContainText('Made with AI');
-    await expect(page.getByText(text('tryon.deleted'), { exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator('.tryon-saved-list img')).toHaveCount(0);
+    await expect(page.locator('.tryon-saved figcaption')).toHaveText('Made with AI');
+    await page.waitForTimeout(1500);
+    await expect(page.locator('.tryon-saved-list img')).toBeVisible();
+    await expect(page.getByText(text('tryon.deleted'), { exact: true })).toHaveCount(0);
   });
-  test('with several saved try-ons, deleting or expiring one keeps the others and settles', async ({ page }) => {
+  test('a long list of saved try-ons loads six pictures and the rest on request', async ({ page }) => {
+    engineOnly();
+    const api = await mockBackend(page);
+    const clothes = seed(api);
+    api.tryonControl.setup[owners.a] = { activated: true };
+    api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION;
+    const outfitId = seedOutfit(api, [clothes.top.id], 'Weekend');
+    for (let index = 0; index < 8; index += 1) {
+      api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId, itemIds: [clothes.top.id], image: api.fixture,
+        completedAtMs: Date.now() - 1000 * (index + 1) });
+    }
+    let images = 0;
+    page.on('request', request => { if (/\/rpc\/tryon_result_image_v1$/.test(new URL(request.url()).pathname)) images += 1; });
+    await page.goto(`/#/outfits/${outfitId}`); await signIn(page);
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(6, { timeout: 10_000 });
+    expect(images).toBe(6);
+    await page.locator('#tryon-saved-more').click();
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(8, { timeout: 10_000 });
+    await expect(page.locator('#tryon-saved-more')).toHaveCount(0);
+  });
+  test('with several saved try-ons, deleting one keeps the others and settles', async ({ page }) => {
     engineOnly();
     const errors: string[] = [];
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -495,13 +538,13 @@ test.describe('Stop and Delete', () => {
     api.tryonControl.setup[owners.a] = { activated: true };
     api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION;
     const outfitId = seedOutfit(api, [clothes.top.id], 'Weekend');
-    const stored = (expiresInMs: number, age: number) => {
+    const stored = (age: number) => {
       const id = randomUUID();
       api.tryonControl.results.push({ id, owner: owners.a, outfitId, itemIds: [clothes.top.id], image: api.fixture,
-        completedAtMs: Date.now() - age, expiresAtMs: Date.now() + expiresInMs });
+        completedAtMs: Date.now() - age });
       return id;
     };
-    const expiring = stored(15_000, 1000), deleting = stored(3_600_000, 2000), kept = stored(3_600_000, 3000);
+    const also = stored(1000), deleting = stored(2000), kept = stored(3000);
     let reads = 0;
     page.on('request', request => { if (/\/rpc\/tryon_(results_v1|result_image_v1)$/.test(new URL(request.url()).pathname)) reads += 1; });
     await page.goto(`/#/outfits/${outfitId}`); await signIn(page);
@@ -511,9 +554,8 @@ test.describe('Stop and Delete', () => {
     await expect(page.getByText(text('tryon.deleted'), { exact: true })).toBeVisible();
     await expect(page.locator('.tryon-saved-list img')).toHaveCount(2);
     expect(api.tryonControl.deletes).toEqual([deleting]);
-    await expect(page.locator('.tryon-saved-list img')).toHaveCount(1, { timeout: 20_000 });
     await expect(page.locator(`#tryon-${kept}-delete`)).toBeVisible();
-    await expect(page.locator(`#tryon-${expiring}-delete`)).toHaveCount(0);
+    await expect(page.locator(`#tryon-${also}-delete`)).toBeVisible();
     const settled = reads;
     await page.waitForTimeout(1500);
     expect(reads).toBe(settled);
@@ -528,7 +570,7 @@ test.describe('Stop and Delete', () => {
     api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION;
     const outfitId = seedOutfit(api, [clothes.top.id], 'Weekend');
     api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId, itemIds: [clothes.top.id], image: api.fixture,
-      completedAtMs: Date.now() - 1000, expiresAtMs: Date.now() + 3_600_000 });
+      completedAtMs: Date.now() - 1000 });
     let failing = true;
     await page.route('**/rest/v1/rpc/tryon_results_v1', async route => {
       if (failing) { await route.fulfill({ status: 500, contentType: 'application/json', body: '{"message":"fixture"}' }); return; }
@@ -1210,7 +1252,7 @@ test.describe('bounded VTO-2 visual evidence', () => {
         const card = page.locator('section[aria-labelledby="tryon-heading"]');
         await expect(card.locator('[role="switch"][aria-checked="false"]')).toBeVisible();
         await card.getByText(text('aiF.about', language), { exact: true }).click();
-        await expect(card).toContainText(text('tryonC.notice2Charges', language));
+        await expect(card).toContainText(text('tryonC.notice3Charges', language));
         await page.locator('#tryon-heading').scrollIntoViewIfNeeded();
       } else {
         const { api } = await start(page, { language });
@@ -1268,11 +1310,11 @@ test.describe('bounded TRYON setup visual evidence', () => {
         const info = await lstat(directory); expect(info.isDirectory() && !info.isSymbolicLink()).toBe(true);
       }
       await page.setViewportSize({ width: selected.width, height: 900 });
-      const { api } = await start(page, { language });
+      const { api } = await start(page, { language, outfit: selected.scene === 'setup-subset' ? 'long' : 'full' });
       await openTryOn(page, language);
       if (selected.scene === 'setup-subset') {
         await expect(page.locator('#tryon-subset')).toHaveText(text('tryon.subset', language));
-        await expect(page.getByText(text('tryon.notIncluded', language, { names: 'Grey coat' }), { exact: true })).toBeVisible();
+        await expect(page.getByText(text('tryon.notIncluded', language, { names: 'Brown belt' }), { exact: true })).toBeVisible();
       } else {
         await preparePhoto(page, language);
         await expect(page.locator('#tryon-save-photo')).toHaveText(text('tryon.savePhoto', language));

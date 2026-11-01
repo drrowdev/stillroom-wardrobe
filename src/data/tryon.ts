@@ -3,7 +3,10 @@
 // src/data/enhancement.ts. The strict parsers below accept only the closed replies of 20261003090000_try_on.sql; the
 // server's checks stay authoritative, and nothing here decides eligibility on its own.
 import type { OwnerScope } from '../auth/session';
-import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_IDEA_ITEMS, TRYON_MODEL, TRYON_NOTICE_REVISION, tryOnResultsHeaders, tryOnSlots, type TryOnSlot } from '../domain/tryon';
+import {
+  TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_IDEA_ITEMS, TRYON_MAX_RESULTS, TRYON_MAX_STEPS, TRYON_MODEL, TRYON_NOTICE_REVISION,
+  tryOnResultsHeaders, tryOnSlots, type TryOnSlot,
+} from '../domain/tryon';
 import { aiBudgetHeaders, parseOptionalAiBudget, type AiBudget } from '../domain/ai-budget';
 import { isUuid } from '../domain/wardrobe';
 import type { AppClient } from './client';
@@ -32,7 +35,7 @@ export const tryOnStatusCodes = ['OK', 'UNAVAILABLE', 'UNCONFIGURED', 'INACTIVE'
 export type TryOnStatusCode = (typeof tryOnStatusCodes)[number];
 export type TryOnPolicy = {
   activated: boolean; noticeRevision: number | null; manifestId: string; modelId: string | null; maxRequestMicro: string | null;
-  maxSteps: number; maxResults: number; resultDays: number; providerAvailable: boolean;
+  maxSteps: number; maxResults: number; providerAvailable: boolean;
 };
 export type TryOnStatus = {
   code: TryOnStatusCode; serverTimeMs: number | null;
@@ -62,13 +65,13 @@ export function parseTryOnStatus(value: unknown): TryOnStatus | null {
   let policy: TryOnPolicy | null = null;
   if (p !== null) {
     if (!exactKeys(p, ['activated', 'noticeRevision', 'manifestId', 'modelId', 'maxRequestMicro',
-      'maxSteps', 'maxResults', 'resultDays', 'providerAvailable'])
+      'maxSteps', 'maxResults', 'providerAvailable'])
       || typeof p.activated !== 'boolean' || !(p.noticeRevision === null || revision(p.noticeRevision))
       || typeof p.manifestId !== 'string' || !(p.modelId === null || typeof p.modelId === 'string')
-      || !nullableMicro(p.maxRequestMicro) || p.maxSteps !== 3 || p.maxResults !== 20
-      || p.resultDays !== TRYON_LIMITS.resultDays || typeof p.providerAvailable !== 'boolean') return null;
+      || !nullableMicro(p.maxRequestMicro) || p.maxSteps !== TRYON_MAX_STEPS || p.maxResults !== TRYON_MAX_RESULTS
+      || typeof p.providerAvailable !== 'boolean') return null;
     policy = { activated: p.activated, noticeRevision: p.noticeRevision, manifestId: p.manifestId, modelId: p.modelId,
-      maxRequestMicro: p.maxRequestMicro, maxSteps: p.maxSteps, maxResults: p.maxResults, resultDays: p.resultDays,
+      maxRequestMicro: p.maxRequestMicro, maxSteps: p.maxSteps, maxResults: p.maxResults,
       providerAvailable: p.providerAvailable };
   }
   if ((code === 'OK' || code === 'INACTIVE' || code === 'CONSENT_REQUIRED') && policy === null) return null;
@@ -121,8 +124,8 @@ export function parseChainStatus(value: unknown): ChainStatus | null {
   }
   if (!exactKeys(value, ['code', 'state', 'nextStep', 'steps', 'activeAttempt', 'resultId', 'expiresAtMs']) || value.code !== 'OK') return null;
   const state = chainStates.find((entry) => entry === value.state);
-  if (!state || !count(value.nextStep) || value.nextStep < 1 || value.nextStep > 4 || !Array.isArray(value.steps)
-    || value.steps.length < 1 || value.steps.length > 3 || typeof value.activeAttempt !== 'boolean'
+  if (!state || !count(value.nextStep) || value.nextStep < 1 || value.nextStep > TRYON_MAX_STEPS + 1 || !Array.isArray(value.steps)
+    || value.steps.length < 1 || value.steps.length > TRYON_MAX_STEPS || typeof value.activeAttempt !== 'boolean'
     || !(value.resultId === null || uuid(value.resultId)) || !count(value.expiresAtMs)) return null;
   const steps: { slot: TryOnSlot; itemId: string }[] = [];
   for (const step of value.steps as unknown[]) {
@@ -146,17 +149,17 @@ export function parseCancel(value: unknown): CancelResult | null {
   return code ? { code } as CancelResult : null;
 }
 
-export type TryOnResult = { id: string; outfitId: string | null; itemIds: string[]; bytes: number; completedAtMs: number; expiresAtMs: number };
+export type TryOnResult = { id: string; outfitId: string | null; itemIds: string[]; bytes: number; completedAtMs: number };
 export function parseResults(value: unknown): TryOnResult[] | null {
-  if (!exactKeys(value, ['code', 'results']) || value.code !== 'OK' || !Array.isArray(value.results) || value.results.length > 20) return null;
+  if (!exactKeys(value, ['code', 'results']) || value.code !== 'OK' || !Array.isArray(value.results) || value.results.length > TRYON_MAX_RESULTS) return null;
   const results: TryOnResult[] = [];
   for (const entry of value.results as unknown[]) {
-    if (!exactKeys(entry, ['id', 'outfitId', 'itemIds', 'bytes', 'completedAtMs', 'expiresAtMs']) || !uuid(entry.id)
-      || (entry.outfitId !== null && !uuid(entry.outfitId)) || !Array.isArray(entry.itemIds) || entry.itemIds.length < 1 || entry.itemIds.length > 3
+    if (!exactKeys(entry, ['id', 'outfitId', 'itemIds', 'bytes', 'completedAtMs']) || !uuid(entry.id)
+      || (entry.outfitId !== null && !uuid(entry.outfitId)) || !Array.isArray(entry.itemIds) || entry.itemIds.length < 1 || entry.itemIds.length > TRYON_MAX_STEPS
       || !entry.itemIds.every(uuid) || !count(entry.bytes) || entry.bytes < 1 || entry.bytes > TRYON_LIMITS.outputBytes
-      || !count(entry.completedAtMs) || !count(entry.expiresAtMs)) return null;
+      || !count(entry.completedAtMs)) return null;
     results.push({ id: entry.id, outfitId: entry.outfitId as string | null, itemIds: [...entry.itemIds as string[]], bytes: entry.bytes,
-      completedAtMs: entry.completedAtMs, expiresAtMs: entry.expiresAtMs });
+      completedAtMs: entry.completedAtMs });
   }
   return results;
 }
@@ -228,7 +231,7 @@ const base64Of = (bytes: Uint8Array): string => {
 
 /** One step's reply: the intermediate picture for the next step, the final result, or a closed code. */
 export type StepResponse = { kind: 'intermediate'; body: Uint8Array<ArrayBuffer>; sha256: string }
-  | { kind: 'result'; resultId: string; expiresAtMs: number } | { kind: 'code'; code: Exclude<TryOnCode, 'OK'> };
+  | { kind: 'result'; resultId: string } | { kind: 'code'; code: Exclude<TryOnCode, 'OK'> };
 /** Step 1 names its garments by a saved outfit or by an unsaved idea's item ids (never both); later steps carry neither. */
 export type StepInput = { chainId: string; step: number; requestId: string; person: Uint8Array<ArrayBuffer>; outfitId?: string;
   itemIds?: readonly string[] };
@@ -243,6 +246,8 @@ const closed = (value: unknown): Exclude<TryOnCode, 'OK'> => {
 type RpcName = 'tryon_status' | 'tryon_set_consent' | 'tryon_chain_status' | 'tryon_cancel' | 'tryon_results_v1'
   | 'tryon_result_image_v1' | 'tryon_delete_result' | 'tryon_person_photo_status_v1' | 'tryon_person_photo_get_v1'
   | 'tryon_person_photo_put_v1' | 'tryon_person_photo_delete_v1';
+// The list of up to 200 results, each naming up to six items, measures about 80 KB; the cap leaves room for the server's spacing.
+const RESULTS_JSON_BYTES = 131_072;
 // A result image is at most 512,000 bytes, so its base64 JSON stays under 700,000.
 const RESULT_JSON_BYTES = 700_000;
 // The reference photo moves like a result image: a longer deadline for its up-to-683 KB base64 request or reply.
@@ -419,9 +424,9 @@ export class TryOnClient {
     if (reply.status === 200 && exactKeys(reply.value, ['code', 'saved']) && reply.value.code === 'OK' && reply.value.saved === false) return;
     throw new TryOnError('UNAVAILABLE');
   }
-  /** The owner's unexpired results; `missing` when this backend has no try-on. */
+  /** The owner's saved results; `missing` when this backend has no try-on. */
   async results(signal?: AbortSignal): Promise<TryOnResult[] | 'missing'> {
-    const reply = await this.rpc('tryon_results_v1', {}, signal);
+    const reply = await this.rpc('tryon_results_v1', {}, signal, RESULTS_JSON_BYTES);
     if (reply.status === 404 && record(reply.value) && reply.value.code === 'PGRST202') return 'missing';
     const parsed = reply.status === 200 ? parseResults(reply.value) : null;
     if (!parsed) throw new TryOnError('UNAVAILABLE');
@@ -449,7 +454,7 @@ export class TryOnClient {
    */
   async step(input: StepInput, signal: AbortSignal): Promise<StepResponse> {
     const { chainId, step, requestId, person, outfitId, itemIds } = input;
-    if (!isUuid(chainId) || !isUuid(requestId) || !Number.isInteger(step) || step < 1 || step > 3
+    if (!isUuid(chainId) || !isUuid(requestId) || !Number.isInteger(step) || step < 1 || step > TRYON_MAX_STEPS
       || (step === 1 ? (outfitId === undefined) === (itemIds === undefined) : outfitId !== undefined || itemIds !== undefined)
       || (outfitId !== undefined && !isUuid(outfitId))
       || (itemIds !== undefined && (itemIds.length < 1 || itemIds.length > TRYON_MAX_IDEA_ITEMS || !itemIds.every(isUuid)
@@ -486,9 +491,8 @@ export class TryOnClient {
       }
       // An unreadable, truncated or unexpected reply proves nothing about the step: it throws, and the caller reconciles.
       const value = await this.json(response, wait);
-      if (response.status === 200 && exactKeys(value, ['code', 'resultId', 'expiresAtMs']) && value.code === 'OK'
-        && uuid(value.resultId) && count(value.expiresAtMs)) {
-        return { kind: 'result', resultId: value.resultId, expiresAtMs: value.expiresAtMs };
+      if (response.status === 200 && exactKeys(value, ['code', 'resultId']) && value.code === 'OK' && uuid(value.resultId)) {
+        return { kind: 'result', resultId: value.resultId };
       }
       if (!exactKeys(value, ['code']) || value.code === 'OK') throw new TryOnError('UNAVAILABLE');
       return { kind: 'code', code: closed(value.code) };
