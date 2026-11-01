@@ -366,7 +366,18 @@ export async function budget2BehaviourProbes(snapshot, rawSql, markStage) {
   need(refused.ok && refused.data.length === 1 && refused.data[0].state === 'analysis_unavailable');
 
   mark('guarded-switch');
-  // b has no alive request and no held charge: forward switch is refused only by the exact-row guard until it is v2.
+  // The subject account has no alive request, no held charge and no frozen Save: the guards are then seen one at a time.
+  // Earlier frozen stages left such residue for either owner; it is cleared (requests, held charges) or, for a frozen attempt,
+  // avoided by taking the owner that has none. A frozen attempt is never deleted to pass a guard.
+  const frozenOf = async (owner) => Number(await scalar(`select (select count(*) from private.ai_item_save_attempts x join private.item_save_attempts y
+      on y.owner_id=x.owner_id and y.item_id=x.item_id where x.owner_id=${literal(owner.uid)} and x.manifest_id is not null and y.state='reserved')
+    +(select count(*) from private.image_change_attempts z where z.owner_id=${literal(owner.uid)} and z.manifest_id is not null and z.state='reserved');`));
+  const frozen = [await frozenOf(b), await frozenOf(a)];
+  const s = frozen[0] === 0 ? b : a;
+  if (frozen[0] !== 0 && frozen[1] !== 0) markStage(`${current}-both-owners-hold-a-frozen-attempt-${frozen.join('-')}`);
+  need(frozen[0] === 0 || frozen[1] === 0);
+  await setControls(s, V3, V3_RESERVATION);
+  equal((await aiConsent(s, true)).code, 'OK');
   const reconcile = (owner) => sql(`delete from private.ai_usage where owner_id=${literal(owner.uid)} and charge_state in ('reserved','held');`);
   const expire = (owner, id) => sql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour'
     where owner_id=${literal(owner.uid)} and request_id=${literal(id)}; select private.ai_expire(${literal(owner.uid)},clock_timestamp(),100);`);
@@ -376,51 +387,53 @@ export async function budget2BehaviourProbes(snapshot, rawSql, markStage) {
     ready: 'BLOCKED: an unsaved ready analysis is still alive',
     held: 'BLOCKED: reserved or held charge exists (an expired dispatched request keeps its held charge)',
   };
-  await reconcile(b);
-  const bBefore = await controlsRow(b);
+  await reconcile(s);
+  // Earlier frozen stages left unexpired ready results for this owner; they are fixture residue, cleared so each guard is seen alone.
+  await sql(`delete from private.ai_requests where owner_id=${literal(s.uid)};`);
+  const bBefore = await controlsRow(s);
   // Rollback uses the same quiescence guards as the forward switch: a live request, an unsaved ready analysis and an expired
   // request's held charge each refuse it with their own message, and nothing is written or erased to pass the guard.
   const readyB = randomUUID();
-  need((await claim(b, readyB)).claimed === true);
-  equal(await attempt(b, 'rollback'), REFUSALS.alive);
-  equal(await controlsRow(b), bBefore);
-  equal((await finish(b, readyB, facts({ colours: ['navy'] }))).stored, true);
-  equal(await attempt(b, 'rollback'), REFUSALS.ready);
-  equal(await controlsRow(b), bBefore);
-  await expire(b, readyB);
+  need((await claim(s, readyB)).claimed === true);
+  equal(await attempt(s, 'rollback'), REFUSALS.alive);
+  equal(await controlsRow(s), bBefore);
+  equal((await finish(s, readyB, facts({ colours: ['navy'] }))).stored, true);
+  equal(await attempt(s, 'rollback'), REFUSALS.ready);
+  equal(await controlsRow(s), bBefore);
+  await expire(s, readyB);
   const heldV3 = randomUUID();
-  need((await claim(b, heldV3)).claimed === true);
-  await expire(b, heldV3);
-  const heldV3Row = await usageRow(b, heldV3);
+  need((await claim(s, heldV3)).claimed === true);
+  await expire(s, heldV3);
+  const heldV3Row = await usageRow(s, heldV3);
   equal(heldV3Row, { reserved_micro: '1', accounted_micro: '1', charge_state: 'held', closed_reason: 'EXPIRED' });
-  equal(await attempt(b, 'rollback'), REFUSALS.held);
-  equal(await usageRow(b, heldV3), heldV3Row);
-  equal(await controlsRow(b), bBefore);
-  await reconcile(b);
-  equal(await attempt(b, 'forward'), REFUSALS.row);
-  equal(await controlsRow(b), bBefore);
-  equal(await attempt(b, 'rollback'), 'OK');
-  equal(await controlsRow(b), { ...bBefore, execution_manifest_id: V2, max_request_micro: V2_RESERVATION });
+  equal(await attempt(s, 'rollback'), REFUSALS.held);
+  equal(await usageRow(s, heldV3), heldV3Row);
+  equal(await controlsRow(s), bBefore);
+  await reconcile(s);
+  equal(await attempt(s, 'forward'), REFUSALS.row);
+  equal(await controlsRow(s), bBefore);
+  equal(await attempt(s, 'rollback'), 'OK');
+  equal(await controlsRow(s), { ...bBefore, execution_manifest_id: V2, max_request_micro: V2_RESERVATION });
   // A held charge blocks the forward switch, and nothing is erased to pass the guard.
   const heldId = randomUUID();
-  need((await claim(b, heldId, V2)).claimed === true);
-  await expire(b, heldId);
-  const heldBefore = await usageRow(b, heldId);
+  need((await claim(s, heldId, V2)).claimed === true);
+  await expire(s, heldId);
+  const heldBefore = await usageRow(s, heldId);
   equal(heldBefore, { reserved_micro: String(V2_RESERVATION), accounted_micro: String(V2_RESERVATION), charge_state: 'held', closed_reason: 'EXPIRED' });
-  equal(await attempt(b, 'forward'), REFUSALS.held);
-  equal(await usageRow(b, heldId), heldBefore);
-  equal((await controlsRow(b)).execution_manifest_id, V2);
+  equal(await attempt(s, 'forward'), REFUSALS.held);
+  equal(await usageRow(s, heldId), heldBefore);
+  equal((await controlsRow(s)).execution_manifest_id, V2);
   // Reconciling that charge is a separately authorised step; once it is gone the guarded forward switch succeeds.
-  await reconcile(b);
-  equal(await attempt(b, 'forward'), 'OK');
-  equal(await controlsRow(b), { ...bBefore, execution_manifest_id: V3, max_request_micro: V3_RESERVATION });
+  await reconcile(s);
+  equal(await attempt(s, 'forward'), 'OK');
+  equal(await controlsRow(s), { ...bBefore, execution_manifest_id: V3, max_request_micro: V3_RESERVATION });
   // The switch writes no activation, consent, notice, prompt or allowance.
-  const consent = (await client.rows(b, 'profiles'))[0];
+  const consent = (await client.rows(s, 'profiles'))[0];
   need(consent.ai_enabled === true && consent.ai_notice_revision === 2);
 
   mark('ceiling');
-  const admins = Number(await scalar('select count(*) from private.app_admins;'));
-  need(admins === 0);
+  // Earlier stages may have left an admin row (the admin is a singleton); it is fixture state and is replaced for this check.
+  await sql('delete from private.app_admins;');
   await sql(`insert into private.app_admins(owner_id,admission_no,admission_generation)
     select user_id,admission_no,generation from private.approved_accounts where user_id=${literal(a.uid)};`);
   try {
