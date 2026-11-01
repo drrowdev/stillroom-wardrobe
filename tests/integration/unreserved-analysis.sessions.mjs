@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { requireEvidence } from './preservation.sessions.mjs';
 import { equal, analysisFacts, analysisHash } from './ai-analysis.sessions.mjs';
 import { analyzedHarness, analyzedIntent } from './analyzed-save.sessions.mjs';
@@ -128,7 +129,20 @@ const USAGE = Object.freeze({ modelObservation: 'expected_snapshot', controlObse
   total: 1200, reasoning: 50, cacheRead: 0, cacheWrite: 0 });
 const ESTIMATE = Math.ceil((1000 * 440 + 200 * 1980) / 100);
 
-export async function budget2BehaviourProbes(snapshot, sql, mark) {
+export async function budget2BehaviourProbes(snapshot, sql, markStage) {
+  // Failure labels are the only detail the rehearsal prints, so each comparison puts the actual and wanted values in it.
+  let current = '';
+  const mark = (name) => { current = name; markStage(name); };
+  const brief = (value) => JSON.stringify(value ?? null).replace(/[^A-Za-z0-9_.:,-]+/g, '').slice(0, 70);
+  const equal = (actual, expected) => {
+    const ok = isDeepStrictEqual(actual, expected);
+    if (!ok) markStage(`${current}-got-${brief(actual)}-want-${brief(expected)}`);
+    requireEvidence(ok);
+  };
+  const need = (ok) => {
+    if (!ok) markStage(`${current}-check-at-line-${/:(\d+):\d+/.exec(new Error('x').stack?.split('\n')[2] ?? '')?.[1] ?? 'unknown'}`);
+    requireEvidence(ok);
+  };
   const { client, owners: [a, b], env } = snapshot;
   const one = async (text) => JSON.parse(await sql(text));
   const scalar = async (text) => (await sql(text)).trim();
@@ -160,7 +174,7 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
       equal(result, { status: 409, data: { code: 'CONFLICT' } });
       await new Promise((resolve) => { setTimeout(resolve, 50 * attempt); });
     }
-    requireEvidence(false);
+    need(false);
   };
   const saveIntent = (request, colours) => {
     const value = analyzedIntent(a, 21);
@@ -176,7 +190,7 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
   const baseline = await used(a);
   const request = randomUUID();
   const first = await claim(a, request);
-  requireEvidence(first.claimed === true && first.manifestId === V3);
+  need(first.claimed === true && first.manifestId === V3);
   // The whole hold is one micro-USD: no worst-case amount is set aside for the photo.
   equal(await usageRow(a, request), { reserved_micro: '1', accounted_micro: '1', charge_state: 'held', closed_reason: null });
   equal(await used(a), baseline + 1n);
@@ -196,15 +210,15 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
   await h.upload(value);
   await h.finalize(value, row);
   let history = await client.rpc(a, 'item_attribution_history', { p_item_id: value.p_item.id });
-  requireEvidence(history.length === 1 && history[0].prompt_version === 2);
+  need(history.length === 1 && history[0].prompt_version === 2);
   equal(history[0].fields.colours, { kind: 'ai_observed', revision: 1 });
   // The saved lineage names the v3 manifest instead of none; the owner-facing history and export never show it.
   equal(await scalar(`select manifest_id from private.item_attribution_history where owner_id=${literal(a.uid)} and item_id=${literal(value.p_item.id)};`), V3);
-  requireEvidence(!JSON.stringify(history).includes('devtest') && !Object.hasOwn(history[0], 'manifest_id'));
+  need(!JSON.stringify(history).includes('devtest') && !Object.hasOwn(history[0], 'manifest_id'));
 
   mark('v3-image-replacement');
   const replacementRequest = randomUUID();
-  requireEvidence((await claim(a, replacementRequest)).claimed === true);
+  need((await claim(a, replacementRequest)).claimed === true);
   equal((await finish(a, replacementRequest, facts({ pattern: 'solid' }))).stored, true);
   const ich = imageChangeHarness(client, a, env);
   const replacement = ich.make((await h.read('items', value.p_item.id))[0], (await h.read('item_images', value.p_image.id))[0]);
@@ -215,9 +229,12 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
   await ich.upload(replacement);
   await completed(ich, replacement);
   history = await client.rpc(a, 'item_attribution_history', { p_item_id: value.p_item.id });
-  requireEvidence(history.length === 2 && history[1].source_image_id === replacement.imageId);
+  need(history.length === 2 && history[1].source_image_id === replacement.imageId);
+  // The replacement's attribution is recorded in image_change_history (the owner-facing history merges both tables).
   equal(await scalar(`select count(*) from private.item_attribution_history where owner_id=${literal(a.uid)} and item_id=${literal(value.p_item.id)}
-    and manifest_id=${literal(V3)};`), '2');
+    and manifest_id=${literal(V3)};`), '1');
+  equal(await scalar(`select count(*) from private.image_change_history where owner_id=${literal(a.uid)} and item_id=${literal(value.p_item.id)}
+    and manifest_id=${literal(V3)};`), '1');
 
   mark('manifest-pairs');
   // Each controls row admits only its own manifest. v2 keeps its whole-request floor, so v2 can never run at one micro.
@@ -228,7 +245,7 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
   equal(await claim(a, randomUUID(), V3), { code: 'CONFIG_CHANGED', claimed: false });
   await setControls(a, V2, V2_RESERVATION);
   const legacy = randomUUID(), legacyBase = await used(a);
-  requireEvidence((await claim(a, legacy, V2)).claimed === true);
+  need((await claim(a, legacy, V2)).claimed === true);
   equal((await usageRow(a, legacy)).accounted_micro, String(V2_RESERVATION));
   equal(await used(a), legacyBase + BigInt(V2_RESERVATION));
   equal(await claim(a, randomUUID(), V3), { code: 'CONFIG_CHANGED', claimed: false });
@@ -241,12 +258,12 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
   const room = await used(a);
   await setAllowance(a, room + 3n);
   const burst = [randomUUID(), randomUUID(), randomUUID()];
-  for (const id of burst) requireEvidence((await claim(a, id)).claimed === true);
+  for (const id of burst) need((await claim(a, id)).claimed === true);
   equal(await claim(a, randomUUID()), { code: 'ALLOWANCE', claimed: false });
   for (const id of burst) equal((await finish(a, id, facts({ colours: ['navy'] }))).stored, true);
   const after = await used(a);
   equal(after, room + BigInt(3 * ESTIMATE));
-  requireEvidence(after > room + 3n);
+  need(after > room + 3n);
   equal(await claim(a, randomUUID()), { code: 'ALLOWANCE', claimed: false });
   await setAllowance(a, 100000000);
 
@@ -262,7 +279,7 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
   mark('expired-held');
   // A dispatched request that expires keeps its held charge (it is never released): one micro now, not a whole request.
   const stale = randomUUID(), staleBase = await used(a);
-  requireEvidence((await claim(a, stale)).claimed === true);
+  need((await claim(a, stale)).claimed === true);
   await sql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour'
     where owner_id=${literal(a.uid)} and request_id=${literal(stale)};
     select private.ai_expire(${literal(a.uid)},clock_timestamp(),100);`);
@@ -273,43 +290,43 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
   // v3: the envelope is a recorded anomaly threshold, not a switch. Input above 16,384 records the unclamped estimate and fails
   // that photo only; analysis stays available for the next one without any reactivation.
   const edge = randomUUID();
-  requireEvidence((await claim(a, edge)).claimed === true);
+  need((await claim(a, edge)).claimed === true);
   const inEnvelope = { ...USAGE, input: V3_INPUT_ENVELOPE, output: 2048, total: V3_INPUT_ENVELOPE + 2048, reasoning: 0 };
   equal((await finish(a, edge, facts({ colours: ['navy'] }), V3, inEnvelope)).stored, true);
   equal((await controlsRow(a)).activated, true);
   const over = randomUUID();
-  requireEvidence((await claim(a, over)).claimed === true);
+  need((await claim(a, over)).claimed === true);
   const overUsage = { ...USAGE, input: V3_INPUT_ENVELOPE + 1, output: 10, total: V3_INPUT_ENVELOPE + 11, reasoning: 0 };
   equal((await finish(a, over, facts({ colours: ['navy'] }), V3, overUsage)).code, 'USAGE_ANOMALY');
   equal((await usageRow(a, over)).accounted_micro, String(Math.ceil(((V3_INPUT_ENVELOPE + 1) * 440 + 10 * 1980) / 100)));
   equal(await scalar(`select anomaly::text from private.ai_usage_evidence where owner_id=${literal(a.uid)} and request_id=${literal(over)};`), 'true');
   equal((await controlsRow(a)).activated, true);
-  requireEvidence((await claim(a, randomUUID())).claimed === true);
+  need((await claim(a, randomUUID())).claimed === true);
   // The output side of the envelope behaves the same.
   const overOut = randomUUID();
-  requireEvidence((await claim(a, overOut)).claimed === true);
+  need((await claim(a, overOut)).claimed === true);
   equal((await finish(a, overOut, facts({ colours: ['navy'] }), V3, { ...USAGE, input: 100, output: 2049, total: 2149, reasoning: 0 })).code, 'USAGE_ANOMALY');
   equal((await controlsRow(a)).activated, true);
   // Every other shutdown is unchanged for v3: contradictory or cache controls still deactivate it.
   const contradictory = randomUUID();
-  requireEvidence((await claim(a, contradictory)).claimed === true);
+  need((await claim(a, contradictory)).claimed === true);
   equal((await finish(a, contradictory, facts({ colours: ['navy'] }), V3, { ...USAGE, controlObservation: 'contradictory' })).code, 'USAGE_ANOMALY');
   equal((await controlsRow(a)).activated, false);
   equal(await claim(a, randomUUID()), { code: 'INACTIVE', claimed: false });
   await sql(`update private.ai_controls set activated=true where owner_id=${literal(a.uid)};`);
   const cache = randomUUID();
-  requireEvidence((await claim(a, cache)).claimed === true);
+  need((await claim(a, cache)).claimed === true);
   equal((await finish(a, cache, facts({ colours: ['navy'] }), V3, { ...USAGE, controlObservation: 'cache_read', cacheRead: 5 })).code, 'USAGE_ANOMALY');
   equal((await controlsRow(a)).activated, false);
   await sql(`update private.ai_controls set activated=true where owner_id=${literal(a.uid)};`);
   // v2 keeps its deactivation on an envelope overrun (v1/v2 semantics preserved).
   await setControls(a, V2, V2_RESERVATION);
   const overV2 = randomUUID();
-  requireEvidence((await claim(a, overV2, V2)).claimed === true);
+  need((await claim(a, overV2, V2)).claimed === true);
   equal((await finish(a, overV2, facts({ colours: ['navy'] }), V2, { ...USAGE, input: 922001, output: 10, total: 922011, reasoning: 0 })).code, 'USAGE_ANOMALY');
   equal((await controlsRow(a)).activated, false);
   await setControls(a, V3, V3_RESERVATION);
-  requireEvidence((await claim(a, randomUUID())).claimed === true);
+  need((await claim(a, randomUUID())).claimed === true);
 
   mark('ready-draft-and-reverse-cutover');
   // A ready, unsaved v3 result refuses Save once the controls return to v2 (its manifest no longer matches); the switch
@@ -317,16 +334,16 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
   await setControls(b, V3, V3_RESERVATION);
   equal((await aiConsent(b, true)).code, 'OK');
   const ready = randomUUID();
-  requireEvidence((await claim(a, ready)).claimed === true);
+  need((await claim(a, ready)).claimed === true);
   equal((await finish(a, ready, facts({ colours: ['navy'] }))).stored, true);
   const blocked = async (text) => { try { await sql(text); return false; } catch { return true; } };
   const before = await controlsRow(a);
-  requireEvidence(await blocked(switchControlsSql(a.uid, 'rollback')));
+  need(await blocked(switchControlsSql(a.uid, 'rollback')));
   equal(await controlsRow(a), before);
   await sql(`update private.ai_controls set execution_manifest_id=${literal(V2)},max_request_micro=${V2_RESERVATION}
     where owner_id=${literal(a.uid)};`);
   const refused = await analyzedHarness(client, a, env).call('reserve_analyzed_item_save', saveIntent(ready, ['navy']));
-  requireEvidence(refused.ok && refused.data.length === 1 && refused.data[0].state === 'analysis_unavailable');
+  need(refused.ok && refused.data.length === 1 && refused.data[0].state === 'analysis_unavailable');
 
   mark('guarded-switch');
   // b has no alive request and no held charge: forward switch is refused only by the exact-row guard until it is v2.
@@ -336,36 +353,36 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
   // Rollback uses the same quiescence guards as the forward switch: an unsaved ready analysis, a live request and an expired
   // request's held charge each refuse it, and nothing is written or erased to pass the guard.
   const readyB = randomUUID();
-  requireEvidence((await claim(b, readyB)).claimed === true);
-  requireEvidence(await blocked(switchControlsSql(b.uid, 'rollback')));
+  need((await claim(b, readyB)).claimed === true);
+  need(await blocked(switchControlsSql(b.uid, 'rollback')));
   equal(await controlsRow(b), bBefore);
   equal((await finish(b, readyB, facts({ colours: ['navy'] }))).stored, true);
-  requireEvidence(await blocked(switchControlsSql(b.uid, 'rollback')));
+  need(await blocked(switchControlsSql(b.uid, 'rollback')));
   equal(await controlsRow(b), bBefore);
   await sql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour'
     where owner_id=${literal(b.uid)} and request_id=${literal(readyB)}; select private.ai_expire(${literal(b.uid)},clock_timestamp(),100);`);
   const heldV3 = randomUUID();
-  requireEvidence((await claim(b, heldV3)).claimed === true);
+  need((await claim(b, heldV3)).claimed === true);
   await sql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour'
     where owner_id=${literal(b.uid)} and request_id=${literal(heldV3)}; select private.ai_expire(${literal(b.uid)},clock_timestamp(),100);`);
   const heldV3Row = await usageRow(b, heldV3);
   equal(heldV3Row, { reserved_micro: '1', accounted_micro: '1', charge_state: 'held', closed_reason: 'EXPIRED' });
-  requireEvidence(await blocked(switchControlsSql(b.uid, 'rollback')));
+  need(await blocked(switchControlsSql(b.uid, 'rollback')));
   equal(await usageRow(b, heldV3), heldV3Row);
   equal(await controlsRow(b), bBefore);
   await reconcile(b);
-  requireEvidence(await blocked(switchControlsSql(b.uid, 'forward')));
+  need(await blocked(switchControlsSql(b.uid, 'forward')));
   equal(await controlsRow(b), bBefore);
   await sql(switchControlsSql(b.uid, 'rollback'));
   equal(await controlsRow(b), { ...bBefore, execution_manifest_id: V2, max_request_micro: V2_RESERVATION });
   // A held charge blocks the forward switch, and nothing is erased to pass the guard.
   const heldId = randomUUID();
-  requireEvidence((await claim(b, heldId, V2)).claimed === true);
+  need((await claim(b, heldId, V2)).claimed === true);
   await sql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour'
     where owner_id=${literal(b.uid)} and request_id=${literal(heldId)}; select private.ai_expire(${literal(b.uid)},clock_timestamp(),100);`);
   const heldBefore = await usageRow(b, heldId);
   equal(heldBefore, { reserved_micro: String(V2_RESERVATION), accounted_micro: String(V2_RESERVATION), charge_state: 'held', closed_reason: 'EXPIRED' });
-  requireEvidence(await blocked(switchControlsSql(b.uid, 'forward')));
+  need(await blocked(switchControlsSql(b.uid, 'forward')));
   equal(await usageRow(b, heldId), heldBefore);
   equal((await controlsRow(b)).execution_manifest_id, V2);
   // Reconciling that charge is a separately authorised step; once it is gone the guarded forward switch succeeds.
@@ -374,11 +391,11 @@ export async function budget2BehaviourProbes(snapshot, sql, mark) {
   equal(await controlsRow(b), { ...bBefore, execution_manifest_id: V3, max_request_micro: V3_RESERVATION });
   // The switch writes no activation, consent, notice, prompt or allowance.
   const consent = (await client.rows(b, 'profiles'))[0];
-  requireEvidence(consent.ai_enabled === true && consent.ai_notice_revision === 2);
+  need(consent.ai_enabled === true && consent.ai_notice_revision === 2);
 
   mark('ceiling');
   const admins = Number(await scalar('select count(*) from private.app_admins;'));
-  requireEvidence(admins === 0);
+  need(admins === 0);
   await sql(`insert into private.app_admins(owner_id,admission_no,admission_generation)
     select user_id,admission_no,generation from private.approved_accounts where user_id=${literal(a.uid)};`);
   try {
