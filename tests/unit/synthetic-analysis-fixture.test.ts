@@ -181,3 +181,46 @@ describe('synthetic historical analysis fixtures stay equal to the historical su
     ]) inOrder(compact(await body(file, header)), IMAGE);
   });
 });
+
+describe('synthetic substitutions are never silent', () => {
+  const read = async (path: string) => (await readFile(new URL(path, import.meta.url), 'utf8')).replaceAll('\r\n', '\n');
+  const functionText = (source: string, name: string) => {
+    const start = source.indexOf(`export async function ${name}(`);
+    expect(start, name).toBeGreaterThanOrEqual(0);
+    return source.slice(start, source.indexOf('\n}\n', start));
+  };
+
+  it('records and labels every synthetic path, and shows the real replacement refusal before a synthetic replacement write', async () => {
+    const source = await read('../integration/synthetic-analysis.sessions.mjs');
+    expect(source).toContain("export const SYNTHETIC_LABEL = 'SYNTHETIC historical fixture';");
+    for (const [name, write, kind] of [
+      ['analysisClaim', 'syntheticClaimSql(', 'analysis claim'], ['analysisFinishSuccess', 'syntheticFinishSql(', 'analysis finish'],
+      ['analyzedSaveRow', 'syntheticSaveSql(', 'analyzed Save'],
+      ['analyzedReplacementReceipt', 'syntheticImageChangeSql(', 'analyzed replacement reservation'],
+      ['tagClaimStatement', 'private.ai_begin_owner(', 'tagging claim entry via real ai_begin_owner'],
+    ] as const) {
+      const text = functionText(source, name);
+      expect(text, name).toContain(write);
+      expect(text, name).toContain(`recordSynthetic('${kind}'`);
+    }
+    for (const name of ['analysisClaim', 'analysisFinishSuccess']) {
+      expect(functionText(source, name), name).toContain('synthetic: true, label: SYNTHETIC_LABEL');
+    }
+    const replacement = functionText(source, 'analyzedReplacementReceipt');
+    expect(replacement.indexOf('await expiredReplacementRefusalProbe(')).toBeGreaterThanOrEqual(0);
+    expect(replacement.indexOf('await expiredReplacementRefusalProbe(')).toBeLessThan(replacement.indexOf('syntheticImageChangeSql('));
+    const probe = functionText(source, 'expiredReplacementRefusalProbe');
+    expect(probe).toContain('public.reserve_image_change(');
+    expect(probe).toContain("state: 'analysis_unavailable'");
+    expect(probe).toContain('rollback;');
+    expect(source).toContain('SYNTHETIC_LABEL.toUpperCase()');
+  });
+
+  it('prints the substitution status after every stage that can use synthetic analysis evidence', async () => {
+    const rehearsal = await read('../../scripts/preservation-rehearsal.mjs');
+    for (const stage of ['I10b-ten-capture', 'I10b-preservation', 'COL1-A1-eleven-capture', 'COL1-A6-fifteen-probes', 'SAVE1-seed',
+      'SAVE1-verify', 'P6d-attribution-roundtrip', 'ST1a-stylist-ledger', 'BG2b-enhancement-ledger', 'COL1-B-twelve-probes', 'AVAIL1-behaviour']) {
+      expect(rehearsal, stage).toContain(`await syntheticNote('${stage}');`);
+    }
+  });
+});

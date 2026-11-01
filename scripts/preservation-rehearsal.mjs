@@ -40,6 +40,9 @@ const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], '
   colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], 'budget1-prior': ['save1-prior'],
   'idea-prior': ['budget1-prior'], 'photo-prior': ['idea-prior'], 'avail-prior': ['photo-prior'], target: ['avail-prior'] });
 
+// Prints, per stage, whether SYNTHETIC analysis claim/finish/Save/replacement evidence was used (lazy import keeps this module import-safe).
+const syntheticNote = async (stage) => (await import('../tests/integration/synthetic-analysis.sessions.mjs')).syntheticNote(stage);
+
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
   { name: '20260906000000_item_field_provenance.sql', version: '20260906000000', time: '2026-09-06 00:00:00', bytes: 5923, sha256: SOURCE_HASHES.target },
@@ -1226,6 +1229,7 @@ async function main() {
       console.log('PASS: populated prior-main9/azure-target10 historical preservation; Google proof retained for next upgrade');
       stage = 'I10b-ten-capture';
       const ten = await captureImageChangePreservation(priorMain, privilegedLocalSql);
+      await syntheticNote('I10b-ten-capture');
       await assertMigrationInventory(); await history('azure-target');
       const container = await sameDatabaseIdentity();
       stage = 'I10b-ten-to-eleven';
@@ -1235,6 +1239,7 @@ async function main() {
       await verifyCiStorageGuard();
       stage = 'I10b-preservation';
       await verifyImageChangePreservation(ten, privilegedLocalSql, (label) => { stage = `I10b-preservation-${label}`; });
+      await syntheticNote('I10b-preservation');
       stage = 'I10b-publication-races';
       const { imageDeletionCases, imageChangePagedDeletion, imageChangeOrphanDeletion } = await import('../tests/integration/image-replacement.sessions.mjs');
       await imageDeletionCases(azureEnv, { withLifecycleLateUpload, requireLifecyclePrefixEmpty, withLifecycleParentLock,
@@ -1295,6 +1300,7 @@ async function main() {
       stage = 'COL1-A1-eleven-capture';
       await history('image-change');
       const colourSnapshot = await captureColourPreservation(sixEnv, privilegedLocalSql);
+      await syntheticNote('COL1-A1-eleven-capture');
       await assertMigrationInventory(); await history('image-change');
       const colourContainer = await sameDatabaseIdentity();
       stage = 'COL1-A2-eleven-to-twelve';
@@ -1322,6 +1328,7 @@ async function main() {
       stage = 'SAVE1-seed';
       const { analysisModelSeed, analysisModelVerify } = await import('../tests/integration/analysis-missing-model.sessions.mjs');
       const modelSeed = await analysisModelSeed(colourSnapshot, privilegedLocalSql);
+      await syntheticNote('SAVE1-seed');
       stage = 'RAIN1-seed';
       // Real v1 stylist claims are made at the prior inventory, before the forward v2 manifest migration is applied.
       const { stylistUpgradeSeed, stylistUpgradeVerify } = await import('../tests/integration/stylist-ledger.sessions.mjs');
@@ -1336,22 +1343,27 @@ async function main() {
       await stylistUpgradeVerify(rainSeed, colourSnapshot, privilegedLocalSql, (label) => { stage = `RAIN1-${label}`; });
       stage = 'SAVE1-verify';
       await analysisModelVerify(modelSeed, privilegedLocalSql, (label) => { stage = `SAVE1-${label}`; });
+      await syntheticNote('SAVE1-verify');
       stage = 'COL1-A6-fifteen-probes';
       await colourProbes(sixEnv, privilegedLocalSql, 'target');
+      await syntheticNote('COL1-A6-fifteen-probes');
       colourFinalizer.assertRunning();
       stage = 'P6d-attribution-roundtrip';
       const { attributionRestoreProbes } = await import('../tests/integration/attribution-restore.sessions.mjs');
       await attributionRestoreProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `P6d-attribution-${label}`; });
+      await syntheticNote('P6d-attribution-roundtrip');
       colourFinalizer.assertRunning();
       stage = 'ST1a-stylist-ledger';
       const { stylistLedgerProbes } = await import('../tests/integration/stylist-ledger.sessions.mjs');
       await stylistLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `ST1a-stylist-${label}`; });
+      await syntheticNote('ST1a-stylist-ledger');
       colourFinalizer.assertRunning();
       stage = 'BG2b-enhancement-ledger';
       const { enhancementLedgerProbes } = await import('../tests/integration/enhancement-ledger.sessions.mjs');
       // FILT1: the old-Edge compatibility checks call the local PostgREST RPC with the disposable stack's service key.
       const localService = await localStatus();
       await enhancementLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BG2b-enhancement-${label}`; }, localService);
+      await syntheticNote('BG2b-enhancement-ledger');
       colourFinalizer.assertRunning();
       stage = 'AD1-admin-limits';
       const { adminLimitsProbes } = await import('../tests/integration/admin-limits.sessions.mjs');
@@ -1413,6 +1425,7 @@ async function main() {
       await availabilityCatalogProbe(privilegedLocalSql, (label) => { stage = `AVAIL1-${label}`; });
       stage = 'AVAIL1-behaviour';
       await availabilityBehaviourProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `AVAIL1-${label}`; });
+      await syntheticNote('AVAIL1-behaviour');
       colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
     console.log('PASS: AVAIL1 persistent availability; the availability migration was applied alone to a populated checkpoint that stayed identical apart from the nine replaced bodies (owner, ACL, security configuration, every other body, manifests, triggers, rows and object bytes), those bodies equal the migration source and none but the legacy Google term reads a review date, and after the recorded review dates the real photo analysis lifecycle, analyzed Save, image replacement, Stylist and clean-up claim and finish succeed while consent, activation, configuration, allowance, provider availability and request lifetime still refuse and no hourly limit applies; try-on is not exercised here; no provider calls');
@@ -1439,6 +1452,7 @@ async function main() {
     try {
       twelveFinalizer.assertRunning();
       await colourProbes(twelveEnv, privilegedLocalSql, 'colours');
+      await syntheticNote('COL1-B-twelve-probes');
       await history('colours');
       probeStep('server-running');
       twelveFinalizer.assertRunning();

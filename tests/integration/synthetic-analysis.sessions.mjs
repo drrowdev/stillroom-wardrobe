@@ -24,13 +24,33 @@ const FIELDS = ['category', 'subcategory', 'colours', 'pattern', 'sleeve_length'
 
 export const SYNTHETIC_LABEL = 'SYNTHETIC historical fixture';
 
-// Expiry as the historical bodies read it: the manifest row against the database clock.
-export async function manifestExpired(sql, manifestId) {
-  const out = (await sql(`select coalesce((select review_expires_at<=clock_timestamp()
-    from private.ai_execution_manifests where id=${literal(manifestId)}),false);`)).trim();
-  requireEvidence(out === 't' || out === 'f');
-  return out === 't';
+// Every synthetic substitution is recorded here and printed per stage by syntheticNote, so CI output separates emulated
+// claim/finish/Save/replacement evidence from the genuine uploads, finalizers, history and comparisons.
+const substitutions = { counts: new Map(), manifests: new Map(), refusals: 0 };
+function recordSynthetic(kind, manifest, expiresOn) {
+  substitutions.counts.set(kind, (substitutions.counts.get(kind) ?? 0) + 1);
+  substitutions.manifests.set(manifest, expiresOn);
 }
+export function syntheticNote(stage) {
+  const kinds = [...substitutions.counts].map(([kind, count]) => `${kind} x${count}`).join(', ');
+  const manifests = [...substitutions.manifests].map(([id, on]) => `${id} expired ${on}`).join('; ');
+  const line = substitutions.counts.size === 0
+    ? `REAL: ${stage}: no synthetic analysis evidence was used`
+    : `${SYNTHETIC_LABEL.toUpperCase()}: ${stage}: ${kinds} (manifest review date passed: ${manifests}; real refusal asserted ${substitutions.refusals} times before use); uploads, finalizer, history and preservation comparison are genuine`;
+  substitutions.counts.clear(); substitutions.manifests.clear(); substitutions.refusals = 0;
+  console.log(line);
+}
+
+// Expiry as the historical bodies read it: the manifest row against the database clock.
+async function manifestExpiry(sql, manifestId) {
+  const out = (await sql(`select coalesce((select (review_expires_at<=clock_timestamp())::text||'|'
+    ||to_char(review_expires_at at time zone 'UTC','YYYY-MM-DD') from private.ai_execution_manifests
+    where id=${literal(manifestId)}),'false|');`)).trim();
+  const [flag, on] = out.split('|');
+  requireEvidence((flag === 'true' || flag === 'false') && on !== undefined);
+  return { expired: flag === 'true', on };
+}
+export async function manifestExpired(sql, manifestId) { return (await manifestExpiry(sql, manifestId)).expired; }
 
 const guard = (manifest) => `select * into m from private.ai_execution_manifests where id=${literal(manifest)}
     and id in ('azure-eu-terra-devtest-v1','azure-eu-terra-devtest-v2');
@@ -275,34 +295,39 @@ const run = async (sql, body) => sql(`begin; set local lock_timeout='2s'; set lo
 export async function analysisClaim(sql, owner, requestId, manifest, shape = {}) {
   const { draftId = requestId, generation = 1, hash: imageHash = analysisHash, bytes = jpegHeaderFixture().length,
     width = 120, height = 80 } = shape;
-  const before = await manifestExpired(sql, manifest);
+  const expiry = await manifestExpiry(sql, manifest), before = expiry.expired;
   const real = JSON.parse(await sql(`select public.ai_claim_analysis(${literal(owner.uid)},${literal(requestId)},${literal(draftId)},
     ${generation},${literal(imageHash)},${bytes},${width},${height},${literal(manifest)});`));
   requireEvidence(before === await manifestExpired(sql, manifest));
   if (!before) return real;
   equal(real, { code: 'UNCONFIGURED', claimed: false });
   await run(sql, syntheticClaimSql({ owner: owner.uid, requestId, draftId, generation, hash: imageHash, bytes, width, height, manifest }));
-  return { code: 'OK', claimed: true, manifestId: manifest, synthetic: true };
+  recordSynthetic('analysis claim', manifest, expiry.on);
+  return { code: 'OK', claimed: true, manifestId: manifest, synthetic: true, label: SYNTHETIC_LABEL };
 }
 
 // A successful finish. After the manifest's date the real function would close the request as UNAVAILABLE, so the labelled
 // synthetic success sequence is written instead; the real refusal is asserted by expiredAnalysisRefusalProbe.
 export async function analysisFinishSuccess(sql, owner, requestId, manifest, facts = analysisFacts, usage = analysisUsage) {
-  if (!(await manifestExpired(sql, manifest))) {
+  const expiry = await manifestExpiry(sql, manifest);
+  if (!expiry.expired) {
     return JSON.parse(await sql(`select public.ai_finish_analysis(${literal(owner.uid)},${literal(requestId)},${literal(manifest)},
       ${json(facts)},${json(usage)},'SUCCESS');`));
   }
   await run(sql, syntheticFinishSql({ owner: owner.uid, requestId, manifest, facts, usage }));
-  return { code: 'OK', stored: true, synthetic: true };
+  recordSynthetic('analysis finish', manifest, expiry.on);
+  return { code: 'OK', stored: true, synthetic: true, label: SYNTHETIC_LABEL };
 }
 
 // A reservation that must succeed: the real public RPC before the date, the labelled synthetic success sequence after it.
 // The row is checked by the caller exactly as a real row is.
 export async function analyzedSaveRow(h, sql, owner, value, manifest) {
-  if (!(await manifestExpired(sql, manifest))) return h.reserve(value);
+  const expiry = await manifestExpiry(sql, manifest);
+  if (!expiry.expired) return h.reserve(value);
   const out = await run(sql, syntheticSaveSql({ owner: owner.uid, item: value.p_item, image: value.p_image, claim: value.p_claim, manifest }));
   const line = out.split('\n').find((entry) => entry.startsWith('ROW:'));
   requireEvidence(line !== undefined);
+  recordSynthetic('analyzed Save', manifest, expiry.on);
   return h.accept(value, JSON.parse(line.slice(4)));
 }
 
@@ -311,6 +336,7 @@ export async function analyzedSaveRow(h, sql, owner, value, manifest) {
 // Nothing here reaches the preserved snapshot.
 export async function expiredAnalysisRefusalProbe(sql, owner, manifest, value) {
   if (!(await manifestExpired(sql, manifest))) return false;
+  substitutions.refusals += 1;
   const shape = (requestId) => ({ owner: owner.uid, requestId, draftId: requestId, generation: 1,
     hash: value.p_claim.imageSha256, bytes: value.p_image.main_bytes, width: value.p_image.width, height: value.p_image.height, manifest });
   const finishId = randomUUID(), saveId = randomUUID();
@@ -340,13 +366,43 @@ rollback;`);
   return true;
 }
 
+// The real replacement refusal after the manifest's date, on a disposable request inside a transaction that is rolled back:
+// the real public.reserve_image_change must answer analysis_unavailable, close the request as UNAVAILABLE and write no
+// attempt. Any other reply fails. Run before every synthetic replacement write.
+export async function expiredReplacementRefusalProbe(sql, owner, manifest, intent) {
+  const id = randomUUID(), probe = { ...intent, claim: { ...intent.claim, requestId: id, draftId: id } };
+  const claim = { owner: owner.uid, requestId: id, draftId: id, generation: 1, hash: intent.claim.imageSha256,
+    bytes: intent.image.main_bytes, width: intent.image.width, height: intent.image.height, manifest };
+  const out = await sql(`begin; set local lock_timeout='2s'; set local statement_timeout='30s';
+${syntheticClaimSql(claim)}
+${syntheticFinishSql({ owner: owner.uid, requestId: id, manifest, facts: analysisFacts, usage: analysisUsage })}
+select set_config('request.jwt.claim.sub',${literal(owner.uid)},true);
+select set_config('request.jwt.claims',${literal(JSON.stringify({ sub: owner.uid, role: 'authenticated' }))},true);
+select 'REPLACEMENT:'||public.reserve_image_change(${json(probe)})::text;
+select 'REPLACEMENT_CLOSED:'||coalesce(closed_reason,'-') from private.ai_usage where owner_id=${literal(owner.uid)} and request_id=${literal(id)};
+select 'REPLACEMENT_REQUESTS:'||count(*) from private.ai_requests where owner_id=${literal(owner.uid)} and request_id=${literal(id)};
+select 'REPLACEMENT_ATTEMPTS:'||count(*) from private.image_change_attempts where owner_id=${literal(owner.uid)}
+  and request_id=${literal(intent.requestId)};
+rollback;`);
+  const lines = Object.fromEntries(out.split('\n').filter((line) => /^[A-Z_]+:/.test(line))
+    .map((line) => [line.slice(0, line.indexOf(':')), line.slice(line.indexOf(':') + 1)]));
+  equal(JSON.parse(lines.REPLACEMENT), { state: 'analysis_unavailable', requestId: intent.requestId, itemId: intent.itemId,
+    imageId: intent.imageId });
+  equal([lines.REPLACEMENT_CLOSED, lines.REPLACEMENT_REQUESTS, lines.REPLACEMENT_ATTEMPTS], ['UNAVAILABLE', '0', '0']);
+  equal((await sql(`select count(*) from private.ai_usage where owner_id=${literal(owner.uid)} and request_id=${literal(id)};`)).trim(), '0');
+  substitutions.refusals += 1;
+}
+
 // An analyzed replacement reservation that must succeed: the real RPC before the date, the labelled synthetic success
 // sequence after it. The receipt is checked by the caller exactly as a real receipt is (ich.accept).
 export async function analyzedReplacementReceipt(ich, sql, owner, value, manifest) {
-  if (!(await manifestExpired(sql, manifest))) return ich.reserve(value);
+  const expiry = await manifestExpiry(sql, manifest);
+  if (!expiry.expired) return ich.reserve(value);
+  await expiredReplacementRefusalProbe(sql, owner, manifest, value);
   const out = await run(sql, syntheticImageChangeSql({ owner: owner.uid, intent: value, manifest }));
   const line = out.split('\n').find((entry) => entry.startsWith('RECEIPT:'));
   requireEvidence(line !== undefined);
+  recordSynthetic('analyzed replacement reservation', manifest, expiry.on);
   return ich.accept(value, JSON.parse(line.slice(8)));
 }
 
@@ -359,5 +415,6 @@ export async function tagClaimStatement(sql, ownerUid, requestId, manifest) {
   if (!(await manifestExpired(sql, manifest))) {
     return `public.ai_claim_analysis(${head},${jpegHeaderFixture().length},120,80,${literal(manifest)})`;
   }
+  recordSynthetic('tagging claim entry via real ai_begin_owner', manifest, (await manifestExpiry(sql, manifest)).on);
   return `(select jsonb_build_object('code',b->>'code','claimed',b->>'code'='OK') from (select private.ai_begin_owner(${head}) b) s)`;
 }
