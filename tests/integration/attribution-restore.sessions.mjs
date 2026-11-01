@@ -5,15 +5,14 @@
 import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { requireEvidence } from './preservation.sessions.mjs';
-import { equal, analysisId, analysisHash, analysisFacts, analysisUsage } from './ai-analysis.sessions.mjs';
+import { equal, analysisId, analysisHash, analysisFacts } from './ai-analysis.sessions.mjs';
 import { imageChangeHarness } from './image-replacement.sessions.mjs';
 import { denied } from './item-save.sessions.mjs';
 import { COLOUR_MANIFEST } from './azure-preservation.sessions.mjs';
 import { analyzedHarness, analyzedIntent } from './analyzed-save.sessions.mjs';
-import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
+import { analysisClaim, analysisFinishSuccess, analyzedReplacementReceipt, analyzedSaveRow } from './synthetic-analysis.sessions.mjs';
 
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
-const json = (value) => `${literal(JSON.stringify(value))}::jsonb`;
 const delay = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 const omit = (entry, ...keys) => Object.fromEntries(Object.entries(entry).filter(([key]) => !keys.includes(key)));
 const withoutOrigin = (entry) => omit(entry, 'origin');
@@ -132,16 +131,14 @@ async function completeSettled(ich, value) {
 // A genuine analyzed photo replacement, reserved and uploaded; the caller completes it.
 async function analyzedReplacement(ich, sql, owner, n, itemId, imageId) {
   const id = analysisId(owner.label, n);
-  requireEvidence(JSON.parse(await sql(`select public.ai_claim_analysis(${literal(owner.uid)},${literal(id)},${literal(id)},1,
-    ${literal(analysisHash)},${jpegHeaderFixture().length},120,80,${literal(COLOUR_MANIFEST.v2)});`)).claimed === true);
+  requireEvidence((await analysisClaim(sql, owner, id, COLOUR_MANIFEST.v2)).claimed === true);
   const facts = { ...analysisFacts, fields: { ...analysisFacts.fields, pattern: 'solid' } };
-  requireEvidence(JSON.parse(await sql(`select public.ai_finish_analysis(${literal(owner.uid)},${literal(id)},
-    ${literal(COLOUR_MANIFEST.v2)},${json(facts)},${json(analysisUsage)},'SUCCESS');`)).stored === true);
+  requireEvidence((await analysisFinishSuccess(sql, owner, id, COLOUR_MANIFEST.v2, facts)).stored === true);
   const value = ich.make((await ich.read('items', itemId))[0], (await ich.read('item_images', imageId))[0]);
   value.item.pattern = 'solid'; value.item.field_provenance.pattern = { kind: 'ai_observed', revision: 1 };
   value.claim = { requestId: id, draftId: id, generation: 1, imageSha256: analysisHash,
     fields: { pattern: { kind: 'ai_observed', value: 'solid' } } };
-  await ich.reserve(value);
+  await analyzedReplacementReceipt(ich, sql, owner, value, COLOUR_MANIFEST.v2);
   await ich.upload(value);
   return value;
 }
@@ -149,16 +146,14 @@ async function analyzedReplacement(ich, sql, owner, n, itemId, imageId) {
 // A genuine analyzed Save with fresh item and photo IDs (the fixed B2 save IDs belong to earlier stages).
 async function analyzedSave(client, owner, env, sql, n) {
   const id = analysisId(owner.label, n);
-  requireEvidence(JSON.parse(await sql(`select public.ai_claim_analysis(${literal(owner.uid)},${literal(id)},${literal(id)},1,
-    ${literal(analysisHash)},${jpegHeaderFixture().length},120,80,${literal(COLOUR_MANIFEST.v2)});`)).claimed === true);
+  requireEvidence((await analysisClaim(sql, owner, id, COLOUR_MANIFEST.v2)).claimed === true);
   const facts = { ...analysisFacts, fields: { ...analysisFacts.fields, colours: ['navy'] } };
-  requireEvidence(JSON.parse(await sql(`select public.ai_finish_analysis(${literal(owner.uid)},${literal(id)},
-    ${literal(COLOUR_MANIFEST.v2)},${json(facts)},${json(analysisUsage)},'SUCCESS');`)).stored === true);
+  requireEvidence((await analysisFinishSuccess(sql, owner, id, COLOUR_MANIFEST.v2, facts)).stored === true);
   const h = analyzedHarness(client, owner, env), value = analyzedIntent(owner, 21);
   value.p_item.id = randomUUID(); value.p_image.id = randomUUID(); value.p_item.colours = ['navy'];
   value.p_claim = { ...value.p_claim, requestId: id, draftId: id,
     fields: { ...value.p_claim.fields, colours: { kind: 'ai_observed', value: ['navy'] } } };
-  const row = await h.reserve(value);
+  const row = await analyzedSaveRow(h, sql, owner, value, COLOUR_MANIFEST.v2);
   await h.upload(value);
   await h.finalize(value, row);
   return value;

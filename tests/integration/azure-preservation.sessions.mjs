@@ -7,6 +7,7 @@ import { saveHarness, denied } from './item-save.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
 import { imageChangeHarness } from './image-replacement.sessions.mjs';
 import { probeStep, resetProbe } from '../../scripts/backend/local.mjs';
+import { analysisClaim, analysisFinishSuccess, analyzedSaveRow, expiredAnalysisRefusalProbe, manifestExpired } from './synthetic-analysis.sessions.mjs';
 
 const literal = (value) => "'" + String(value).replaceAll("'", "''") + "'";
 const json = (value) => `${literal(JSON.stringify(value))}::jsonb`;
@@ -163,15 +164,15 @@ export async function captureImageChangePreservation(snapshot, sql) {
     equal(await client.rpc(owner, 'ai_set_consent', { p_enabled: true, p_notice_revision: 2, p_expected_version: profile.version }),
       { code: 'OK', profileVersion: String(profile.version + 1) });
     const h = analyzedHarness(client, owner, env);
+    // After the manifest's date the real refusals are asserted on rolled-back rows, and the populated fixture below is SYNTHETIC.
+    await expiredAnalysisRefusalProbe(sql, owner, 'azure-eu-terra-devtest-v1', analyzedIntent(owner, 23));
     for (const n of [23, 24]) {
       const id = analysisId(owner.label, n);
-      const claim = JSON.parse(await sql(`select public.ai_claim_analysis(${literal(owner.uid)},${literal(id)},${literal(id)},1,
-        ${literal(analysisHash)},${jpegHeaderFixture().length},120,80,'azure-eu-terra-devtest-v1');`));
+      const claim = await analysisClaim(sql, owner, id, 'azure-eu-terra-devtest-v1');
       requireEvidence(claim.claimed === true);
-      const finish = JSON.parse(await sql(`select public.ai_finish_analysis(${literal(owner.uid)},${literal(id)},'azure-eu-terra-devtest-v1',
-        ${json(analysisFacts)},${json(analysisUsage)},'SUCCESS');`));
+      const finish = await analysisFinishSuccess(sql, owner, id, 'azure-eu-terra-devtest-v1');
       requireEvidence(finish.stored === true);
-      const value = analyzedIntent(owner, n), row = await h.reserve(value);
+      const value = analyzedIntent(owner, n), row = await analyzedSaveRow(h, sql, owner, value, 'azure-eu-terra-devtest-v1');
       await h.upload(value);
       if (n === 23) await h.finalize(value, row);
     }
@@ -223,6 +224,16 @@ export async function verifyImageChangePreservation(snapshot, sql, mark) {
         equal(await client.rpc(owner, 'ai_set_consent', { p_enabled: true, p_notice_revision: 2, p_expected_version: p.version }),
           { code: 'OK', profileVersion: String(p.version + 1) });
         const id = analysisId(owner.label, 25);
+        if (await manifestExpired(sql, 'azure-eu-terra-devtest-v1')) {
+          // Past the manifest's date this historical stage can only refuse. The analyzed replacement and recovery matrix is
+          // not reproduced here with a synthetic claim; the same flow runs for real in image-replacement.sessions.mjs and the
+          // post-migration availability stage.
+          mark('replacement-expired-refusals');
+          equal(JSON.parse(await sql(`select public.ai_claim_analysis(${literal(owner.uid)},${literal(id)},${literal(id)},1,
+            ${literal(analysisHash)},${jpegHeaderFixture().length},120,80,'azure-eu-terra-devtest-v1');`)),
+          { code: 'UNCONFIGURED', claimed: false });
+          await expiredAnalysisRefusalProbe(sql, owner, 'azure-eu-terra-devtest-v1', analyzedIntent(owner, 25));
+        } else {
         requireEvidence(JSON.parse(await sql(`select public.ai_claim_analysis(${literal(owner.uid)},${literal(id)},${literal(id)},1,
           ${literal(analysisHash)},${jpegHeaderFixture().length},120,80,'azure-eu-terra-devtest-v1');`)).claimed === true);
         const facts = { ...analysisFacts, fields: { ...analysisFacts.fields, pattern: 'solid' } };
@@ -278,6 +289,7 @@ export async function verifyImageChangePreservation(snapshot, sql, mark) {
           generation: 1, imageSha256: analysisHash, fields: {} };
         const reusedReplacement = await h.call('reserve_image_change', { p_intent: addConsumed });
         requireEvidence(!reusedReplacement.ok && reusedReplacement.status === 400 && reusedReplacement.data.message === 'Request conflict');
+        }
       }
       // Structural probe only: both actual tables, both public arms, DDL rolled back.
       mark('projection-probe');
@@ -598,21 +610,22 @@ const colourClaim = async (sql, owner, n, manifest) => JSON.parse(await sql(`sel
   ${literal(analysisId(owner.label, n))},${literal(analysisId(owner.label, n))},1,${literal(analysisHash)},${jpegHeaderFixture().length},
   120,80,${literal(manifest)});`));
 
-// One Azure analysis plus analyzed Save; the item carries the stated colours from the stored result.
+// One Azure analysis plus analyzed Save; the item carries the stated colours from the stored result. Past the manifest's
+// date this is the labelled SYNTHETIC success sequence (see synthetic-analysis.sessions.mjs); the upload, finalizer and
+// history are real.
 async function colourAnalyzedSave(client, owner, env, sql, n, manifest, colours, mark = () => {}) {
   mark('colour-analysis-claim');
-  const claim = await colourClaim(sql, owner, n, manifest);
+  const claim = await analysisClaim(sql, owner, analysisId(owner.label, n), manifest);
   requireEvidence(claim.claimed === true && claim.manifestId === manifest);
   mark('colour-analysis-finish');
   const facts = { ...analysisFacts, fields: { ...analysisFacts.fields, colours } };
-  const finish = JSON.parse(await sql(`select public.ai_finish_analysis(${literal(owner.uid)},${literal(analysisId(owner.label, n))},
-    ${literal(manifest)},${json(facts)},${json(analysisUsage)},'SUCCESS');`));
+  const finish = await analysisFinishSuccess(sql, owner, analysisId(owner.label, n), manifest, facts);
   requireEvidence(finish.stored === true);
   const h = analyzedHarness(client, owner, env), value = analyzedIntent(owner, n);
   value.p_item.colours = colours;
   value.p_claim.fields.colours = { kind: 'ai_observed', value: colours };
   mark('colour-analyzed-reserve');
-  const row = await h.reserve(value);
+  const row = await analyzedSaveRow(h, sql, owner, value, manifest);
   mark('colour-analyzed-upload');
   await h.upload(value);
   mark('colour-analyzed-finalize');
@@ -652,6 +665,7 @@ export async function captureColourPreservation(env, sql) {
   for (const owner of owners) {
     await colourControls(sql, owner, COLOUR_MANIFEST.v1, 1);
     await colourConsent(client, owner);
+    await expiredAnalysisRefusalProbe(sql, owner, COLOUR_MANIFEST.v1, analyzedIntent(owner, 26));
     await colourAnalyzedSave(client, owner, env, sql, 26, COLOUR_MANIFEST.v1, ['green']);
     for (const colours of [['navy', 'purple'], ['unknown'], []]) await colourManualSave(client, owner, colours);
     const preferences = (await client.rows(owner, 'style_preferences'))[0];
@@ -725,17 +739,20 @@ export async function colourProbes(env, sql, stage) {
     await colourControls(sql, owner, COLOUR_MANIFEST.v1, 1);
     probeStep('colour-consent');
     await colourConsent(client, owner);
+    await expiredAnalysisRefusalProbe(sql, owner, COLOUR_MANIFEST.v1, analyzedIntent(owner, stage === 'target' ? 27 : 29));
     const legacy = await colourAnalyzedSave(client, owner, env, sql, stage === 'target' ? 27 : 29, COLOUR_MANIFEST.v1, ['green'], probeStep);
     equal(legacy.history.prompt_version, 1);
     probeStep('colour-v2-claim');
     const v2 = await colourClaim(sql, owner, stage === 'target' ? 28 : 30, COLOUR_MANIFEST.v2);
-    equal(v2, { code: stage === 'target' ? 'CONFIG_CHANGED' : 'UNCONFIGURED', claimed: false });
+    // The historical claim checks the manifest date before the configuration, so a manifest past its date reads UNCONFIGURED.
+    const refusal = async (manifest, normal) => ({ code: (await manifestExpired(sql, manifest)) ? 'UNCONFIGURED' : normal, claimed: false });
+    equal(v2, stage === 'target' ? await refusal(COLOUR_MANIFEST.v2, 'CONFIG_CHANGED') : { code: 'UNCONFIGURED', claimed: false });
     if (stage === 'target') {
       probeStep('colour-target');
       await colourControls(sql, owner, COLOUR_MANIFEST.v2, 2);
-      equal(await colourClaim(sql, owner, 31, COLOUR_MANIFEST.v1), { code: 'CONFIG_CHANGED', claimed: false });
+      equal(await colourClaim(sql, owner, 31, COLOUR_MANIFEST.v1), await refusal(COLOUR_MANIFEST.v1, 'CONFIG_CHANGED'));
       await sql(`update private.ai_controls set prompt_version=1 where owner_id=${literal(owner.uid)};`);
-      equal(await colourClaim(sql, owner, 31, COLOUR_MANIFEST.v2), { code: 'CONFIG_CHANGED', claimed: false });
+      equal(await colourClaim(sql, owner, 31, COLOUR_MANIFEST.v2), await refusal(COLOUR_MANIFEST.v2, 'CONFIG_CHANGED'));
       await sql(`update private.ai_controls set prompt_version=2 where owner_id=${literal(owner.uid)};`);
       const current = await colourAnalyzedSave(client, owner, env, sql, 31, COLOUR_MANIFEST.v2, ['burgundy', 'gold']);
       probeStep('colour-target');

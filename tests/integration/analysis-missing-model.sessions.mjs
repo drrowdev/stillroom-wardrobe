@@ -7,9 +7,9 @@
 // the signed-in owner through a role switch with the negotiated header. No provider calls.
 import { randomUUID } from 'node:crypto';
 import { requireEvidence } from './preservation.sessions.mjs';
-import { equal, analysisFacts, analysisUsage, analysisHash, analysisStatus } from './ai-analysis.sessions.mjs';
+import { equal, analysisFacts, analysisUsage, analysisStatus } from './ai-analysis.sessions.mjs';
 import { COLOUR_MANIFEST } from './azure-preservation.sessions.mjs';
-import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
+import { analysisClaim, analysisFinishSuccess, manifestExpired } from './synthetic-analysis.sessions.mjs';
 
 const MODEL_ID = 'gpt-5.6-terra-2026-07-09';
 const ESTIMATE = 1034;
@@ -23,8 +23,8 @@ function tools(snapshot, sql) {
   const { client, owners: [a, b] } = snapshot;
   const one = async (text) => JSON.parse(await sql(text));
   const ids = `${literal(a.uid)},${literal(b.uid)}`;
-  const claim = (owner, id, manifest = COLOUR_MANIFEST.v2) => one(`select public.ai_claim_analysis(${literal(owner.uid)},${literal(id)},
-    ${literal(id)},1,${literal(analysisHash)},${jpegHeaderFixture().length},120,80,${literal(manifest)});`);
+  // Past a manifest's review date the claim is the labelled SYNTHETIC success sequence after the real historical refusal.
+  const claim = (owner, id, manifest = COLOUR_MANIFEST.v2) => analysisClaim(sql, owner, id, manifest);
   const finish = (owner, id, usage, code = 'SUCCESS', manifest = COLOUR_MANIFEST.v2, facts = analysisFacts) =>
     one(`select public.ai_finish_analysis(${literal(owner.uid)},${literal(id)},${literal(manifest)},${json(facts)},${json(usage)},${literal(code)});`);
   const ledger = (owner, id) => one(`select coalesce((select jsonb_build_object('usage',to_jsonb(u),'evidence',to_jsonb(e))
@@ -76,7 +76,7 @@ export async function analysisModelSeed(snapshot, sql) {
   const inflight = randomUUID(), ready = randomUUID(), usageOnly = randomUUID();
   requireEvidence((await t.claim(a, inflight)).claimed === true);
   requireEvidence((await t.claim(a, ready)).claimed === true);
-  requireEvidence((await t.finish(a, ready, analysisUsage)).stored === true);
+  requireEvidence((await analysisFinishSuccess(sql, a, ready, COLOUR_MANIFEST.v2)).stored === true);
   requireEvidence((await t.claim(b, usageOnly)).claimed === true);
   requireEvidence((await t.finish(b, usageOnly, analysisUsage, 'USAGE_ONLY')).code === 'TERMINAL');
   const before = await t.digest();
@@ -90,7 +90,10 @@ export async function analysisModelVerify(seed, sql, mark = () => {}) {
   mark('compare');
   equal(await t.digest(), seed.before);
   mark('continuation');
-  equal((await analysisStatus(client, a, seed.ready)).status, 'ready');
+  const readyStatus = await analysisStatus(client, a, seed.ready);
+  // A request on a manifest past its review date reads as a changed configuration under the historical functions.
+  if (await manifestExpired(sql, COLOUR_MANIFEST.v2)) equal(readyStatus, { code: 'CONFIG_CHANGED' });
+  else equal(readyStatus.status, 'ready');
   equal((await t.ledger(b, seed.usageOnly)).usage.charge_state, 'estimated');
 
   mark('legacy-envelope');

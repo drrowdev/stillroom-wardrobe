@@ -1797,8 +1797,9 @@ describe('COL1 strict preservation pass and twelve-only probes (source order, no
       "await history('idea-prior'); await verifyCiStorageGuard();", 'await sharedBudgetProbes(', 'await ideaUpgradeSeed(',
       "await migrateToStage(run, 'idea-prior', 'photo-prior')", "await history('photo-prior'); await verifyCiStorageGuard();",
       'await ideaUpgradeVerify(', 'await tryonIdeaProbes(', 'await photoUpgradeSeed(',       "await migrateToStage(run, 'photo-prior', 'avail-prior')", "await history('avail-prior'); await verifyCiStorageGuard();",
-            'await photoUpgradeVerify(', 'await tryonPhotoProbes(', "await migrateToStage(run, 'avail-prior', 'target')", "await history('target'); await verifyCiStorageGuard();",
-            'await availabilityCatalogProbe(', 'await colourFinalizer.stop()',
+            'await photoUpgradeVerify(', 'await tryonPhotoProbes(', 'await availabilityCheckpoint(', "await migrateToStage(run, 'avail-prior', 'target')",
+            "await history('target'); await verifyCiStorageGuard();", 'await availabilityCompare(', 'await availabilityCatalogProbe(',
+            'await availabilityBehaviourProbes(', 'await colourFinalizer.stop()',
       "'--version', COLOUR_VERSION", "await history('colours'); await verifyCiStorageGuard();", 'provision-test-users.mjs',
       "await colourProbes(twelveEnv, privilegedLocalSql, 'colours')", 'await twelveFinalizer.stop()']) {
       const next = col1.indexOf(step, offset); expect(next, step).toBeGreaterThanOrEqual(offset); offset = next + step.length;

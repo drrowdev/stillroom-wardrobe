@@ -1400,16 +1400,22 @@ async function main() {
       await tryonPhotoProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `PHOTO1-${label}`; });
       colourFinalizer.assertRunning();
       // AVAIL1: every frozen historical check above ran at its exact inventory; the availability migration is applied last.
+      stage = 'AVAIL1-checkpoint';
+      const { availabilityCheckpoint, availabilityCompare, availabilityCatalogProbe, availabilityBehaviourProbes } = await import('../tests/integration/persistent-availability.sessions.mjs');
+      const availBefore = await availabilityCheckpoint(privilegedLocalSql);
       stage = 'AVAIL1-prior-to-target';
       await migrateToStage(run, 'avail-prior', 'target');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
       await history('target'); await verifyCiStorageGuard();
+      stage = 'AVAIL1-compare';
+      await availabilityCompare(availBefore, privilegedLocalSql);
       stage = 'AVAIL1-catalog';
-      const { availabilityCatalogProbe } = await import('../tests/integration/persistent-availability.sessions.mjs');
       await availabilityCatalogProbe(privilegedLocalSql);
+      stage = 'AVAIL1-behaviour';
+      await availabilityBehaviourProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `AVAIL1-${label}`; });
       colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
-    console.log('PASS: AVAIL1 persistent availability; the availability migration was applied after the frozen checks, the nine replaced function bodies equal the migration source and none but the legacy Google term reads a review date; no provider calls');
+    console.log('PASS: AVAIL1 persistent availability; the availability migration was applied alone to a populated checkpoint that stayed identical apart from the nine replaced bodies (owner, ACL, security configuration, every other body, manifests, triggers, rows and object bytes), those bodies equal the migration source and none but the legacy Google term reads a review date, and after the recorded review dates the real photo analysis lifecycle, analyzed Save, image replacement, Stylist and clean-up claim and finish succeed while consent, activation, configuration, allowance, provider availability and request lifetime still refuse and no hourly limit applies; try-on is not exercised here; no provider calls');
     console.log('PASS: TRYON-PHOTO1 saved reference photo; the photo migration was applied after the frozen checks, the configured notice moved to revision 2 with consent left at 1, a revision-1 consent cannot save a photo, saves are admitted only for the app\'s own JPEG shape, each owner has one private photo that only they can read, replace or remove, withdrawal and any notice change remove it, removal needs no activation, a save racing a withdrawal never survives it, and the platform-restore step removes every photo; no provider calls');
     console.log('PASS: TRYON-IDEA1 unsaved try-on; the idea migration was applied after the frozen checks, an idea chain is claimed from the owner\'s own items without an outfit, keeps its identity, is isolated per owner, and its results are visible and deletable without an outfit while outfit try-on is unchanged; no provider calls');
     console.log('PASS: FILT1 upgrade; try-on and enhancement rows settled by the old finishes keep their digest, origin, anomaly and amount after the provider_refusal migration, the new columns are null, replays with the refusal arguments omitted or null match and write nothing; seeded rows removed before the compare; no provider calls');

@@ -31,10 +31,8 @@ export function analyzedIntent(owner, n) {
 }
 export function analyzedHarness(client, owner, env) {
   const h = saveHarness(client, owner);
-  const reserve = async (value) => {
-    const result = await h.call('reserve_analyzed_item_save', value);
-    requireEvidence(result.ok && result.status === 200 && Array.isArray(result.data) && result.data.length === 1);
-    const row = result.data[0];
+  // Checks a reservation row the same way for a real RPC result and for a labelled synthetic fixture row.
+  const accept = async (value, row) => {
     requireEvidence(/^[0-9a-f]{64}$/.test(row.fingerprint) && ['reserved', 'completed'].includes(row.state));
     for (const [key, expected] of Object.entries(value.p_item)) eq(row.item[key], expected);
     for (const [key, expected] of Object.entries(value.p_image)) eq(row.image[key], expected);
@@ -44,6 +42,11 @@ export function analyzedHarness(client, owner, env) {
     eq(await h.read('items', value.p_item.id), [row.item]);
     eq(await h.read('item_images', value.p_image.id), [row.image]);
     return row;
+  };
+  const reserve = async (value) => {
+    const result = await h.call('reserve_analyzed_item_save', value);
+    requireEvidence(result.ok && result.status === 200 && Array.isArray(result.data) && result.data.length === 1);
+    return accept(value, result.data[0]);
   };
   const upload = async (value, data = jpegHeaderFixture()) => {
     for (const path of h.paths(value)) {
@@ -72,7 +75,7 @@ export function analyzedHarness(client, owner, env) {
     const result = await h.call('analyzed_item_save_preflight', h.finalizeArgs(value, row));
     requireEvidence(result.ok); return result.data;
   };
-  return { ...h, reserve, upload, endpoint, finalize, preflight };
+  return { ...h, reserve, accept, upload, endpoint, finalize, preflight };
 }
 
 export async function analyzedBaseline(env) {

@@ -6,12 +6,12 @@
 // controls are opened only inside this probe and restored in finally. No provider calls.
 import { createHash, randomUUID } from 'node:crypto';
 import { requireEvidence } from './preservation.sessions.mjs';
-import { equal, analysisHash } from './ai-analysis.sessions.mjs';
+import { equal } from './ai-analysis.sessions.mjs';
 import { intent, saveHarness, denied, bytes } from './item-save.sessions.mjs';
 import { imageChangeIntent } from './image-replacement.sessions.mjs';
 import { COLOUR_MANIFEST } from './azure-preservation.sessions.mjs';
 import { refusalRows, serviceRpcOf, awaitHttpReadiness, legacyDigestHolds } from './tryon.sessions.mjs';
-import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
+import { tagClaimStatement } from './synthetic-analysis.sessions.mjs';
 
 // BG2c-1: new claims admit only the clean-up manifest under notice revision 2; enhance-v1 rows are legacy work.
 const MANIFEST = 'azure-global-image25-sunburst-cleanup-v1';
@@ -417,8 +417,7 @@ export async function enhancementLedgerProbes(snapshot, sql, mark, service) {
     const tagId = randomUUID();
     const tagRoom = total + BigInt(TAG_RESERVATION) - 1n;
     await limits(tagRoom, enhanceUsed + BigInt(RESERVED));
-    equal((await one(`select public.ai_claim_analysis(${literal(a.uid)},${literal(tagId)},${literal(tagId)},1,
-      ${literal(analysisHash)},${jpegHeaderFixture().length},120,80,${literal(COLOUR_MANIFEST.v2)});`)).code, 'ALLOWANCE');
+    equal((await one(`select ${await tagClaimStatement(sql, a.uid, tagId, COLOUR_MANIFEST.v2)};`)).code, 'ALLOWANCE');
     await limits(total + BigInt(STYLIST_RESERVATION) - 1n, total + BigInt(STYLIST_RESERVATION) - 1n);
     equal((await one(`select public.stylist_claim(${literal(a.uid)},${literal(randomUUID())},${literal(STYLIST)});`)).code, 'ALLOWANCE');
     requireEvidence(await rows() === count);
