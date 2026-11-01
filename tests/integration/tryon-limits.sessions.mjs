@@ -10,10 +10,18 @@
 //   tryonLimitsProbes: the new contract at the full inventory.
 import { createHash, randomUUID } from 'node:crypto';
 import { requireEvidence } from './preservation.sessions.mjs';
-import { equal } from './ai-analysis.sessions.mjs';
+import { isDeepStrictEqual } from 'node:util';
 import { intent, saveHarness } from './item-save.sessions.mjs';
 import { flatJpeg } from '../fixtures/restore-jpeg-fixtures.ts';
 
+// The harness prints only the stage on failure; this prints the failing line with expected and actual (fictional data only, bounded).
+function equal(actual, expected, label = '') {
+  if (isDeepStrictEqual(actual, expected)) return;
+  const at = (new Error().stack ?? '').split('\n')[2]?.trim().replace(/^at /, '').split(/[\\\\/]/).pop() ?? '';
+  const text = (value) => JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? String(v) : v))?.slice(0, 600);
+  console.log(`LIMITS1-MISMATCH ${label} (${at}) expected ${text(expected)} actual ${text(actual)}`);
+  requireEvidence(false);
+}
 const V1 = 'azure-global-image25-sunburst-tryon-v1';
 const V2 = 'azure-global-image25-sunburst-tryon-v2';
 const KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';

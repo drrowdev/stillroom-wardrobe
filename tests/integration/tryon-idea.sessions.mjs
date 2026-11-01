@@ -12,7 +12,7 @@ import { requireEvidence } from './preservation.sessions.mjs';
 import { equal } from './ai-analysis.sessions.mjs';
 import { intent, saveHarness } from './item-save.sessions.mjs';
 import { serviceRpcOf } from './tryon.sessions.mjs';
-import { selectTryOnSteps } from '../../src/domain/tryon.ts';
+import { selectTryOnStepsV1 as selectTryOnSteps } from '../fixtures/tryon-select-v1.ts';
 
 const MANIFEST = 'azure-global-image25-sunburst-tryon-v1';
 const KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';
@@ -380,12 +380,16 @@ export async function tryonIdeaProbes(snapshot, sql, mark, service) {
       [shoes, bottom, top], [top2, top], [onePiece], [top, onePiece, coat, shoes], [coat]];
     for (const list of lists) {
       const expected = selectTryOnSteps(list.map((id) => ({ itemId: id, category: category.get(id), lifecycle: 'active', deleted: false,
-        readyImage: true }))).steps;
+        readyImage: true })));
       const parity = fresh(), parityId = randomUUID();
       const claimed = await claim(a, parity, 1, parityId, { items: list });
       if (expected.length === 0) {
         equal(claimed, { code: 'NO_GARMENTS', claimed: false });
         continue;
+      }
+      // Expected and actual go in the failure label, so a mismatch names the list and both selections.
+      if (claimed.code !== 'OK' || claimed.steps !== expected.length) {
+        console.log(`IDEA1-SELECTION-MISMATCH ${JSON.stringify(list.map((id) => category.get(id)))} expected ${JSON.stringify(expected.map((s) => s.slot))} actual ${JSON.stringify([claimed.code, claimed.steps])}`);
       }
       requireEvidence(claimed.code === 'OK' && claimed.steps === expected.length);
       const steps = await one(`select jsonb_agg(jsonb_build_object('slot',x->>'slot','itemId',x->>'itemId') order by n)

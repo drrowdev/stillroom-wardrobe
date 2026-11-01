@@ -7,6 +7,7 @@ import {
   TRYON_PROMPT_VERSION, TRYON_RESERVATION_MICRO, TRYON_SETTINGS, selectTryOnSteps, tryOnCategories, tryOnEstimateMicro, tryOnPrompt,
   tryOnSlots, type TryOnCandidate,
 } from '../../src/domain/tryon';
+import { selectTryOnStepsV1 } from '../fixtures/tryon-select-v1';
 import { TRYON_V1_MANIFEST, TRYON_V1_PROMPTS, TRYON_V1_SETTINGS } from '../fixtures/tryon-v1-frozen';
 import { ENHANCE_PARAMETERS } from '../../src/domain/enhancement';
 import { categories } from '../../src/domain/wardrobe';
@@ -74,6 +75,15 @@ describe('try-on garment chain', () => {
   it('returns no steps for an outfit with nothing to try on', () => {
     expect(selectTryOnSteps([item('a', 'accessory', { readyImage: false })]).steps).toEqual([]);
     expect(selectTryOnSteps([]).steps).toEqual([]);
+  });
+});
+
+describe('frozen v1 selection used by the historical integration stages', () => {
+  it('matches the three-step selection that shipped before TRYON-LIMITS1', () => {
+    const list = [item('x', 'accessory'), item('o', 'outerwear'), item('s', 'footwear'), item('l', 'layer'), item('b', 'bottom'), item('t', 'top')];
+    expect(selectTryOnStepsV1(list).map((step) => step.slot)).toEqual(['top', 'bottom', 'footwear']);
+    expect(selectTryOnStepsV1([item('c', 'outerwear')])).toEqual([]);
+    expect(selectTryOnStepsV1([item('d', 'one_piece'), item('t', 'top'), item('s', 'footwear')]).map((step) => step.slot)).toEqual(['one_piece', 'footwear']);
   });
 });
 
