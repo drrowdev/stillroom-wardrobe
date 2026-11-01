@@ -3,6 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { locales, translate, type Language, type MessageKey } from '../../src/i18n/all';
+import { helsinkiOffsetSeconds } from './helsinki-offset';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { accountMenu, expectIdentity, expectSignedIn, openAccountMenu, settleShell } from './shell-support';
 
@@ -63,7 +64,8 @@ const places = {
 
 // A reply for the city's local date at `now` and the next, 00:00 to 23:00, with daytime values as given.
 type FixtureWeather = { temperature: number; current?: number | null; rain?: number; wind?: number };
-function forecastReply(weather: FixtureWeather, offset = 10800, now = Date.now()) {
+function forecastReply(weather: FixtureWeather, offset: number | null = null, now = Date.now()) {
+  offset ??= helsinkiOffsetSeconds(now);
   const first = new Date(now + offset * 1000).toISOString().slice(0, 10);
   const time: string[] = [], temperature: number[] = [], rain: number[] = [], wind: number[] = [];
   for (let index = 0; index < 48; index++) {
@@ -126,7 +128,7 @@ async function service(page: Page) {
     const url = new URL(route.request().url());
     const latitude = url.searchParams.get('latitude') ?? '';
     if (state.hold.forecast.has(latitude)) { state.held.push({ kind: 'forecast', url, route }); return; }
-    await reply(route, state.status.forecast === 200 ? forecastReply(state.weather.get(latitude) ?? { temperature: 20 }, 10800, state.clock.at ?? Date.now()) : { error: true }, state.status.forecast);
+    await reply(route, state.status.forecast === 200 ? forecastReply(state.weather.get(latitude) ?? { temperature: 20 }, null, state.clock.at ?? Date.now()) : { error: true }, state.status.forecast);
   });
   return {
     ...state,
@@ -786,7 +788,7 @@ test('I16 a failed forecast pauses before Try again, suggestions keep working, a
 });
 
 test('I16 a forecast stops counting after three hours; suggestions drop it and it is asked for again', async ({ page }) => {
-  const at = Date.parse(`${new Date().toISOString().slice(0, 10)}T07:00:00Z`);
+  const at = Date.parse('2026-10-08T07:00:00Z');
   await page.clock.install({ time: at });
   const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => { basics(api); service.clock.at = at; } });
   await expect(bar(page)).toContainText(await lowLine(page, 0));
@@ -810,7 +812,7 @@ test('I16 a forecast stops counting after three hours; suggestions drop it and i
 });
 
 test('I16 a forecast stops counting at the city\'s midnight and the next day\'s is asked for', async ({ page }) => {
-  const at = Date.parse(`${new Date().toISOString().slice(0, 10)}T20:50:00Z`);
+  const at = Date.parse('2026-10-08T20:50:00Z');
   await page.clock.install({ time: at });
   const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => { basics(api); service.clock.at = at; } });
   await expect(bar(page)).toContainText(await lowLine(page, 0));
