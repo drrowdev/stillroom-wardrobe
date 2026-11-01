@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHandler } from '../../supabase/functions/analyze-clothing/handler';
+import { createHandler as createFrozenV2Handler } from '../fixtures/frozen-v2-analyze-handler';
 import { AZURE_MODEL, AZURE_MANIFEST } from '../../supabase/functions/analyze-clothing/azure-openai';
 import { analyzeGoogle, estimatedMicro, googleToken, normalizeUsage, TOKEN_URL } from '../../supabase/functions/analyze-clothing/google-cloud';
 import {
@@ -271,7 +272,7 @@ describe('B1 source runtime and fixed protocol', () => {
   });
   describe('BUDGET2 manifest v3', () => {
     const V3 = 'azure-eu-terra-devtest-v3';
-    const run = async (policyChange: object, claimManifest?: string, succeed = false) => {
+    const run = async (policyChange: object, claimManifest?: string, succeed = false, make: typeof createHandler = createHandler) => {
       const calls: string[] = [], claims: Record<string, unknown>[] = [];
       vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
         calls.push(url.split('/').at(-1)!);
@@ -289,9 +290,28 @@ describe('B1 source runtime and fixed protocol', () => {
           prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 }, completion_tokens_details: { reasoning_tokens: 20 } },
         choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', refusal: null, content: '{}' } }] });
       });
-      const response = await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
+      const response = await make({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
       return { body: await response.json(), calls, claims, provider };
     };
+    it('refuses v3 controls in an older v2-only deployment before any claim or provider call (deployment skew)', async () => {
+      // The frozen pre-change handler stands for an Edge function deployed before the migration's controls switch.
+      const skewed = await run({}, undefined, true, createFrozenV2Handler);
+      expect(skewed.body).toEqual({ code: 'UNCONFIGURED' });
+      expect(skewed.calls).toEqual(['user', 'ai_status']);
+      expect(skewed.claims).toEqual([]);
+      expect(skewed.provider).not.toHaveBeenCalled();
+      for (const change of [{ maxRequestMicro: '112640' }, { maxRequestMicro: '4097351' }]) {
+        const again = await run(change, undefined, true, createFrozenV2Handler);
+        expect([again.body, again.calls, again.claims.length, again.provider.mock.calls.length]).toEqual([{ code: 'UNCONFIGURED' }, ['user', 'ai_status'], 0, 0]);
+      }
+      // The fixture itself is a working v2 Edge function, so the refusal above is the manifest, not a broken copy.
+      const legacy = await run({ executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' }, undefined, true, createFrozenV2Handler);
+      expect(legacy.calls).toEqual(['user', 'ai_status', 'ai_claim_analysis', 'ai_finish_analysis']);
+      expect(legacy.provider).toHaveBeenCalledTimes(1);
+      // v2 controls below the v2 floor (one micro-USD) are also refused by the frozen handler, with no claim.
+      const floor = await run({ executionManifestId: AZURE_MANIFEST }, undefined, true, createFrozenV2Handler);
+      expect([floor.calls, floor.claims.length, floor.provider.mock.calls.length]).toEqual([['user', 'ai_status'], 0, 0]);
+    });
     it('dispatches v3 at the one-micro hold, claiming and finishing under the controls\' own manifest', async () => {
       const seen = await run({}, undefined, true);
       expect(seen.calls).toEqual(['user', 'ai_status', 'ai_claim_analysis', 'ai_finish_analysis']);
