@@ -284,9 +284,9 @@ export async function availabilityBehaviourProbes(snapshot, sql, mark) {
   expectThat('cleanup-claim', cleanup, cleanup?.claimed === true);
   expectEqual('cleanup-finish', (await one(`select public.enhance_finish(${literal(b.uid)},${literal(cleanupId)},'NOT_DISPATCHED',
     null::jsonb,null::text,null::integer);`)).code, 'NOT_DISPATCHED');
-  const disabled = await one(`select public.enhance_provider_control(${literal(key)},false,null::text);`);
+  const disabled = await one(`select public.enhance_provider_control(${literal(key)},false,'OPERATOR');`);
   expectThat('cleanup-provider-off', disabled, disabled.code === 'OK' && disabled.dispatchEnabled === false);
   const refusedCleanup = await cleanupClaim();
-  expectThat('cleanup-provider-off-claim', refusedCleanup, refusedCleanup.claimed === false);
+  expectEqual('cleanup-provider-off-claim', refusedCleanup, { code: 'UNAVAILABLE', claimed: false });
   await one(`select public.enhance_provider_control(${literal(key)},true,null::text);`);
 }
