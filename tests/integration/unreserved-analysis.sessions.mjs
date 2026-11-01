@@ -129,11 +129,30 @@ const USAGE = Object.freeze({ modelObservation: 'expected_snapshot', controlObse
   total: 1200, reasoning: 50, cacheRead: 0, cacheWrite: 0 });
 const ESTIMATE = Math.ceil((1000 * 440 + 200 * 1980) / 100);
 
-export async function budget2BehaviourProbes(snapshot, sql, markStage) {
+// Runs the operator's switch text and reports its outcome instead of throwing: 'OK' (it committed) or the exact message it
+// raised, so a refusal is told apart from any other failure. The DO block runs unchanged inside an EXECUTE.
+async function attemptSwitch(sql, ownerId, direction) {
+  const text = switchControlsSql(ownerId, direction);
+  const block = text.slice(text.indexOf('do $switch$'), text.lastIndexOf('commit;')).trim();
+  const out = await sql(`create temp table if not exists budget2_attempt(message text);
+    truncate budget2_attempt;
+    do $outer$ begin
+      begin execute $inner$${block}$inner$; insert into budget2_attempt values('OK');
+      exception when others then insert into budget2_attempt values(sqlerrm); end;
+    end $outer$;
+    select message from budget2_attempt;`);
+  return out.trim();
+}
+
+export async function budget2BehaviourProbes(snapshot, rawSql, markStage) {
   // Failure labels are the only detail the rehearsal prints, so each comparison puts the actual and wanted values in it.
   let current = '';
   const mark = (name) => { current = name; markStage(name); };
-  const brief = (value) => JSON.stringify(value ?? null).replace(/[^A-Za-z0-9_.:,-]+/g, '').slice(0, 70);
+  const brief = (value) => JSON.stringify(value ?? null).replace(/[^A-Za-z0-9_.:,()-]+/g, '').slice(0, 110);
+  const sql = async (text) => {
+    try { return await rawSql(text); } catch (error) { markStage(`${current}-sql-failed-${brief(text.replace(/\s+/g, ' ').slice(0, 60))}`); throw error; }
+  };
+  const attempt = (owner, direction) => attemptSwitch(sql, owner.uid, direction);
   const equal = (actual, expected) => {
     const ok = isDeepStrictEqual(actual, expected);
     if (!ok) markStage(`${current}-got-${brief(actual)}-want-${brief(expected)}`);
@@ -336,9 +355,10 @@ export async function budget2BehaviourProbes(snapshot, sql, markStage) {
   const ready = randomUUID();
   need((await claim(a, ready)).claimed === true);
   equal((await finish(a, ready, facts({ colours: ['navy'] }))).stored, true);
-  const blocked = async (text) => { try { await sql(text); return false; } catch { return true; } };
   const before = await controlsRow(a);
-  need(await blocked(switchControlsSql(a.uid, 'rollback')));
+  const refusal = await attempt(a, 'rollback');
+  if (!refusal.startsWith('BLOCKED: ')) markStage(`${current}-rollback-not-blocked-got-${brief(refusal)}`);
+  need(refusal.startsWith('BLOCKED: '));
   equal(await controlsRow(a), before);
   await sql(`update private.ai_controls set execution_manifest_id=${literal(V2)},max_request_micro=${V2_RESERVATION}
     where owner_id=${literal(a.uid)};`);
@@ -348,46 +368,51 @@ export async function budget2BehaviourProbes(snapshot, sql, markStage) {
   mark('guarded-switch');
   // b has no alive request and no held charge: forward switch is refused only by the exact-row guard until it is v2.
   const reconcile = (owner) => sql(`delete from private.ai_usage where owner_id=${literal(owner.uid)} and charge_state in ('reserved','held');`);
+  const expire = (owner, id) => sql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour'
+    where owner_id=${literal(owner.uid)} and request_id=${literal(id)}; select private.ai_expire(${literal(owner.uid)},clock_timestamp(),100);`);
+  const REFUSALS = {
+    row: 'BLOCKED: the controls are not the expected current row',
+    alive: 'BLOCKED: a request of this account is still alive',
+    ready: 'BLOCKED: an unsaved ready analysis is still alive',
+    held: 'BLOCKED: reserved or held charge exists (an expired dispatched request keeps its held charge)',
+  };
   await reconcile(b);
   const bBefore = await controlsRow(b);
-  // Rollback uses the same quiescence guards as the forward switch: an unsaved ready analysis, a live request and an expired
-  // request's held charge each refuse it, and nothing is written or erased to pass the guard.
+  // Rollback uses the same quiescence guards as the forward switch: a live request, an unsaved ready analysis and an expired
+  // request's held charge each refuse it with their own message, and nothing is written or erased to pass the guard.
   const readyB = randomUUID();
   need((await claim(b, readyB)).claimed === true);
-  need(await blocked(switchControlsSql(b.uid, 'rollback')));
+  equal(await attempt(b, 'rollback'), REFUSALS.alive);
   equal(await controlsRow(b), bBefore);
   equal((await finish(b, readyB, facts({ colours: ['navy'] }))).stored, true);
-  need(await blocked(switchControlsSql(b.uid, 'rollback')));
+  equal(await attempt(b, 'rollback'), REFUSALS.ready);
   equal(await controlsRow(b), bBefore);
-  await sql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour'
-    where owner_id=${literal(b.uid)} and request_id=${literal(readyB)}; select private.ai_expire(${literal(b.uid)},clock_timestamp(),100);`);
+  await expire(b, readyB);
   const heldV3 = randomUUID();
   need((await claim(b, heldV3)).claimed === true);
-  await sql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour'
-    where owner_id=${literal(b.uid)} and request_id=${literal(heldV3)}; select private.ai_expire(${literal(b.uid)},clock_timestamp(),100);`);
+  await expire(b, heldV3);
   const heldV3Row = await usageRow(b, heldV3);
   equal(heldV3Row, { reserved_micro: '1', accounted_micro: '1', charge_state: 'held', closed_reason: 'EXPIRED' });
-  need(await blocked(switchControlsSql(b.uid, 'rollback')));
+  equal(await attempt(b, 'rollback'), REFUSALS.held);
   equal(await usageRow(b, heldV3), heldV3Row);
   equal(await controlsRow(b), bBefore);
   await reconcile(b);
-  need(await blocked(switchControlsSql(b.uid, 'forward')));
+  equal(await attempt(b, 'forward'), REFUSALS.row);
   equal(await controlsRow(b), bBefore);
-  await sql(switchControlsSql(b.uid, 'rollback'));
+  equal(await attempt(b, 'rollback'), 'OK');
   equal(await controlsRow(b), { ...bBefore, execution_manifest_id: V2, max_request_micro: V2_RESERVATION });
   // A held charge blocks the forward switch, and nothing is erased to pass the guard.
   const heldId = randomUUID();
   need((await claim(b, heldId, V2)).claimed === true);
-  await sql(`update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour'
-    where owner_id=${literal(b.uid)} and request_id=${literal(heldId)}; select private.ai_expire(${literal(b.uid)},clock_timestamp(),100);`);
+  await expire(b, heldId);
   const heldBefore = await usageRow(b, heldId);
   equal(heldBefore, { reserved_micro: String(V2_RESERVATION), accounted_micro: String(V2_RESERVATION), charge_state: 'held', closed_reason: 'EXPIRED' });
-  need(await blocked(switchControlsSql(b.uid, 'forward')));
+  equal(await attempt(b, 'forward'), REFUSALS.held);
   equal(await usageRow(b, heldId), heldBefore);
   equal((await controlsRow(b)).execution_manifest_id, V2);
   // Reconciling that charge is a separately authorised step; once it is gone the guarded forward switch succeeds.
-  await sql(`delete from private.ai_usage where owner_id=${literal(b.uid)} and charge_state in ('reserved','held');`);
-  await sql(switchControlsSql(b.uid, 'forward'));
+  await reconcile(b);
+  equal(await attempt(b, 'forward'), 'OK');
   equal(await controlsRow(b), { ...bBefore, execution_manifest_id: V3, max_request_micro: V3_RESERVATION });
   // The switch writes no activation, consent, notice, prompt or allowance.
   const consent = (await client.rows(b, 'profiles'))[0];
