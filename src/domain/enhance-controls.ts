@@ -1,6 +1,6 @@
 // BG2b-2: the owner's photo-enhancement status as the client sees it. Pure parsing and typing only: nothing here
 // authorises a request, and the server's enhance_status/enhance_claim checks stay authoritative.
-import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_MODEL, ENHANCE_REVIEW_EXPIRES } from './enhancement';
+import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_MODEL } from './enhancement';
 import { parseOptionalAiBudget, type AiBudget } from './ai-budget';
 
 type JsonObject = Record<string, unknown>;
@@ -57,13 +57,12 @@ export function parseEnhanceStatus(value: unknown): EnhanceStatus | null {
 }
 
 /**
- * The policy this app version has a notice for: the photo clean-up manifest (BG2c), its model and notice revision 2, before
- * review expiry. A policy still on enhance-v1 is unsupported, so nothing is offered or sent under it.
+ * The policy this app version has a notice for: the photo clean-up manifest (BG2c), its model and notice revision 2.
+ * A policy still on enhance-v1 is unsupported, so nothing is offered or sent under it.
  */
 export function supportedEnhancePolicy(status: EnhanceStatus): boolean {
   const p = status.policy;
-  return p !== null && p.noticeRevision === CLEANUP_NOTICE_REVISION && p.manifestId === CLEANUP_MANIFEST && p.modelId === ENHANCE_MODEL
-    && status.serverTimeMs !== null && status.serverTimeMs < ENHANCE_REVIEW_EXPIRES;
+  return p !== null && p.noticeRevision === CLEANUP_NOTICE_REVISION && p.manifestId === CLEANUP_MANIFEST && p.modelId === ENHANCE_MODEL;
 }
 const consented = (status: EnhanceStatus) => status.consent?.enabled === true && status.policy !== null
   && status.consent.noticeRevision === status.policy.noticeRevision;

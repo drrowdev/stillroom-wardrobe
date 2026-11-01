@@ -1,5 +1,5 @@
 import {
-  STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_NOTICE_REVISION, STYLIST_RESERVATION_MICRO, STYLIST_REVIEW_EXPIRES,
+  STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_NOTICE_REVISION, STYLIST_RESERVATION_MICRO,
   buildStylistRequest, claimedCandidate, conversationBytes, parseStylistBody, parseStylistItem, stylistEligible,
   validateStylistReply, type StylistItem,
 } from '../../../src/domain/stylist.ts';
@@ -111,7 +111,7 @@ export function createStylistHandler(config: StylistConfig, azureTransport: Azur
       if (!object(consent) || consent.enabled !== true || consent.noticeRevision !== policy.noticeRevision) return error('CONSENT_REQUIRED');
       if (policy.noticeRevision !== STYLIST_NOTICE_REVISION || policy.manifestId !== STYLIST_MANIFEST || policy.modelId !== STYLIST_MODEL
         || !microText(policy.maxRequestMicro) || BigInt(policy.maxRequestMicro as string) < BigInt(STYLIST_RESERVATION_MICRO)
-        || Date.now() >= STYLIST_REVIEW_EXPIRES || !azureConfigured(config.azure)) return error('UNCONFIGURED');
+        || !azureConfigured(config.azure)) return error('UNCONFIGURED');
 
       const claim = await rpc('stylist_claim', { p_owner_id: owner, p_request_id: input.requestId, p_manifest_id: STYLIST_MANIFEST },
         true, STYLIST_LIMITS.responseBytes);

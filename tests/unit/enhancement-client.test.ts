@@ -56,6 +56,14 @@ describe('typed availability (M1)', () => {
     expect(observeEnhanceStatus(bare, false)).toBe('off');
     expect(observeEnhanceStatus(bare, true)).toBe('paused');
   });
+  it('stays available after the historical review date, with consent, activation and provider checks unchanged', () => {
+    const later = { serverTimeMs: Date.parse('2027-06-01T00:00:00Z') };
+    expect(observeEnhanceStatus(status(later), false)).toBe('ready');
+    expect(observeEnhanceStatus(status({ ...later, consent: { enabled: false, noticeRevision: null, consentedAt: null } }), false)).toBe('off');
+    expect(observeEnhanceStatus(status(later, { activated: false }), false)).toBe('off');
+    expect(observeEnhanceStatus(status(later, { providerAvailable: false }), false)).toBe('paused');
+    expect(observeEnhanceStatus(status(later, { modelId: 'other' }), false)).toBe('paused');
+  });
   it('keeps Turn off available whenever consent is on, and offers Turn on only when activated', () => {
     expect(enhanceView({ kind: 'ready', status: off() }, false, false, false)).toEqual({ kind: 'off', turnOn: true, turnOff: false });
     expect(enhanceView({ kind: 'ready', status: status({ consent: { enabled: false, noticeRevision: null, consentedAt: null } },

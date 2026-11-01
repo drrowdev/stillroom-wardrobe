@@ -65,6 +65,6 @@ describe('saveAiConsent binding', () => {
     expect(controller.getSnapshot().profileSaving).toBeFalsy();
   });
   it('needs no renewal when only the allowance changes while consent is on', () => {
-    expect(aiCardState({ status: status('30000000', true), loadFailed: false, unresolved: false, now }).state).toBe('on');
+    expect(aiCardState({ status: status('30000000', true), loadFailed: false, unresolved: false }).state).toBe('on');
   });
 });

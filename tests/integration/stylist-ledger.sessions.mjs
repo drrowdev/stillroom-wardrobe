@@ -5,10 +5,10 @@
 import { isDeepStrictEqual } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { canonicalTables, requireEvidence } from './preservation.sessions.mjs';
-import { equal, analysisHash } from './ai-analysis.sessions.mjs';
+import { equal } from './ai-analysis.sessions.mjs';
 import { imageChangeHarness } from './image-replacement.sessions.mjs';
 import { COLOUR_MANIFEST, STYLIST_MANIFEST_ROW, STYLIST_V2_MANIFEST_ROW } from './azure-preservation.sessions.mjs';
-import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
+import { analysisClaim, tagClaimStatement } from './synthetic-analysis.sessions.mjs';
 
 const MANIFEST = 'azure-eu-terra-stylist-v1';
 const MANIFEST_V2 = 'azure-eu-terra-stylist-v2';
@@ -46,8 +46,8 @@ export async function stylistLedgerProbes(snapshot, sql, mark) {
     requireEvidence((await claim(owner, id)).claimed === true);
     return { id, finished: await finish(owner, id, code, usage) };
   };
-  const tagClaim = (owner, id) => one(`select public.ai_claim_analysis(${literal(owner.uid)},${literal(id)},${literal(id)},1,
-    ${literal(analysisHash)},${jpegHeaderFixture().length},120,80,${literal(COLOUR_MANIFEST.v2)});`);
+  // Past the manifest's date the real claim refuses before the shared allowance rule; see tagClaimStatement.
+  const tagClaim = async (owner, id) => one(`select ${await tagClaimStatement(sql, owner.uid, id, COLOUR_MANIFEST.v2)};`);
   // One uncommitted transaction runs `statement`, then sleeps. Resolves once the sleep is observed, with { done }, the
   // transaction's output promise (wrapped, so awaiting hold() does not wait for the transaction to end).
   const hold = async (statement, seconds, end = 'commit') => {
@@ -228,8 +228,7 @@ export async function stylistLedgerProbes(snapshot, sql, mark) {
     await limit(a, room, room);
     rows = await rowCount(a);
     const tagId = randomUUID(), styId = randomUUID();
-    const tagSql = `select 'TAG:'||public.ai_claim_analysis(${literal(a.uid)},${literal(tagId)},${literal(tagId)},1,
-      ${literal(analysisHash)},${jpegHeaderFixture().length},120,80,${literal(COLOUR_MANIFEST.v2)})::text`;
+    const tagSql = `select 'TAG:'||${await tagClaimStatement(sql, a.uid, tagId, COLOUR_MANIFEST.v2)}::text`;
     const stySql = `select 'STY:'||public.stylist_claim(${literal(a.uid)},${literal(styId)},${literal(MANIFEST)})::text`;
     const held = await hold(first === 'tagging' ? tagSql : stySql, first === 'tagging' ? 1.011 : 1.013);
     const second = sql(`${first === 'tagging' ? stySql : tagSql};`);
@@ -276,7 +275,7 @@ export async function stylistLedgerProbes(snapshot, sql, mark) {
   // Request IDs are owner-scoped and purpose-checked: a tagging request cannot be claimed or settled as a stylist request,
   // and A's owner cannot settle B's stylist request.
   const tagRequest = randomUUID();
-  requireEvidence((await tagClaim(a, tagRequest)).claimed === true);
+  requireEvidence((await analysisClaim(sql, a, tagRequest, COLOUR_MANIFEST.v2)).claimed === true);
   const tagRow = await one(`select to_jsonb(u) from private.ai_usage u where owner_id=${literal(a.uid)} and request_id=${literal(tagRequest)};`);
   equal(await claim(a, tagRequest), { code: 'TERMINAL', claimed: false });
   equal((await finish(a, tagRequest, 'OK', VALID)).code, 'INVALID_INPUT');

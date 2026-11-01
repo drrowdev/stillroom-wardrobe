@@ -1122,8 +1122,9 @@ that button and by the emergency worker.
   - The owner added `AI_AZURE_OPENAI_API_KEY` personally. The coordinator never
     saw the value.
   - The other account has no controls.
-  - The profile review expires on 21 October 2026, per the AZ1 source contract
-    in this guide.
+  - The profile review date (21 October 2026) was recorded as audit metadata.
+    In source it no longer limits availability; see the
+    persistent-availability note under the AZ1 contract below.
 - **Supervised probe.** At about 07:31Z on 24 September the owner turned photo
   analysis on and analysed one photo.
   - Aggregate readback: 1 usage row, `estimated`, 9018 micro-USD; model
@@ -1191,7 +1192,7 @@ Its ordinary-session, human-acceptance and actor boundaries still apply.
 | Website | Git-backed Pages project `stillroom-wardrobe` created; selected GitHub repo access verified. Automatic production deployments OFF, preview deployments NONE, no production backend in preview environment. Deployments since 23 September are owner-run create-deployments of production main HEAD. | Coordinator through official Cloudflare connection only |
 | Live deployment | Latest cited deployment: `27a1c642` of `3ed08147` (PR #36 comment `5813432944`, 24 September). Earlier: `f0016398` and `6e01b747`; the 6 September shell `91462a90` is history. Each replacement needs separate approval and fresh evidence. A deployment is not acceptance. | Coordinator; owner runs the create-deployment |
 | Edge Functions | Three functions v1 ACTIVE, `verify_jwt=true`, source-identical as recorded on 23 September (`5800183953`). COL1 R3 (functions) was recorded as not yet done at R1 on 24 September (`5815899879`). The out-of-EU Edge location is accepted for the 23 September test rollout only, with owner test photos; general residency remains OPEN. Redeployment needs separate approval. | Coordinator/operator with owner approval; source writers have no access |
-| Photo analysis (AI) | Activated for the owner's account only on 23 September (`5815445262`): `azure-eu-terra-devtest-v1`, prompt 1, notice 2, a USD 20/month application allowance (not an invoice ceiling), 20 requests per hour, 3600 s result TTL, review expiry 21 October 2026. The 24 September single-photo probe had no anomaly. Still open: scheduled purge (manual clearing for now; source job ready inactive, hosted H1 pending, H2 activation needs owner approval, physical retention PENDING until H3), other accounts, quality (see COL1), privacy/retention and device acceptance, and renewal before expiry. | Owner decides; coordinator/operator executes each change |
+| Photo analysis (AI) | Activated for the owner's account only on 23 September (`5815445262`): `azure-eu-terra-devtest-v1`, prompt 1, notice 2, a USD 20/month application allowance (not an invoice ceiling), 20 requests per hour, 3600 s result TTL; the 21 October 2026 review date is audit metadata only. The 24 September single-photo probe had no anomaly. Still open: scheduled purge (manual clearing for now; source job ready inactive, hosted H1 pending, H2 activation needs owner approval, physical retention PENDING until H3), other accounts, quality (see COL1), privacy/retention and device acceptance. | Owner decides; coordinator/operator executes each change |
 | Not built / backlog | Outfits, suggestions and weather (Phases 3–5) are not built. The calendar (I12/I13) is in the backlog (`5815445262`). Hosted deletion and recovery flows are not exercised. | Owner prioritises; separate approved packets |
 | Hosted smoke | BLOCKED until both intended ordinary sessions and prepared non-personal item/main/thumb fixtures exist. Run the separate read-only command below privately and report only coarse result plus reviewed code head. The 23 September owner journey was a manual single-account check, not this two-owner runner. | Approved private operator, not cloud agent or public CI |
 | Phone/accessibility | Actual iPhone/Safari and Android camera/library, rotation/compatible-photo fallback, explicit Save/Discard, own login/logout, EN/FI/SV, VoiceOver/TalkBack and narrow/zoomed layout checks remain open. Emulation/axe is insufficient. | Human owners/testers |
@@ -1325,7 +1326,18 @@ Only the server reads `AI_AZURE_OPENAI_API_KEY`; there is no browser key,
 endpoint/model router, Google impersonation, automatic retry or fallback.
 The requested snapshot is `gpt-5.6-terra-2026-07-09`. A returned family name or
 deployment alias is recorded as that observation, not proof of snapshot execution.
-The profile review expires on 21 October 2026 at 00:00 UTC.
+The profile review date, 21 October 2026 at 00:00 UTC, is audit metadata tied to the
+immutable manifest hashes. It is not a service expiry: migration
+`20261101080000_persistent_ai_availability` removes every review-date check from the
+active photo analysis, Stylist, photo clean-up and virtual try-on paths (client, Edge
+and database), so these stay available until the owner switches them off. It takes
+effect in a hosted project only after the separately authorised migration and Edge deploy. Consent and
+notice revisions, activation and provider-availability switches, exact manifest/model/prompt
+checks, the monthly allowance, reservations, rate limits and every operational TTL
+(analysis request/result, try-on result, provisional settlement, probe authorisation,
+scheduled purge) are unchanged. The Stylist (1 December 2026) and photo clean-up and
+try-on (1 January 2027) review dates are metadata in the same way. Legacy Google stays
+read-and-finish only.
 
 The six explicit input/output/total/reasoning/cache-read/cache-write counters
 have no missing-to-zero defaults. Input/output rates are respectively

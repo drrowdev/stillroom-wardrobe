@@ -1,7 +1,7 @@
 // ST1b stylist chat UI: pure status, limit, history and reply handling for the client. The request contract, limits and
 // eligibility come from `stylist.ts`, which the Edge function shares; nothing here changes what the server accepts.
 import {
-  STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_NOTICE_REVISION, STYLIST_OCCASIONS, STYLIST_REVIEW_EXPIRES,
+  STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_NOTICE_REVISION, STYLIST_OCCASIONS,
   conversationBytes, parseStylistBody, plainText, stylistEligible, utf8Bytes,
   type StylistInput, type StylistOccasion, type StylistSeason, type StylistTurn, type StylistWeather,
 } from './stylist';
@@ -61,11 +61,10 @@ export function parseStylistStatus(value: unknown): StylistStatus | null {
     budget: budget.budget };
 }
 
-/** The policy this app version has a notice for: the reviewed manifest, model and notice revision, before review expiry. */
+/** The policy this app version has a notice for: the reviewed manifest, model and notice revision. */
 export function supportedStylistPolicy(status: StylistStatus): boolean {
   const p = status.policy;
-  return p !== null && p.noticeRevision === STYLIST_NOTICE_REVISION && p.manifestId === STYLIST_MANIFEST && p.modelId === STYLIST_MODEL
-    && status.serverTimeMs !== null && status.serverTimeMs < STYLIST_REVIEW_EXPIRES;
+  return p !== null && p.noticeRevision === STYLIST_NOTICE_REVISION && p.manifestId === STYLIST_MANIFEST && p.modelId === STYLIST_MODEL;
 }
 
 /** Latest status read in this owner scope. `missing` is only the expected PGRST202 reply when the RPC isn't installed. */

@@ -46,7 +46,7 @@ describe('closed try-on replies', () => {
     expect(tryOnReady(parseTryOnStatus(statusRaw({}, { providerAvailable: false })))).toBe(false);
     expect(tryOnReady(parseTryOnStatus(statusRaw({}, { modelId: 'other' })))).toBe(false);
     expect(tryOnReady(parseTryOnStatus(statusRaw({ consent: off, code: 'CONSENT_REQUIRED' })))).toBe(false);
-    expect(tryOnReady(parseTryOnStatus(statusRaw({ serverTimeMs: Date.parse('2027-01-01T00:00:00Z') })))).toBe(false);
+    expect(tryOnReady(parseTryOnStatus(statusRaw({ serverTimeMs: Date.parse('2027-01-01T00:00:00Z') })))).toBe(true);
     expect(tryOnReady(null)).toBe(false);
   });
   it('keeps Turn off whenever consent is on and hides the card when there is nothing to turn on', () => {

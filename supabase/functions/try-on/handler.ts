@@ -1,5 +1,5 @@
 import {
-  TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_IDEA_ITEMS, TRYON_MAX_STEPS, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_RESERVATION_MICRO, TRYON_REVIEW_EXPIRES_AT,
+  TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_IDEA_ITEMS, TRYON_MAX_STEPS, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_RESERVATION_MICRO,
   tryOnSlots, type TryOnSlot,
 } from '../../../src/domain/tryon.ts';
 import { refusalFinishArgs } from '../../../src/domain/provider-refusal.ts';
@@ -173,7 +173,7 @@ export function createTryOnHandler(config: TryOnConfig, registrar: TryOnRegistra
       }
       if (policy.noticeRevision !== TRYON_NOTICE_REVISION || policy.manifestId !== TRYON_MANIFEST || policy.modelId !== TRYON_MODEL
         || !microText(policy.maxRequestMicro) || BigInt(policy.maxRequestMicro as string) < BigInt(TRYON_RESERVATION_MICRO)
-        || Date.now() >= Date.parse(TRYON_REVIEW_EXPIRES_AT) || !azureConfigured(config.azure)) return error('UNCONFIGURED');
+        || !azureConfigured(config.azure)) return error('UNCONFIGURED');
       if (policy.providerAvailable !== true) return error('UNAVAILABLE');
       // W1: without a way to keep the claimed work alive, nothing is claimed.
       if (registrar === null) return error('UNCONFIGURED');

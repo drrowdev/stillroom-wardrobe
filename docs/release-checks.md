@@ -247,7 +247,6 @@ How it is isolated:
 - The stack and fixture runtimes must both run edge-runtime v1.74.3 by the digest pinned in
   `scripts/edge-fixture.mjs`; the fixture is launched by that immutable reference and its image ID must
   equal the stack container's.
-- `AZURE_REVIEW_EXPIRES` blocks the gate once the review date passes.
 - Owner-scoped request IDs are tested as fresh UUIDs: a foreign ID gives the same result as a new one
   and leaves the victim unchanged.
 

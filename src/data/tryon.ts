@@ -3,7 +3,7 @@
 // src/data/enhancement.ts. The strict parsers below accept only the closed replies of 20261003090000_try_on.sql; the
 // server's checks stay authoritative, and nothing here decides eligibility on its own.
 import type { OwnerScope } from '../auth/session';
-import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_IDEA_ITEMS, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_REVIEW_EXPIRES_AT, tryOnResultsHeaders, tryOnSlots, type TryOnSlot } from '../domain/tryon';
+import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MAX_IDEA_ITEMS, TRYON_MODEL, TRYON_NOTICE_REVISION, tryOnResultsHeaders, tryOnSlots, type TryOnSlot } from '../domain/tryon';
 import { aiBudgetHeaders, parseOptionalAiBudget, type AiBudget } from '../domain/ai-budget';
 import { isUuid } from '../domain/wardrobe';
 import type { AppClient } from './client';
@@ -77,11 +77,10 @@ export function parseTryOnStatus(value: unknown): TryOnStatus | null {
     results: value.results, budget: budget.budget };
 }
 
-/** The policy this app version has a notice for: the reviewed manifest, model and notice revision, before review expiry. */
+/** The policy this app version has a notice for: the reviewed manifest, model and notice revision. */
 export function supportedTryOnPolicy(status: TryOnStatus): boolean {
   const p = status.policy;
-  return p !== null && p.noticeRevision === TRYON_NOTICE_REVISION && p.manifestId === TRYON_MANIFEST && p.modelId === TRYON_MODEL
-    && status.serverTimeMs !== null && status.serverTimeMs < Date.parse(TRYON_REVIEW_EXPIRES_AT);
+  return p !== null && p.noticeRevision === TRYON_NOTICE_REVISION && p.manifestId === TRYON_MANIFEST && p.modelId === TRYON_MODEL;
 }
 const consented = (status: TryOnStatus) => status.consent?.enabled === true && status.policy !== null
   && status.consent.noticeRevision === status.policy.noticeRevision;

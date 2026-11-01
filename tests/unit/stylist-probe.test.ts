@@ -200,10 +200,10 @@ describe('ST-OP canonical run record (H1)', () => {
     await expect(record(id)).rejects.toThrow('PRIVATE_PATH_INVALID');
   });
 
-  it('refuses init outside the allocation month, with a future receipt or after the review expiry', async () => {
+  it('refuses init outside the allocation month, or with a future receipt', async () => {
     await expect(init({}, NOVEMBER)).rejects.toThrow('ALLOCATION_MONTH_ENDED');
     await expect(init({}, Date.parse('2026-10-05T08:00:00.000Z'))).rejects.toThrow('RECEIPT_INVALID');
-    await expect(init({ allocatedAt: '2026-12-01T00:00:00.000Z' }, Date.parse('2026-12-01T00:00:01.000Z'))).rejects.toThrow('REVIEW_EXPIRED');
+    await expect(init({ allocatedAt: '2026-12-01T00:00:00.000Z' }, Date.parse('2026-12-01T00:00:01.000Z'))).resolves.toBeTruthy();
   });
 });
 
@@ -303,7 +303,6 @@ describe('ST-OP month, review and persistence (M3)', () => {
 
   it.each([
     ['a month rollover', '2026-10-31T23:59:59.999Z', '2026-11-01T00:00:00.000Z', 'ALLOCATION_MONTH_ENDED', '2026-10-05T09:00:00.000Z'],
-    ['the review expiry', '2026-11-30T23:59:59.999Z', '2026-12-01T00:00:00.000Z', 'REVIEW_EXPIRED', '2026-11-02T09:00:00.000Z'],
   ])('rechecks after the durable intent: %s records NOT_SENT and consumes the slot', async (_, before, after, reason, allocatedAt) => {
     const id = await init({ allocatedAt }, Date.parse(before));
     const { calls, fetchImpl } = provider([{}]);

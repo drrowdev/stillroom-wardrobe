@@ -16,7 +16,6 @@ import * as controller from '../../scripts/edge-fixture.mjs';
 import * as deploy from '../../scripts/check-deploy-artifacts.mjs';
 // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
 import { EDGE_DELEGATIONS, delegatedLine } from '../../tests/security/edge-delegations.mjs';
-import { AZURE_REVIEW_EXPIRES } from '../../supabase/functions/analyze-clothing/azure-openai';
 import { classifyEnhanceResponse, enhanceForm } from '../../supabase/functions/enhance-photo/azure';
 import { CLEANUP_PROMPT, ENHANCE_DEPLOYMENT, ENHANCE_PARAMETERS, ENHANCE_PROMPT } from '../../src/domain/enhancement';
 import { classifyTryOnResponse, tryOnForm } from '../../supabase/functions/try-on/azure';
@@ -365,10 +364,10 @@ describe('egress probe verdict (rev5 A1)', () => {
 });
 
 describe('privileged controller', () => {
-  it('blocks the gate once the Azure review has expired', () => {
-    expect(controller.reviewGate(AZURE_REVIEW_EXPIRES - 1)).toBe('open');
-    expect(controller.reviewGate(AZURE_REVIEW_EXPIRES)).toBe('blocked');
-    expect(controller.reviewGate(Date.now(), Number.NaN)).toBe('blocked');
+  it('has no calendar review cutoff: the gate stays runnable after the historical review dates', async () => {
+    expect('reviewGate' in controller).toBe(false);
+    const source = await readFile(new URL('../../scripts/edge-fixture.mjs', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/REVIEW_EXPIRES|reviewGate|review has passed/);
   });
   it('accepts only the closed operations for the fixed owners', () => {
     expect(controller.validOperation({ type: 'op', id: 1, op: 'freeze', owner: 'A' })).toBe(true);

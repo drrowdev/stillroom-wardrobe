@@ -44,18 +44,22 @@ export function imageChangeHarness(client, owner, env, mark = () => {}) {
     await h.finalize(value, row);
     return { value, item: (await h.read('items', value.p_item.id))[0], image: (await h.read('item_images', value.p_image.id))[0] };
   };
+  // Checks a reservation receipt the same way for a real RPC result and for a labelled synthetic fixture receipt.
+  const accept = (value, data) => {
+    const receiptKeys = ['completedVersion', 'fingerprint', 'imageId', 'itemId', 'kind', 'requestId', 'state'];
+    if (data == null || !isDeepStrictEqual(Object.keys(data).sort(), receiptKeys)) mark('reserve-receipt-keys');
+    eq(Object.keys(data).sort(), receiptKeys);
+    const sameIdentity = data.requestId === value.requestId && data.itemId === value.itemId
+      && data.imageId === value.imageId && /^[0-9a-f]{64}$/.test(data.fingerprint);
+    if (!sameIdentity) mark('reserve-receipt-identity');
+    requireEvidence(sameIdentity);
+    return data;
+  };
   const reserve = async (value) => {
     const result = await h.call('reserve_image_change', { p_intent: value });
     if (!(result.ok && result.status === 200)) mark(`reserve-http-${responseClass(result)}`);
     requireEvidence(result.ok && result.status === 200);
-    const receiptKeys = ['completedVersion', 'fingerprint', 'imageId', 'itemId', 'kind', 'requestId', 'state'];
-    if (result.data == null || !isDeepStrictEqual(Object.keys(result.data).sort(), receiptKeys)) mark('reserve-receipt-keys');
-    eq(Object.keys(result.data).sort(), receiptKeys);
-    const sameIdentity = result.data.requestId === value.requestId && result.data.itemId === value.itemId
-      && result.data.imageId === value.imageId && /^[0-9a-f]{64}$/.test(result.data.fingerprint);
-    if (!sameIdentity) mark('reserve-receipt-identity');
-    requireEvidence(sameIdentity);
-    return result.data;
+    return accept(value, result.data);
   };
   const upload = async (value, variants = ['main', 'thumb']) => {
     for (const variant of variants) {
@@ -91,7 +95,7 @@ export function imageChangeHarness(client, owner, env, mark = () => {}) {
       requireEvidence(['removed', 'missing'].includes(classifyObjectDeletion(result)));
     }
   };
-  return { ...h, create, make, reserve, upload, endpoint, paths, remove,
+  return { ...h, create, make, reserve, accept, upload, endpoint, paths, remove,
     status: (value) => client.rpc(owner, 'image_change_status', { p_item_id: value.itemId, p_request_id: value.requestId }),
     cancel: (value) => client.rpc(owner, 'cancel_image_change', { p_item_id: value.itemId, p_request_id: value.requestId }),
   };

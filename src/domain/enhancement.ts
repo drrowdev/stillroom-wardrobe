@@ -9,7 +9,6 @@ export const ENHANCE_ENDPOINT = 'https://stillroom-ai-eval.openai.azure.com/open
 export const ENHANCE_PROMPT_VERSION = 1;
 export const ENHANCE_NOTICE_REVISION = 1;
 export const ENHANCE_REVIEW_EXPIRES_AT = '2027-01-01T00:00:00Z';
-export const ENHANCE_REVIEW_EXPIRES = Date.parse(ENHANCE_REVIEW_EXPIRES_AT);
 // Estimated operational envelope, not an invoice ceiling: (7,500 input x 8.00 + 8,000 output x 30.00) per million USD.
 export const ENHANCE_RESERVATION_MICRO = '300000';
 

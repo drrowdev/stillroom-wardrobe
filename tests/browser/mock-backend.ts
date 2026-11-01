@@ -13,9 +13,9 @@ import { rawColumns } from '../../src/domain/export-format';
 import type { ImageChangeReceipt } from '../../src/domain/image-replacement';
 import type { DeletionOperation } from '../../src/domain/item-lifecycle';
 import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
-import { STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_REVIEW_EXPIRES } from '../../src/domain/stylist';
-import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_MODEL, ENHANCE_REVIEW_EXPIRES } from '../../src/domain/enhancement';
-import { selectTryOnSteps, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, TRYON_REVIEW_EXPIRES_AT, type TryOnCandidate, type TryOnStep } from '../../src/domain/tryon';
+import { STYLIST_MANIFEST, STYLIST_MODEL } from '../../src/domain/stylist';
+import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_MODEL } from '../../src/domain/enhancement';
+import { selectTryOnSteps, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, type TryOnCandidate, type TryOnStep } from '../../src/domain/tryon';
 
 export const owners = {
   a: '10000000-0000-4000-8000-000000000001',
@@ -532,8 +532,7 @@ function stylistStatus(setup: StylistSetup, consent: number | null) {
   const code = !setup.configured ? 'UNCONFIGURED' : !setup.activated ? 'INACTIVE' : consent !== setup.noticeRevision ? 'CONSENT_REQUIRED' : 'OK';
   const policy = setup.configured ? { activated: setup.activated, noticeRevision: setup.noticeRevision, manifestId: setup.manifestId,
     modelId: setup.modelId, maxRequestMicro: setup.maxRequestMicro } : null;
-  // Kept inside the reviewed period so the fixture doesn't expire with the app's notice review.
-  const now = Math.min(Date.now(), STYLIST_REVIEW_EXPIRES - 86_400_000);
+  const now = Date.now();
   return { code, period: new Date(now).toISOString().slice(0, 7), serverTimeMs: now,
     consent: { enabled: consent !== null, noticeRevision: consent, consentedAt: consent === null ? null : '2026-10-01T00:00:00Z' },
     policy, budget: setup.configured ? budgetReply(setup.totalAllowanceMicro, setup.totalMicro) : null };
@@ -550,9 +549,9 @@ export type EnhanceReply = EnhanceReplyValue
 const enhanceDefaults: EnhanceSetup = { configured: true, activated: false, providerAvailable: true, noticeRevision: CLEANUP_NOTICE_REVISION,
   manifestId: CLEANUP_MANIFEST, modelId: ENHANCE_MODEL, maxRequestMicro: '300000',
   totalAllowanceMicro: '20000000', totalMicro: '0', serverOffsetMs: 0 };
-// The enhance_status reply as the BG2b-1 function builds it, kept inside the reviewed period.
+// The enhance_status reply as the BG2b-1 function builds it.
 export function enhanceServerNow(setup: Pick<EnhanceSetup, 'serverOffsetMs'>) {
-  return Math.min(Date.now(), ENHANCE_REVIEW_EXPIRES - 86_400_000) + setup.serverOffsetMs;
+  return Date.now() + setup.serverOffsetMs;
 }
 function enhanceStatus(setup: EnhanceSetup, consent: number | null) {
   const code = !setup.configured ? 'UNCONFIGURED' : !setup.activated ? 'INACTIVE' : consent !== setup.noticeRevision ? 'CONSENT_REQUIRED' : 'OK';
@@ -576,7 +575,7 @@ export type TryOnStored = { id: string; owner: string; outfitId: string | null; 
 export type TryOnRequest = { owner: string; chainId: string; step: number; requestId: string; outfitId: string | null;
   itemIds: string[] | null; bytes: number; width: number | null; height: number | null; soi: boolean };
 const tryOnDefaults: TryOnSetup = { configured: true, activated: false, providerAvailable: true, noticeRevision: TRYON_NOTICE_REVISION };
-export const tryOnServerNow = () => Math.min(Date.now(), Date.parse(TRYON_REVIEW_EXPIRES_AT) - 86_400_000);
+export const tryOnServerNow = () => Date.now();
 /** The frame size of a baseline or progressive JPEG, read from its first SOF marker. */
 export function jpegSize(bytes: Buffer): { width: number; height: number } | null {
   let at = 2;
