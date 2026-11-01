@@ -218,38 +218,61 @@ export async function availabilityBehaviourProbes(snapshot, sql, mark) {
   for (let n = 0; n < 3; n++) requireEvidence((await claim(a, idle())).claimed === true);
 
   mark('stylist-and-cleanup');
+  // A failing check puts the actual reply in the stage label, which is the only detail the rehearsal prints.
+  const brief = (value) => JSON.stringify(value ?? null).replace(/[^A-Za-z0-9_.:,-]+/g, '').slice(0, 110);
+  const expectThat = (label, actual, ok) => {
+    if (!ok) mark(`${label}-got-${brief(actual)}`);
+    requireEvidence(ok);
+    return actual;
+  };
+  const expectEqual = (label, actual, expected) => expectThat(label, actual, JSON.stringify(actual) === JSON.stringify(expected));
+  // BUSY is lock contention with a background finalizer, not a refusal: retry it, never any other reply.
+  const unbusy = async (call) => {
+    let reply = await call();
+    for (let attempt = 1; reply?.code === 'BUSY' && attempt <= 10; attempt++) {
+      await new Promise((resolve) => { setTimeout(resolve, 100 * attempt); });
+      reply = await call();
+    }
+    return reply;
+  };
   await setControls(b, V2, 2);
   await sql(`update private.ai_controls set stylist_activated=true,stylist_notice_revision=1,stylist_manifest_id=${literal(STYLIST)},
     stylist_max_request_micro=${STYLIST_RESERVE},stylist_max_requests_per_hour=1,enhance_activated=true,enhance_notice_revision=2,
     enhance_manifest_id=${literal(CLEANUP)},enhance_max_request_micro=${CLEANUP_RESERVE},enhance_max_requests_per_hour=1,
     max_requests_per_hour=1,updated_at=clock_timestamp() where owner_id=${literal(b.uid)};`);
-  equal((await aiConsent(b, true)).code, 'OK');
+  expectEqual('b-ai-consent', (await aiConsent(b, true)).code, 'OK');
   const consented = (reply) => reply?.consent?.enabled === true;
-  requireEvidence(consented(await client.rpc(b, 'stylist_set_consent', { p_enabled: true, p_notice_revision: 1 })));
-  requireEvidence(consented(await client.rpc(b, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 2 })));
+  const stylistOn = await client.rpc(b, 'stylist_set_consent', { p_enabled: true, p_notice_revision: 1 });
+  expectThat('stylist-consent', stylistOn, consented(stylistOn));
+  const cleanupOn = await client.rpc(b, 'enhance_set_consent', { p_enabled: true, p_notice_revision: 2 });
+  expectThat('cleanup-consent', cleanupOn, consented(cleanupOn));
   await imageChangeHarness(client, b, env).create();
   const stylistClaim = (id = randomUUID()) => one(`select public.stylist_claim(${literal(b.uid)},${literal(id)},${literal(STYLIST)});`);
   const stylistFinish = (id, code, usage) => one(`select public.stylist_finish(${literal(b.uid)},${literal(id)},${literal(code)},
     ${usage === null ? 'null::jsonb' : json(usage)});`);
   const styId = randomUUID();
-  requireEvidence((await stylistClaim(styId)).claimed === true);
-  equal((await stylistFinish(styId, 'OK', VALID)).code, 'OK');
+  const stylistFirst = await unbusy(() => stylistClaim(styId));
+  expectThat('stylist-claim', stylistFirst, stylistFirst?.claimed === true);
+  expectEqual('stylist-finish-ok', (await stylistFinish(styId, 'OK', VALID)).code, 'OK');
   for (let n = 0; n < 2; n++) {
     const id = randomUUID();
-    requireEvidence((await stylistClaim(id)).claimed === true);
-    equal((await stylistFinish(id, 'NOT_DISPATCHED', null)).code, 'NOT_DISPATCHED');
+    const reply = await unbusy(() => stylistClaim(id));
+    expectThat('stylist-claim-loop', reply, reply?.claimed === true);
+    expectEqual('stylist-finish-not-dispatched', (await stylistFinish(id, 'NOT_DISPATCHED', null)).code, 'NOT_DISPATCHED');
   }
   const stylistConsent = (enabled) => client.rpc(b, 'stylist_set_consent', { p_enabled: enabled, p_notice_revision: enabled ? 1 : null });
   await stylistConsent(false);
-  equal((await stylistClaim()).claimed, false);
+  const withdrawn = await stylistClaim();
+  expectThat('stylist-consent-off', withdrawn, withdrawn.claimed === false && withdrawn.code === 'CONSENT_REQUIRED');
   await stylistConsent(true);
   await sql(`update private.ai_controls set monthly_allowance_micro=${await used(b) + BigInt(STYLIST_RESERVE) - 1n} where owner_id=${literal(b.uid)};`);
-  equal(await stylistClaim(), { code: 'ALLOWANCE', claimed: false });
+  expectEqual('stylist-allowance', await unbusy(() => stylistClaim()), { code: 'ALLOWANCE', claimed: false });
   await sql(`update private.ai_controls set monthly_allowance_micro=100000000 where owner_id=${literal(b.uid)};`);
 
   const key = await scalar(`select deployment_key from private.provider_deployments where manifest_id=${literal(CLEANUP)};`);
-  requireEvidence(key !== '');
-  equal(await one(`select public.enhance_provider_control(${literal(key)},true,null::text);`), { code: 'OK', dispatchEnabled: true });
+  expectThat('cleanup-deployment', key, key !== '');
+  expectEqual('cleanup-provider-on', await one(`select public.enhance_provider_control(${literal(key)},true,null::text);`),
+    { code: 'OK', dispatchEnabled: true });
   await sql(`update private.provider_capacity set max_dispatch=1,updated_at=clock_timestamp() where deployment_key=${literal(key)};
     update private.provider_slots set held_until=clock_timestamp()-interval '1 second'
       where deployment_key=${literal(key)} and held_until>clock_timestamp();`);
@@ -257,11 +280,13 @@ export async function availabilityBehaviourProbes(snapshot, sql, mark) {
   const cleanupClaim = (id = randomUUID()) => one(`select public.enhance_claim(${literal(b.uid)},${literal(id)},${literal(CLEANUP)},
     ${literal(input)},null::uuid);`);
   const cleanupId = randomUUID();
-  requireEvidence((await cleanupClaim(cleanupId)).claimed === true);
-  equal((await one(`select public.enhance_finish(${literal(b.uid)},${literal(cleanupId)},'NOT_DISPATCHED',null::jsonb,null::text,null::integer);`)).code,
-    'NOT_DISPATCHED');
+  const cleanup = await unbusy(() => cleanupClaim(cleanupId));
+  expectThat('cleanup-claim', cleanup, cleanup?.claimed === true);
+  expectEqual('cleanup-finish', (await one(`select public.enhance_finish(${literal(b.uid)},${literal(cleanupId)},'NOT_DISPATCHED',
+    null::jsonb,null::text,null::integer);`)).code, 'NOT_DISPATCHED');
   const disabled = await one(`select public.enhance_provider_control(${literal(key)},false,null::text);`);
-  requireEvidence(disabled.code === 'OK' && disabled.dispatchEnabled === false);
-  equal((await cleanupClaim()).claimed, false);
+  expectThat('cleanup-provider-off', disabled, disabled.code === 'OK' && disabled.dispatchEnabled === false);
+  const refusedCleanup = await cleanupClaim();
+  expectThat('cleanup-provider-off-claim', refusedCleanup, refusedCleanup.claimed === false);
   await one(`select public.enhance_provider_control(${literal(key)},true,null::text);`);
 }
