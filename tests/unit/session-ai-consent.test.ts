@@ -67,4 +67,15 @@ describe('saveAiConsent binding', () => {
   it('needs no renewal when only the allowance changes while consent is on', () => {
     expect(aiCardState({ status: status('30000000', true), loadFailed: false, unresolved: false }).state).toBe('on');
   });
+  it('rejects Turn on when the manifest and reservation switched to v3 after the policy was shown', async () => {
+    const v3 = { ...policy, executionManifestId: 'azure-eu-terra-devtest-v3', maxRequestMicro: '1' };
+    const { controller, scope, ai, writes } = setup({ ...status(), policy: v3 });
+    await expect(controller.saveAiConsent(scope, profile, ai, true, 2, aiPolicyBinding(scope, status())))
+      .rejects.toMatchObject({ code: 'CONFIG_CHANGED' });
+    expect(writes).toHaveLength(0);
+  });
+  it('asks nobody again for consent already given when the controls move to v3 (same notice revision)', () => {
+    const v3 = { ...policy, executionManifestId: 'azure-eu-terra-devtest-v3', maxRequestMicro: '1' };
+    expect(aiCardState({ status: { ...status('20000000', true), policy: v3 }, loadFailed: false, unresolved: false }).state).toBe('on');
+  });
 });

@@ -81,6 +81,17 @@ describe('policy binding', () => {
   it('changes with the monthly budget', () => {
     expect(aiPolicyBinding(scope, status({ budget: budgetOf('30000000') }))).not.toBe(base);
   });
+  it('is bound to the manifest, reservation and budget together across the v2 to v3 switch', () => {
+    const v3 = { executionManifestId: 'azure-eu-terra-devtest-v3', maxRequestMicro: '1' };
+    const switched = aiPolicyBinding(scope, status({ policy: v3 }));
+    expect(switched).not.toBe(base);
+    // Either half of the switch alone, or any later change of the reservation or the budget, asks again.
+    expect(aiPolicyBinding(scope, status({ policy: { executionManifestId: v3.executionManifestId } }))).not.toBe(switched);
+    expect(aiPolicyBinding(scope, status({ policy: { maxRequestMicro: '1' } }))).not.toBe(switched);
+    expect(aiPolicyBinding(scope, status({ policy: { ...v3, maxRequestMicro: '2' } }))).not.toBe(switched);
+    expect(aiPolicyBinding(scope, status({ policy: v3, budget: budgetOf('200000000') }))).not.toBe(switched);
+    expect(aiPolicyBinding(scope, status({ policy: v3 }))).toBe(switched);
+  });
   it.each([
     ['maximum request', { maxRequestMicro: '4097352' }],
     ['revision', { noticeRevision: 3 }], ['model', { modelId: 'other-model' }], ['manifest', { executionManifestId: 'other-manifest' }],

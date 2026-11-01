@@ -5,10 +5,13 @@ import { freezeValues } from './garment-fields';
 export const aiModel = 'gemini-3.8-flash';
 export const azureAiModel = 'gpt-5.6-terra-2026-07-09';
 export const azureAiManifest = 'azure-eu-terra-devtest-v2';
-// Each Azure manifest is valid only with its own prompt version; mixed pairs are unsupported.
+export const azureAiManifestV3 = 'azure-eu-terra-devtest-v3';
+// Each Azure manifest is valid only with its own prompt version; mixed pairs are unsupported. `minRequestMicro` is the
+// manifest's reservation: the per-photo amount the account's controls hold. v3 holds the smallest amount the schema allows.
 export const azureAiProfiles = [
-  { executionManifestId: 'azure-eu-terra-devtest-v1', promptVersion: 1 },
-  { executionManifestId: azureAiManifest, promptVersion: 2 },
+  { executionManifestId: 'azure-eu-terra-devtest-v1', promptVersion: 1, minRequestMicro: 4097351n },
+  { executionManifestId: azureAiManifest, promptVersion: 2, minRequestMicro: 4097351n },
+  { executionManifestId: azureAiManifestV3, promptVersion: 2, minRequestMicro: 1n },
 ] as const;
 export const aiCodes = ['OK', 'UNAVAILABLE', 'UNAUTHENTICATED', 'INVALID_INPUT', 'CONSENT_REQUIRED',
   'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'CONFLICT', 'ACTIVE_DRAFT',
@@ -76,14 +79,15 @@ export function parseAiStatus(value: unknown, negotiated = false): AiStatus | nu
     policy, budget: budget.budget,
     ...(negotiated ? { photoModelNoticeUntilMs: until as number | null } : {}) });
 }
-function azureProfile(policy: AiPolicy): boolean {
-  return azureAiProfiles.some((profile) => profile.executionManifestId === policy.executionManifestId
+function azureProfile(policy: AiPolicy) {
+  return azureAiProfiles.find((profile) => profile.executionManifestId === policy.executionManifestId
     && profile.promptVersion === policy.promptVersion);
 }
 export function supportedAiPolicy(status: AiStatus): boolean {
   const p = status.policy;
-  return !!p && p.activated && p.modelId === azureAiModel && p.noticeRevision === 2
-    && azureProfile(p) && BigInt(p.maxRequestMicro) >= 4097351n
+  const profile = p ? azureProfile(p) : undefined;
+  return !!p && !!profile && p.activated && p.modelId === azureAiModel && p.noticeRevision === 2
+    && BigInt(p.maxRequestMicro) >= profile.minRequestMicro
     && status.budget !== null;
 }
 export function aiNoticeProfile(policy: AiPolicy | null): 'google' | 'azure' | null {

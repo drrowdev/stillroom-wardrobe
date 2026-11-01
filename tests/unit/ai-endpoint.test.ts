@@ -269,6 +269,51 @@ describe('B1 source runtime and fixed protocol', () => {
     expect(calls).toEqual(['user', 'ai_status', 'ai_claim_analysis']);
     expect(provider).not.toHaveBeenCalled();
   });
+  describe('BUDGET2 manifest v3', () => {
+    const V3 = 'azure-eu-terra-devtest-v3';
+    const run = async (policyChange: object, claimManifest?: string, succeed = false) => {
+      const calls: string[] = [], claims: Record<string, unknown>[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+        calls.push(url.split('/').at(-1)!);
+        if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
+        if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
+          policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2, executionManifestId: V3,
+            maxRequestMicro: '1', ...policyChange }, budget: BUDGET });
+        claims.push(JSON.parse(String(init.body)));
+        return Response.json({ code: 'OK', claimed: true, manifestId: claimManifest ?? claims.at(-1)!.p_manifest_id,
+          resultExpiresAtMs: Date.now() + 10000, dispatchBeforeMs: Date.now() + 1000 });
+      }));
+      const provider = vi.fn(async () => {
+        if (!succeed) throw new DOMException('fixture timeout', 'TimeoutError');
+        return Response.json({ model: AZURE_MODEL, usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130,
+          prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 }, completion_tokens_details: { reasoning_tokens: 20 } },
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', refusal: null, content: '{}' } }] });
+      });
+      const response = await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
+      return { body: await response.json(), calls, claims, provider };
+    };
+    it('dispatches v3 at the one-micro hold, claiming and finishing under the controls\' own manifest', async () => {
+      const seen = await run({}, undefined, true);
+      expect(seen.calls).toEqual(['user', 'ai_status', 'ai_claim_analysis', 'ai_finish_analysis']);
+      expect(seen.claims.map((body) => body.p_manifest_id)).toEqual([V3, V3]);
+      expect(seen.provider).toHaveBeenCalledTimes(1);
+    });
+    it('keeps v2 on its whole-request floor and v3 on its own', async () => {
+      for (const [change, dispatched] of [[{ executionManifestId: AZURE_MANIFEST }, false],
+        [{ executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' }, true],
+        [{ maxRequestMicro: '0' }, false], [{ maxRequestMicro: '' }, false], [{ promptVersion: 1 }, false],
+        [{ executionManifestId: 'azure-eu-terra-devtest-v4' }, false], [{ noticeRevision: 1 }, false]] as const) {
+        const seen = await run(change);
+        expect(seen.provider).toHaveBeenCalledTimes(dispatched ? 1 : 0);
+        expect(seen.calls.includes('ai_claim_analysis')).toBe(dispatched);
+      }
+    });
+    it('refuses a claim acknowledgement for another manifest without a provider call', async () => {
+      const seen = await run({}, AZURE_MANIFEST);
+      expect(seen.body).toEqual({ code: 'TIMEOUT' });
+      expect(seen.provider).not.toHaveBeenCalled();
+    });
+  });
 });
 describe('Google usage estimates are not confirmed billing', () => {
   const full = { promptTokenCount: 100, totalTokenCount: 125, candidatesTokenCount: 10, thoughtsTokenCount: 15, trafficType: 'ON_DEMAND' };
