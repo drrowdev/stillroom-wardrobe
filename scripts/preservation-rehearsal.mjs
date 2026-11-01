@@ -1408,9 +1408,9 @@ async function main() {
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
       await history('target'); await verifyCiStorageGuard();
       stage = 'AVAIL1-compare';
-      await availabilityCompare(availBefore, privilegedLocalSql);
+      await availabilityCompare(availBefore, privilegedLocalSql, (label) => { stage = `AVAIL1-${label}`; });
       stage = 'AVAIL1-catalog';
-      await availabilityCatalogProbe(privilegedLocalSql);
+      await availabilityCatalogProbe(privilegedLocalSql, (label) => { stage = `AVAIL1-${label}`; });
       stage = 'AVAIL1-behaviour';
       await availabilityBehaviourProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `AVAIL1-${label}`; });
       colourFinalizer.assertRunning();

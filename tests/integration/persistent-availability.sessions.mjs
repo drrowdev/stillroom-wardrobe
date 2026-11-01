@@ -27,7 +27,7 @@ function sourceBody(sql, name) {
   return body;
 }
 
-export async function availabilityCatalogProbe(sql) {
+export async function availabilityCatalogProbe(sql, mark = () => {}) {
   const source = await readFile(new URL(`../../supabase/migrations/${MIGRATION}`, import.meta.url), 'utf8');
   requireEvidence(!source.includes('\r'));
   const state = JSON.parse(await sql(`select jsonb_object_agg(f.name,(select coalesce(jsonb_agg(jsonb_build_object(
@@ -35,11 +35,18 @@ export async function availabilityCatalogProbe(sql) {
       'definer',p.prosecdef,'config',coalesce(p.proconfig,'{}'::text[]))),'[]'::jsonb)
     from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname||'.'||p.proname=f.name))
     from (values ${FUNCTIONS.map((name) => `(${literal(name)})`).join(',')}) as f(name);`));
+  // Failure labels go through mark (the stage name is the only detail the rehearsal prints).
+  const label = (name, check) => mark(`catalog-${name.replace(/[^a-z0-9_]+/gi, '-')}-${check}`);
   for (const name of FUNCTIONS) {
+    label(name, 'one-definition');
     requireEvidence(Array.isArray(state[name]) && state[name].length === 1);
+    label(name, 'body-md5');
     equal(state[name][0].md5, createHash('md5').update(sourceBody(source, name)).digest('hex'));
+    label(name, 'review-date-reads');
     equal(state[name][0].dates, name === 'private.ai_analysis_permitted' ? 1 : 0);
-    requireEvidence(state[name][0].config.includes('search_path='));
+    label(name, 'search-path');
+    // proconfig holds entries such as search_path=", so match the entry, not the bare key.
+    requireEvidence(state[name][0].config.some((entry) => entry.startsWith('search_path=')));
   }
 }
 
@@ -82,8 +89,26 @@ export async function availabilityCheckpoint(sql) {
 
 // Read-only: the migration changed the nine bodies and nothing else (owner, ACL, security config, volatility, every other
 // body, manifests, triggers, rows, object bytes).
-export async function availabilityCompare(before, sql) {
+export async function availabilityCompare(before, sql, mark = () => {}) {
   const after = JSON.parse(await sql(checkpointSql));
+  const clean = (text) => String(text).replace(/[^a-z0-9_]+/gi, '-').slice(0, 80);
+  const same = (x, y) => JSON.stringify(x) === JSON.stringify(y);
+  for (const section of ['manifests', 'triggers', 'objects']) {
+    if (!same(after[section], before[section])) mark(`compare-${section}`);
+    requireEvidence(same(after[section], before[section]));
+  }
+  for (const key of Object.keys(before.rows)) {
+    if (!same(after.rows[key], before.rows[key])) mark(`compare-rows-${clean(key)}`);
+    requireEvidence(same(after.rows[key], before.rows[key]));
+  }
+  const names = new Set([...Object.keys(before.functions), ...Object.keys(after.functions)]);
+  for (const name of names) {
+    for (const field of ['owner', 'definer', 'volatility', 'config', 'acl', 'body']) {
+      const x = before.functions[name]?.[field], y = after.functions[name]?.[field];
+      if (!same(x, y)) mark(`compare-function-${clean(name)}-${field}`);
+      requireEvidence(same(x, y));
+    }
+  }
   equal(after, before);
 }
 
