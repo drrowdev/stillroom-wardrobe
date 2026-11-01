@@ -508,27 +508,81 @@ test.describe('Stop and Delete', () => {
     await expect(page.locator('.tryon-saved-list img')).toBeVisible();
     await expect(page.getByText(text('tryon.deleted'), { exact: true })).toHaveCount(0);
   });
-  test('a long list of saved try-ons loads six pictures and the rest on request', async ({ page }) => {
+  test('200 saved try-ons show six at a time and never keep more than one page of pictures loaded', async ({ page }) => {
+    engineOnly();
+    test.setTimeout(150_000);
+    // Count the Blob URLs the page creates and revokes: every picture that is shown owns one until it leaves the page.
+    await page.addInitScript(() => {
+      const counts = { created: 0, revoked: 0 };
+      Object.assign(window, { __blobs: counts });
+      const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+      URL.createObjectURL = (value) => { counts.created += 1; return create(value); };
+      URL.revokeObjectURL = (url) => { counts.revoked += 1; revoke(url); };
+    });
+    const api = await mockBackend(page);
+    const clothes = seed(api);
+    api.tryonControl.setup[owners.a] = { activated: true };
+    api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION;
+    const outfitId = seedOutfit(api, [clothes.top.id], 'Weekend');
+    for (let index = 0; index < 200; index += 1) {
+      api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId, itemIds: [clothes.top.id], image: api.fixture,
+        completedAtMs: Date.now() - 1000 * (index + 1) });
+    }
+    const live = () => page.evaluate(() => { const c = (window as unknown as { __blobs: { created: number; revoked: number } }).__blobs; return c.created - c.revoked; });
+    await page.goto(`/#/outfits/${outfitId}`); await signIn(page);
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(6, { timeout: 10_000 });
+    await expect(page.locator('#tryon-saved-page')).toHaveText(text('tryon.pageOf', 'en', { page: 1, pages: 34 }));
+    await expect(page.locator('#tryon-saved-prev')).toBeDisabled();
+    // The page holds a few Blob URLs of its own (item thumbnails); what matters is that this list adds one per mounted picture only.
+    await expect.poll(live).toBeGreaterThanOrEqual(6);
+    const base = await live();
+    for (let at = 1; at < 34; at += 1) {
+      await page.locator('#tryon-saved-next').click();
+      await expect(page.locator('#tryon-saved-page')).toHaveText(text('tryon.pageOf', 'en', { page: at + 1, pages: 34 }));
+      await expect(page.locator('.tryon-saved-list li')).toHaveCount(at === 33 ? 2 : 6);
+      // Mounted pictures and unreleased Blob URLs stay within one page (plus the one just being replaced) at any depth.
+      expect(await page.locator('.tryon-saved-list li').count()).toBeLessThanOrEqual(6);
+      await expect.poll(live).toBeLessThanOrEqual(base);
+    }
+    await expect(page.locator('#tryon-saved-next')).toBeDisabled();
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(2);
+    await expect.poll(live).toBe(base - 4);
+    await page.locator('#tryon-saved-prev').click();
+    await expect(page.locator('#tryon-saved-page')).toHaveText(text('tryon.pageOf', 'en', { page: 33, pages: 34 }));
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(6);
+    await expect.poll(live).toBe(base);
+    const { created, revoked } = await page.evaluate(() => (window as unknown as { __blobs: { created: number; revoked: number } }).__blobs);
+    expect(created).toBeGreaterThanOrEqual(200);
+    expect(created - revoked).toBe(base);
+  });
+  test('deleting the last picture of the last page moves back a page; deleting another refills the page', async ({ page }) => {
     engineOnly();
     const api = await mockBackend(page);
     const clothes = seed(api);
     api.tryonControl.setup[owners.a] = { activated: true };
     api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION;
     const outfitId = seedOutfit(api, [clothes.top.id], 'Weekend');
+    const ids: string[] = [];
     for (let index = 0; index < 8; index += 1) {
-      api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId, itemIds: [clothes.top.id], image: api.fixture,
-        completedAtMs: Date.now() - 1000 * (index + 1) });
+      const id = randomUUID(); ids.push(id);
+      api.tryonControl.results.push({ id, owner: owners.a, outfitId, itemIds: [clothes.top.id], image: api.fixture, completedAtMs: Date.now() - 1000 * (index + 1) });
     }
-    let images = 0;
-    page.on('request', request => { if (/\/rpc\/tryon_result_image_v1$/.test(new URL(request.url()).pathname)) images += 1; });
     await page.goto(`/#/outfits/${outfitId}`); await signIn(page);
     await expect(page.locator('.tryon-saved-list img')).toHaveCount(6, { timeout: 10_000 });
-    expect(images).toBe(6);
-    await page.locator('#tryon-saved-more').click();
-    await expect(page.locator('.tryon-saved-list img')).toHaveCount(8, { timeout: 10_000 });
-    await expect(page.locator('#tryon-saved-more')).toHaveCount(0);
-  });
-  test('with several saved try-ons, deleting one keeps the others and settles', async ({ page }) => {
+    // Deleting on page one pulls the next picture in, so the page stays full.
+    await page.locator(`#tryon-${ids[0]}-delete`).click();
+    await page.locator(`#tryon-${ids[0]}-confirm-confirm`).click();
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(6, { timeout: 10_000 });
+    await expect(page.locator(`#tryon-${ids[6]}-delete`)).toBeVisible();
+    await expect(page.locator('#tryon-saved-page')).toHaveText(text('tryon.pageOf', 'en', { page: 1, pages: 2 }));
+    await page.locator('#tryon-saved-next').click();
+    await expect(page.locator('.tryon-saved-list li')).toHaveCount(1);
+    await page.locator(`#tryon-${ids[7]}-delete`).click();
+    await page.locator(`#tryon-${ids[7]}-confirm-confirm`).click();
+    // The emptied page is left: the list is one page of six again and the pager is gone.
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(6, { timeout: 10_000 });
+    await expect(page.locator('#tryon-saved-page')).toHaveCount(0);
+  });  test('with several saved try-ons, deleting one keeps the others and settles', async ({ page }) => {
     engineOnly();
     const errors: string[] = [];
     page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });

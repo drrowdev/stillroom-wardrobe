@@ -25,8 +25,9 @@ export function TryOnButton({ client, scope, record, components, disabled, t, on
  * when opened. The ideas' metadata list is read whenever the device is online, whatever the try-on status says (the status
  * read may fail, and saved pictures must not vanish with it); a failed read is shown with Retry.
  */
-/** Saved pictures load one by one, so a long list shows its newest few and the rest on request. */
-const SAVED_PAGE = 6;
+/** Up to 200 pictures can be saved, so they show one page at a time: only this page's pictures are mounted and loaded, and a
+ * picture's Blob URL is revoked when its page is left. */
+export const SAVED_PAGE = 6;
 
 export function SavedTryOns({ client, scope, outfitId, online, t }: {
   client: AppClient; scope: OwnerScope; outfitId: string | null; online: boolean; t: Translate;
@@ -36,7 +37,7 @@ export function SavedTryOns({ client, scope, outfitId, online, t }: {
   const { state, retry } = useOutfitTryOns(store?.api ?? null, outfitId, outfitId === null ? online : status !== null && status.results > 0);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [open, setOpen] = useState(false);
-  const [limit, setLimit] = useState(SAVED_PAGE);
+  const [page, setPage] = useState(0);
   // Idempotent: reporting the same removal again changes nothing and renders nothing.
   const remove = useCallback((id: string) => setRemoved(current => current.has(id) ? current : new Set(current).add(id)), []);
   if (!store) return null;
@@ -49,16 +50,24 @@ export function SavedTryOns({ client, scope, outfitId, online, t }: {
   }
   if (state.kind !== 'ready' || !state.results.length) return null;
   const shown = state.results.filter(result => !removed.has(result.id));
-  const body = <>
+  // Deleting the last picture of a page moves back one page; deleting any other refills the page from the next one.
+  const pages = Math.max(1, Math.ceil(shown.length / SAVED_PAGE));
+  const current = Math.min(page, pages - 1);
+  const visible = shown.slice(current * SAVED_PAGE, (current + 1) * SAVED_PAGE);  const body = <>
     {removed.size > 0 && <p role="status">{t('tryon.deleted')}</p>}
     {shown.length > 0 && <ul className="tryon-saved-list">
-      {shown.slice(0, limit).map(result => <li key={result.id}>
+      {visible.map(result => <li key={result.id}>
         <TryOnPicture api={store.api} result={result} t={t} online={online} idPrefix={`tryon-${result.id}`}
           onDeleted={() => remove(result.id)} />
       </li>)}
     </ul>}
-    {shown.length > limit && <button id="tryon-saved-more" type="button" className="button button-secondary"
-      onClick={() => setLimit(value => value + SAVED_PAGE)}>{t('tryon.showMore')}</button>}
+    {pages > 1 && <nav className="outfit-actions" aria-label={t('tryon.pages')}>
+      <button id="tryon-saved-prev" type="button" className="button button-secondary" disabled={current === 0}
+        onClick={() => setPage(current - 1)}>{t('tryon.prevPage')}</button>
+      <span id="tryon-saved-page" role="status">{t('tryon.pageOf', { page: current + 1, pages })}</span>
+      <button id="tryon-saved-next" type="button" className="button button-secondary" disabled={current === pages - 1}
+        onClick={() => setPage(current + 1)}>{t('tryon.nextPage')}</button>
+    </nav>}
   </>;
   if (outfitId === null) {
     if (!shown.length && !removed.size) return null;
