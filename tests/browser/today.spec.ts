@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
 import { locales, translate, type Language, type MessageKey } from '../../src/i18n/all';
+import { helsinkiOffsetSeconds } from './helsinki-offset';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { dismissKeyboard, expectIdentity, expectSignedIn, openAccountMenu, settleShell, shellNav } from './shell-support';
 
@@ -1323,7 +1324,7 @@ test('Undo for a pair holds Save and Wear today while it is written, and until a
 
 // Cool days (10 degrees by day) for today and tomorrow, as Open-Meteo's forecast would reply, held until released.
 function coldForecast(now = Date.now()) {
-  const offset = 10800;
+  const offset = helsinkiOffsetSeconds(now);
   const first = new Date(now + offset * 1000).toISOString().slice(0, 10);
   const time: string[] = [], temperature: number[] = [], rain: number[] = [], wind: number[] = [];
   for (let index = 0; index < 48; index++) {
