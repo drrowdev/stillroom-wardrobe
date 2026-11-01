@@ -50,6 +50,7 @@ export function SavedTryOns({ client, scope, outfitId, online, t }: {
   }
   if (state.kind !== 'ready' || !state.results.length) return null;
   const shown = state.results.filter(result => !removed.has(result.id));
+  // The paging buttons are aria-disabled at the ends, not disabled, so the one just pressed keeps keyboard focus.
   // Deleting the last picture of a page moves back one page; deleting any other refills the page from the next one.
   const pages = Math.max(1, Math.ceil(shown.length / SAVED_PAGE));
   const current = Math.min(page, pages - 1);
@@ -62,11 +63,11 @@ export function SavedTryOns({ client, scope, outfitId, online, t }: {
       </li>)}
     </ul>}
     {pages > 1 && <nav className="outfit-actions" aria-label={t('tryon.pages')}>
-      <button id="tryon-saved-prev" type="button" className="button button-secondary" disabled={current === 0}
-        onClick={() => setPage(current - 1)}>{t('tryon.prevPage')}</button>
+      <button id="tryon-saved-prev" type="button" className="button button-secondary" aria-disabled={current === 0 || undefined}
+        onClick={() => { if (current > 0) setPage(current - 1); }}>{t('tryon.prevPage')}</button>
       <span id="tryon-saved-page" role="status">{t('tryon.pageOf', { page: current + 1, pages })}</span>
-      <button id="tryon-saved-next" type="button" className="button button-secondary" disabled={current === pages - 1}
-        onClick={() => setPage(current + 1)}>{t('tryon.nextPage')}</button>
+      <button id="tryon-saved-next" type="button" className="button button-secondary" aria-disabled={current === pages - 1 || undefined}
+        onClick={() => { if (current < pages - 1) setPage(current + 1); }}>{t('tryon.nextPage')}</button>
     </nav>}
   </>;
   if (outfitId === null) {

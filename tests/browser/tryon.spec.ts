@@ -532,19 +532,21 @@ test.describe('Stop and Delete', () => {
     await page.goto(`/#/outfits/${outfitId}`); await signIn(page);
     await expect(page.locator('.tryon-saved-list img')).toHaveCount(6, { timeout: 10_000 });
     await expect(page.locator('#tryon-saved-page')).toHaveText(text('tryon.pageOf', 'en', { page: 1, pages: 34 }));
-    await expect(page.locator('#tryon-saved-prev')).toBeDisabled();
+    await expect(page.locator('#tryon-saved-prev')).toHaveAttribute('aria-disabled', 'true');
     // The page holds a few Blob URLs of its own (item thumbnails); what matters is that this list adds one per mounted picture only.
     await expect.poll(live).toBeGreaterThanOrEqual(6);
     const base = await live();
     for (let at = 1; at < 34; at += 1) {
-      await page.locator('#tryon-saved-next').click();
+      // The last step is taken from the keyboard (WebKit does not focus a clicked button), to prove focus stays on the control.
+      if (at === 33) { await page.locator('#tryon-saved-next').focus(); await page.keyboard.press('Enter'); } else await page.locator('#tryon-saved-next').click();
       await expect(page.locator('#tryon-saved-page')).toHaveText(text('tryon.pageOf', 'en', { page: at + 1, pages: 34 }));
       await expect(page.locator('.tryon-saved-list li')).toHaveCount(at === 33 ? 2 : 6);
       // Mounted pictures and unreleased Blob URLs stay within one page (plus the one just being replaced) at any depth.
       expect(await page.locator('.tryon-saved-list li').count()).toBeLessThanOrEqual(6);
       await expect.poll(live).toBeLessThanOrEqual(base);
     }
-    await expect(page.locator('#tryon-saved-next')).toBeDisabled();
+    await expect(page.locator('#tryon-saved-next')).toHaveAttribute('aria-disabled', 'true');
+    await expect(page.locator('#tryon-saved-next')).toBeFocused();
     await expect(page.locator('.tryon-saved-list img')).toHaveCount(2);
     await expect.poll(live).toBe(base - 4);
     await page.locator('#tryon-saved-prev').click();
@@ -569,6 +571,29 @@ test.describe('Stop and Delete', () => {
     }
     await page.goto(`/#/outfits/${outfitId}`); await signIn(page);
     await expect(page.locator('.tryon-saved-list img')).toHaveCount(6, { timeout: 10_000 });
+    // Paging by keyboard never drops focus at either end: the pressed button keeps it while it reads as disabled, and an
+    // activation at an end changes nothing.
+    const prev = page.locator('#tryon-saved-prev'), next = page.locator('#tryon-saved-next');
+    const label = (page2: 1 | 2) => page.locator('#tryon-saved-page').filter({ hasText: text('tryon.pageOf', 'en', { page: page2, pages: 2 }) });
+    await expect(prev).toHaveAttribute('aria-disabled', 'true');
+    await next.focus(); await page.keyboard.press('Enter');
+    await expect(label(2)).toBeVisible();
+    await expect(next).toHaveAttribute('aria-disabled', 'true');
+    await expect(next).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(label(2)).toBeVisible();
+    await expect(next).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(prev).toBeFocused();
+    await expect(prev).not.toHaveAttribute('aria-disabled', 'true');
+    await page.keyboard.press('Enter');
+    await expect(label(1)).toBeVisible();
+    await expect(prev).toHaveAttribute('aria-disabled', 'true');
+    await expect(prev).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(label(1)).toBeVisible();
+    await expect(prev).toBeFocused();
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(false);
     // Deleting on page one pulls the next picture in, so the page stays full.
     await page.locator(`#tryon-${ids[0]}-delete`).click();
     await page.locator(`#tryon-${ids[0]}-confirm-confirm`).click();
