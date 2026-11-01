@@ -3,7 +3,6 @@ import AxeBuilder from '@axe-core/playwright';
 import { mkdir, open, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { languages, locales, messages, translate, type Language, type MessageKey } from '../../src/i18n/all';
-import { azureAiReviewExpires } from '../../src/domain/ai-controls';
 import { aiFixture, editItem } from './ai-photo-first-support';
 import { budgetReply, owners } from './mock-backend';
 import { utcPeriod } from '../../src/features/settings/ai-features-model';
@@ -294,7 +293,7 @@ test('L2a unavailable states show one line and only Turn off for stored consent'
   await expect(toggle(page)).toHaveCount(0);
   for (const patch of [{ code: 'INACTIVE' }, { code: 'UNAVAILABLE' }, { policy: { modelId: 'unrecognized-model' } },
     { policy: { noticeRevision: 1, modelId: 'gemini-3.8-flash', executionManifestId: 'google-eu-3.8-v1' } },
-    { serverTimeMs: azureAiReviewExpires }, { consent: { enabled: true, noticeRevision: 1 }, policy: { modelId: 'unrecognized-model' } }] as StatusPatch[]) {
+    { consent: { enabled: true, noticeRevision: 1 }, policy: { modelId: 'unrecognized-model' } }] as StatusPatch[]) {
     setStatus(patch);
     await reread(page, unavailable);
     await expect(state(page, true)).toHaveCount(1);

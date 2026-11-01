@@ -296,22 +296,21 @@ describe('status validation and current policy', () => {
   it('accepts an account without controls: no policy and no budget', () => {
     expect(parseAiStatus({ ...status(), code: 'UNCONFIGURED', policy: null, budget: null })).toMatchObject({ budget: null, policy: null });
   });
-  it('refuses unknown notice/model, inactive controls and expired review', () => {
+  it('refuses unknown notice/model and inactive controls, with no calendar expiry', () => {
     const good = parseAiStatus(status())!;
-    expect(supportedAiPolicy(good, Date.parse('2026-09-12T00:00:00Z'))).toBe(true);
-    expect(supportedAiPolicy(good, Date.parse('2026-10-21T00:00:00Z'))).toBe(false);
+    for (const at of ['2026-09-12T00:00:00Z', '2026-10-21T00:00:00Z', '2027-06-01T00:00:00Z'])
+      expect(supportedAiPolicy({ ...good, serverTimeMs: Date.parse(at) })).toBe(true);
     for (const policy of [{ ...good.policy!, noticeRevision: 1 }, { ...good.policy!, modelId: 'other' },
       { ...good.policy!, executionManifestId: 'other' }, { ...good.policy!, activated: false }])
       expect(supportedAiPolicy({ ...good, policy })).toBe(false);
   });
   it('supports each Azure manifest only with its own prompt version', () => {
     const good = parseAiStatus(status())!;
-    const at = Date.parse('2026-09-24T00:00:00Z');
     const v2 = { ...good.policy!, executionManifestId: 'azure-eu-terra-devtest-v2', promptVersion: 2 };
-    expect(supportedAiPolicy({ ...good, policy: v2 }, at)).toBe(true);
+    expect(supportedAiPolicy({ ...good, policy: v2 })).toBe(true);
     for (const policy of [{ ...v2, promptVersion: 1 }, { ...good.policy!, promptVersion: 2 },
       { ...v2, promptVersion: 3 }, { ...v2, executionManifestId: 'azure-eu-terra-devtest-v3' }])
-      expect(supportedAiPolicy({ ...good, policy }, at)).toBe(false);
+      expect(supportedAiPolicy({ ...good, policy })).toBe(false);
   });
 });
 

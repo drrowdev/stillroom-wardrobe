@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aiCardState, aiPolicyBinding, azureAiManifest, azureAiModel, azureAiReviewExpires, type AiStatus } from '../../src/domain/ai-controls';
+import { aiCardState, aiPolicyBinding, azureAiManifest, azureAiModel, type AiStatus } from '../../src/domain/ai-controls';
 
 const now = Date.parse('2026-09-24T12:00:00Z');
 const policy = { activated: true, noticeRevision: 2, modelId: azureAiModel, promptVersion: 2, maxRequestMicro: '4097351',
@@ -17,8 +17,8 @@ function status(overrides: { code?: AiStatus['code']; enabled?: boolean; revisio
     budget: overrides.budget !== undefined ? overrides.budget : budgetOf('20000000'),
   };
 }
-const card = (value: AiStatus | null, extra: { loadFailed?: boolean; unresolved?: boolean; now?: number } = {}) =>
-  aiCardState({ status: value, loadFailed: extra.loadFailed ?? false, unresolved: extra.unresolved ?? false, now: extra.now ?? now });
+const card = (value: AiStatus | null, extra: { loadFailed?: boolean; unresolved?: boolean } = {}) =>
+  aiCardState({ status: value, loadFailed: extra.loadFailed ?? false, unresolved: extra.unresolved ?? false });
 
 describe('photo analysis card state', () => {
   it('shows each state with only its own actions', () => {
@@ -46,17 +46,23 @@ describe('photo analysis card state', () => {
       expect(card(status({ code })).turnOff).toBe(false);
     }
   });
-  it('treats unsupported, Google, expired and missing policies as unavailable, never renew', () => {
+  it('treats unsupported, Google and missing policies as unavailable, never renew', () => {
     expect(card(status({ policy: null, code: 'UNCONFIGURED' })).state).toBe('unavailable');
     expect(card(status({ policy: { modelId: 'unrecognized-model' } })).state).toBe('unavailable');
     expect(card(status({ policy: { noticeRevision: 1, modelId: 'gemini-3.8-flash', executionManifestId: 'google-eu-3.8-v1' } })).state)
       .toBe('unavailable');
     expect(card(status({ enabled: true, revision: 1, code: 'CONSENT_REQUIRED', policy: { modelId: 'unrecognized-model' } })).state)
       .toBe('unavailable');
-    expect(card(status(), { now: azureAiReviewExpires }).state).toBe('unavailable');
-    expect(card(status({ serverTimeMs: azureAiReviewExpires })).state).toBe('unavailable');
     expect(card(status({ budget: null })).state).toBe('unavailable');
     expect(card(status({ policy: { activated: false } })).state).toBe('unavailable');
+  });
+  it('stays available past the historical review dates, with consent and activation still required', () => {
+    for (const at of ['2026-10-21T00:00:00Z', '2027-01-01T00:00:00Z', '2030-06-01T00:00:00Z']) {
+      const serverTimeMs = Date.parse(at);
+      expect(card(status({ enabled: true, serverTimeMs })).state).toBe('on');
+      expect(card(status({ serverTimeMs })).state).toBe('off');
+      expect(card(status({ enabled: true, serverTimeMs, policy: { activated: false } })).state).toBe('unavailable');
+    }
   });
   it('keeps consent on when only the monthly budget changes', () => {
     expect(card(status({ enabled: true, budget: budgetOf('30000000') })).state).toBe('on');

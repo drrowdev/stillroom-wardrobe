@@ -5,7 +5,7 @@ import {
   stylistRequest, stylistView, stylistWeather, type ChatTurn, type StylistRead, type StylistStatus,
 } from '../../src/domain/stylist-controls';
 import {
-  STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_REVIEW_EXPIRES, conversationBytes, parseStylistBody, utf8Bytes,
+  STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, conversationBytes, parseStylistBody, utf8Bytes,
 } from '../../src/domain/stylist';
 import type { WardrobeItem } from '../../src/domain/wardrobe';
 import { messages } from '../../src/i18n/all';
@@ -13,7 +13,7 @@ import { messages } from '../../src/i18n/all';
 const owner = '00000000-0000-4000-8000-00000000000a';
 const REQUEST = '11111111-1111-4111-8111-111111111111';
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
-const NOW = STYLIST_REVIEW_EXPIRES - 86_400_000;
+const NOW = Date.parse('2026-11-30T00:00:00Z');
 
 type RawOptions = { code?: string; enabled?: boolean; revision?: number | null; policy?: Record<string, unknown> | null;
   used?: string; allowance?: string; warning?: boolean; budget?: unknown; serverTimeMs?: number };
@@ -75,7 +75,9 @@ describe('ST1b stylist status', () => {
       expect(v(ready(status({ policy, enabled: true })))).toMatchObject({ kind: 'unavailable', turnOff: true, turnOn: false, send: false });
       expect(v(ready(status({ policy, code: 'CONSENT_REQUIRED' })))).toMatchObject({ kind: 'unavailable', turnOff: false, turnOn: false });
     }
-    expect(v(ready(status({ enabled: true, serverTimeMs: STYLIST_REVIEW_EXPIRES })))).toMatchObject({ kind: 'unavailable', turnOff: true });
+    for (const at of ['2026-12-01T00:00:00Z', '2027-06-01T00:00:00Z']) {
+      expect(v(ready(status({ enabled: true, serverTimeMs: Date.parse(at) })))).toMatchObject({ kind: 'on', send: true, turnOff: true });
+    }
     expect(v(ready(status({ code: 'INACTIVE', enabled: true })))).toMatchObject({ kind: 'paused', entry: true, turnOff: true, send: false });
     expect(v(ready(status({ code: 'INACTIVE' })))).toMatchObject({ kind: 'paused', turnOff: false, turnOn: false });
     expect(v(ready(status({ code: 'CONSENT_REQUIRED' })))).toMatchObject({ kind: 'off', entry: true, turnOn: true, turnOff: false });

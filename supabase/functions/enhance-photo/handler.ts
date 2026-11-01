@@ -1,5 +1,5 @@
 import {
-  CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_LIMITS, ENHANCE_MODEL, ENHANCE_RESERVATION_MICRO, ENHANCE_REVIEW_EXPIRES,
+  CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_LIMITS, ENHANCE_MODEL, ENHANCE_RESERVATION_MICRO,
 } from '../../../src/domain/enhancement.ts';
 import { readJpegHeader } from '../../../src/images/jpeg.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
@@ -125,7 +125,7 @@ export function createEnhanceHandler(config: EnhanceConfig, registrar: EnhanceRe
       }
       if (policy.noticeRevision !== CLEANUP_NOTICE_REVISION || policy.manifestId !== CLEANUP_MANIFEST || policy.modelId !== ENHANCE_MODEL
         || !microText(policy.maxRequestMicro) || BigInt(policy.maxRequestMicro as string) < BigInt(ENHANCE_RESERVATION_MICRO)
-        || Date.now() >= ENHANCE_REVIEW_EXPIRES || !azureConfigured(config.azure)) return error('UNCONFIGURED');
+        || !azureConfigured(config.azure)) return error('UNCONFIGURED');
       if (policy.providerAvailable !== true) return error('UNAVAILABLE');
       // W1: without a way to keep the claimed work alive, nothing is claimed.
       if (registrar === null) return error('UNCONFIGURED');

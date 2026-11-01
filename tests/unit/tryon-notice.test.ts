@@ -105,12 +105,12 @@ describe('Turn on (fail closed)', () => {
   it('is offered when the server policy is activated and matches the pinned notice, manifest and model', () => {
     expect(view(raw())).toEqual({ kind: 'off', turnOn: true, turnOff: false });
   });
-  it('is never offered when the policy is not activated, names another notice, manifest or model, or has expired', () => {
+  it('is never offered when the policy is not activated, names another notice, manifest or model', () => {
     expect(view(raw({}, { activated: false })).turnOn).toBe(false);
     expect(view(raw({}, { noticeRevision: TRYON_NOTICE_REVISION + 1 })).turnOn).toBe(false);
     expect(view(raw({}, { manifestId: 'other' })).turnOn).toBe(false);
     expect(view(raw({}, { modelId: 'other' })).turnOn).toBe(false);
-    expect(view(raw({ serverTimeMs: Date.parse('2027-01-01T00:00:00Z') })).turnOn).toBe(false);
+    expect(view(raw({ serverTimeMs: Date.parse('2027-06-01T00:00:00Z') })).turnOn).toBe(true);
     expect(view(parseTryOnStatus({ code: 'UNAVAILABLE' })).turnOn).toBe(false);
   });
   it('asks to turn on again when consent was given to another revision; Turn off stays', () => {

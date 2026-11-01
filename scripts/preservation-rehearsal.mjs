@@ -30,14 +30,15 @@ const SAVE1_PRIOR_VERSION = '20261007090000';
 const BUDGET1_PRIOR_VERSION = '20261009090000';
 const IDEA_PRIOR_VERSION = '20261010090000';
 const PHOTO_PRIOR_VERSION = '20261011090000';
+const AVAIL_PRIOR_VERSION = '20261011100000';
 // Exact applied prefix per labelled stage; 'target' is the full source inventory.
 const STAGE_VERSIONS = Object.freeze({ base: '20260905000000', 'hosted-source': HOSTED_SOURCE_VERSION,
   'prior-main': PRIOR_MAIN_VERSION, 'azure-target': AZURE_TARGET_VERSION, 'image-change': IMAGE_CHANGE_VERSION,
   colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, 'save1-prior': SAVE1_PRIOR_VERSION, 'budget1-prior': BUDGET1_PRIOR_VERSION,
-  'idea-prior': IDEA_PRIOR_VERSION, 'photo-prior': PHOTO_PRIOR_VERSION, target: null });
+  'idea-prior': IDEA_PRIOR_VERSION, 'photo-prior': PHOTO_PRIOR_VERSION, 'avail-prior': AVAIL_PRIOR_VERSION, target: null });
 const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], 'image-change': ['azure-target', 'hosted-source'],
   colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], 'budget1-prior': ['save1-prior'],
-  'idea-prior': ['budget1-prior'], 'photo-prior': ['idea-prior'], target: ['photo-prior'] });
+  'idea-prior': ['budget1-prior'], 'photo-prior': ['idea-prior'], 'avail-prior': ['photo-prior'], target: ['avail-prior'] });
 
 export const MIGRATIONS = Object.freeze([
   { name: '20260905000000_initial.sql', version: '20260905000000', time: '2026-09-05 00:00:00', bytes: 35214, sha256: SOURCE_HASHES.base },
@@ -75,6 +76,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261010090000_shared_ai_budget.sql', version: '20261010090000', time: '2026-10-10 09:00:00', bytes: 63172, sha256: '8c813bd31aebfc4fdf515b9f34fc9571f6be841878b64a220e9c73e2df1bb79e' },
   { name: '20261011090000_tryon_idea.sql', version: '20261011090000', time: '2026-10-11 09:00:00', bytes: 24325, sha256: '666e3da6a75033d7a6a43678f879c07f1584b4eea1b5b6867e379f3854ff4d4a' },
   { name: '20261011100000_tryon_person_photo.sql', version: '20261011100000', time: '2026-10-11 10:00:00', bytes: 21848, sha256: '465973355f31dd3137ffc2168820c318a77a87c417c01b1969e882ce5ee12331' },
+  { name: '20261101080000_persistent_ai_availability.sql', version: '20261101080000', time: '2026-11-01 08:00:00', bytes: 47567, sha256: '9c483f9a2dce35bae501fb34842d718fdd7868443d001744f6c928ee10cb50e4' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1389,15 +1391,25 @@ async function main() {
       const { photoUpgradeSeed, photoUpgradeVerify, tryonPhotoProbes } = await import('../tests/integration/tryon-photo.sessions.mjs');
       const photoSeed = await photoUpgradeSeed(colourSnapshot, privilegedLocalSql);
       stage = 'PHOTO1-prior-to-target';
-      await migrateToStage(run, 'photo-prior', 'target');
+      await migrateToStage(run, 'photo-prior', 'avail-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
-      await history('target'); await verifyCiStorageGuard();
+      await history('avail-prior'); await verifyCiStorageGuard();
       stage = 'PHOTO1-upgrade-verify';
       await photoUpgradeVerify(photoSeed, (label) => { stage = `PHOTO1-upgrade-${label}`; });
       stage = 'PHOTO1-tryon-photo';
       await tryonPhotoProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `PHOTO1-${label}`; });
       colourFinalizer.assertRunning();
+      // AVAIL1: every frozen historical check above ran at its exact inventory; the availability migration is applied last.
+      stage = 'AVAIL1-prior-to-target';
+      await migrateToStage(run, 'avail-prior', 'target');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('target'); await verifyCiStorageGuard();
+      stage = 'AVAIL1-catalog';
+      const { availabilityCatalogProbe } = await import('../tests/integration/persistent-availability.sessions.mjs');
+      await availabilityCatalogProbe(privilegedLocalSql);
+      colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
+    console.log('PASS: AVAIL1 persistent availability; the availability migration was applied after the frozen checks, the nine replaced function bodies equal the migration source and none but the legacy Google term reads a review date; no provider calls');
     console.log('PASS: TRYON-PHOTO1 saved reference photo; the photo migration was applied after the frozen checks, the configured notice moved to revision 2 with consent left at 1, a revision-1 consent cannot save a photo, saves are admitted only for the app\'s own JPEG shape, each owner has one private photo that only they can read, replace or remove, withdrawal and any notice change remove it, removal needs no activation, a save racing a withdrawal never survives it, and the platform-restore step removes every photo; no provider calls');
     console.log('PASS: TRYON-IDEA1 unsaved try-on; the idea migration was applied after the frozen checks, an idea chain is claimed from the owner\'s own items without an outfit, keeps its identity, is isolated per owner, and its results are visible and deletable without an outfit while outfit try-on is unchanged; no provider calls');
     console.log('PASS: FILT1 upgrade; try-on and enhancement rows settled by the old finishes keep their digest, origin, anomaly and amount after the provider_refusal migration, the new columns are null, replays with the refusal arguments omitted or null match and write nothing; seeded rows removed before the compare; no provider calls');

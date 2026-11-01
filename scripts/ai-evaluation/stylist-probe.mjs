@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  STYLIST_BODY_CONTROLS, STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_RESERVATION_MICRO, STYLIST_REVIEW_EXPIRES, STYLIST_SETTINGS,
+  STYLIST_BODY_CONTROLS, STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_RESERVATION_MICRO, STYLIST_SETTINGS,
   STYLIST_ENDPOINT, buildStylistRequest, claimedCandidate, conversationBytes, parseStylistBody, parseStylistItem, stylistEligible,
   utf8Bytes, validateStylistReply,
 } from '../../src/domain/stylist.ts';
@@ -321,7 +321,6 @@ export function gitSource(repo = REPO) {
   return commit;
 }
 function allocationOpen(receipt, now) {
-  requireThat(now < STYLIST_REVIEW_EXPIRES, 'REVIEW_EXPIRED');
   requireThat(utcMonth(now) === receipt.allocatedAt.slice(0, 7), 'ALLOCATION_MONTH_ENDED');
 }
 
@@ -351,7 +350,7 @@ const STATES = ['OK', 'FAILED', 'HALTED', 'NOT_SENT'];
 const REASONS = {
   OK: ['OK'], FAILED: ['FILTERED', 'RESPONSE_FAILED', 'REPLY_INVALID'],
   HALTED: ['NETWORK_UNCERTAIN', 'RESPONSE_UNUSABLE', 'USAGE_INVALID', 'MODEL_ANOMALY', 'CONTROL_ANOMALY', 'INPUT_ENVELOPE', 'OUTPUT_ENVELOPE'],
-  NOT_SENT: ['ALLOCATION_MONTH_ENDED', 'REVIEW_EXPIRED'],
+  NOT_SENT: ['ALLOCATION_MONTH_ENDED'],
 };
 const OBSERVATION_KEYS = ['state', 'reason', 'httpStatus', 'code', 'usage', 'reply', 'messagesBytes', 'included', 'omitted',
   'startedAt', 'finishedAt', 'elapsedMs', 'estimateMicro'];
@@ -496,7 +495,7 @@ const notSent = (reason, built) => ({ state: 'NOT_SENT', reason, httpStatus: nul
 
 /**
  * One slot. Every refusal before the intent spends nothing. The intent is synced before the provider call and
- * consumes the slot for good; the month and review are checked again after it is durable, and a failure there is
+ * consumes the slot for good; the month is checked again after it is durable, and a failure there is
  * recorded as NOT_SENT by this code path, the only affirmative not-sent evidence.
  */
 export async function executeSlot({ root, id, slot, key, fetchImpl = fetch, now = Date.now, source = gitSource,

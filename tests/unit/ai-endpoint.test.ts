@@ -229,6 +229,29 @@ describe('B1 source runtime and fixed protocol', () => {
       expect(provider).not.toHaveBeenCalled();
     },
   );
+  it('dispatches the v2 pair after the historical review date and still stops without consent', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2027-06-01T00:00:00Z'));
+    try {
+      for (const consent of [true, false]) {
+        const calls: string[] = [];
+        vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+          calls.push(url.split('/').at(-1)!);
+          if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
+          if (url.endsWith('/ai_status')) return Response.json({ code: 'OK',
+            consent: consent ? { enabled: true, noticeRevision: 2 } : { enabled: false, noticeRevision: null },
+            policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2,
+              executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' }, budget: BUDGET });
+          return Response.json({ code: 'OK', claimed: true, manifestId: AZURE_MANIFEST,
+            resultExpiresAtMs: Date.now() + 10000, dispatchBeforeMs: Date.now() + 1000 });
+        }));
+        const provider = vi.fn(async () => { throw new DOMException('fixture timeout', 'TimeoutError'); });
+        await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
+        expect(calls.includes('ai_claim_analysis')).toBe(consent);
+        expect(provider).toHaveBeenCalledTimes(consent ? 1 : 0);
+      }
+    } finally { vi.useRealTimers(); }
+  });
   it('refuses a v1 claim acknowledgement under v2 controls without a provider call', async () => {
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {

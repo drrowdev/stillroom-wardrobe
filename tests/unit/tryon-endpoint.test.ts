@@ -124,6 +124,16 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
   const rpcBody = (calls: Call[], name: string) => calls.find((call) => call.url.endsWith(`/rpc/${name}`))?.body;
   const names = (calls: Call[]) => calls.map((call) => call.url.includes('/storage/') ? 'storage' : call.url.split('/').pop());
 
+  it('keeps serving past the historical review date', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2027-06-01T00:00:00Z'));
+    const calls = backend();
+    const { transport } = provider(() => Response.json(imageBody()));
+    const response = await createTryOnHandler(config, register, transport)(post(form(2), { Origin: 'http://127.0.0.1:5173' }));
+    expect(response.status).toBe(200);
+    expect(names(calls)).toEqual(['user', 'tryon_status', 'tryon_claim', 'storage', 'tryon_dispatch', 'tryon_finish']);
+  });
+
   it('runs one intermediate step and releases its bytes only after finish returned OK', async () => {
     const calls = backend();
     const { transport, sent } = provider(() => Response.json(imageBody()));

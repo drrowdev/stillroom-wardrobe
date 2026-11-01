@@ -172,6 +172,19 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     expect(JSON.stringify([...sent[0]!.entries()].filter(([, v]) => typeof v === 'string'))).not.toContain(OWNER);
   });
 
+  it('keeps serving past the historical review date; consent and provider checks still apply', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2027-06-01T00:00:00Z'));
+    const calls = backend();
+    const { transport } = provider(() => Response.json(imageBody()));
+    expect((await createEnhanceHandler(config, register, transport)(post())).status).toBe(200);
+    expect(calls.map((call) => call.url.split('/').pop())).toEqual(['user', 'enhance_status', 'enhance_claim', 'enhance_finish']);
+    const off = backend({ status: { ...status, consent: { enabled: false, noticeRevision: null } } });
+    const denied = await createEnhanceHandler(config, register, transport)(post());
+    expect(denied.status).not.toBe(200);
+    expect(off.some((call) => call.url.endsWith('/rpc/enhance_claim'))).toBe(false);
+  });
+
   it('accepts a restart-interval photo like the ones iPhone Safari prepares and sends it unchanged', async () => {
     const calls = backend();
     const { transport, sent } = provider(() => Response.json(imageBody()));

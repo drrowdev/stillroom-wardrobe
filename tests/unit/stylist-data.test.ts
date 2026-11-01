@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createClient, type Session } from '@supabase/supabase-js';
 import type { Database } from '../../src/data/database.types';
 import { StylistClient } from '../../src/data/stylist';
-import { STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_REVIEW_EXPIRES } from '../../src/domain/stylist';
+import { STYLIST_MANIFEST, STYLIST_MODEL } from '../../src/domain/stylist';
 import { parseStylistStatus, type StylistAnswer, type StylistStatus } from '../../src/domain/stylist-controls';
 import { StylistStore } from '../../src/features/stylist/stylist-store';
 import { canSend, clear, readStatus, send, viewOf, writeConsent } from '../../src/features/stylist/use-stylist';
@@ -11,7 +11,7 @@ import { testAccessToken } from './test-token';
 const owner = '10000000-0000-4000-8000-000000000001';
 const config = { url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_test_only', version: 'test' };
 function raw(code = 'OK', enabled = true) {
-  return { code, period: '2026-10', serverTimeMs: STYLIST_REVIEW_EXPIRES - 86_400_000,
+  return { code, period: '2026-10', serverTimeMs: Date.parse('2026-11-30T00:00:00Z'),
     consent: { enabled, noticeRevision: enabled ? 1 : null, consentedAt: enabled ? '2026-10-01T00:00:00Z' : null },
     policy: code === 'UNCONFIGURED' ? null : { activated: true, noticeRevision: 1, manifestId: STYLIST_MANIFEST, modelId: STYLIST_MODEL,
       maxRequestMicro: '129360' },

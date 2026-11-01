@@ -376,6 +376,22 @@ describe('stylist handler (mocked Auth, RPC and provider)', () => {
     }
   });
 
+  it('keeps serving past the historical review date, and still refuses without consent', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2027-06-01T00:00:00Z'));
+    try {
+      const calls = backend();
+      const { transport } = provider({ content: replyContent(['i1', 'i2']), refusal: null });
+      const response = await createStylistHandler(config, transport)(post(body()));
+      expect(response.status).toBe(200);
+      expect(calls.map((call) => call.url.split('/').pop())).toEqual(['user', 'stylist_status', 'stylist_claim', 'stylist_finish']);
+      const off = backend({ status: { ...status, consent: { enabled: false, noticeRevision: null } } });
+      const denied = await createStylistHandler(config, transport)(post(body()));
+      expect(denied.status).not.toBe(200);
+      expect(off.some((call) => call.url.endsWith('/rpc/stylist_claim'))).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('claims for the verified user only and returns owner item IDs', async () => {
     const calls = backend();
     const { transport, sent } = provider({ content: replyContent(['i1', 'i2']), refusal: null });

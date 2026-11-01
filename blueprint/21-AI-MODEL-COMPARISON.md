@@ -141,8 +141,8 @@ The 1048576-input / 65536-generated allowance envelope yields **2270823
 microUSD** reserved per admitted request. This is **allowance arithmetic, not
 a proven invoice ceiling or expected per-photo cost**. Missing/inconsistent
 usage stays held; estimates are not confirmed bills; over-envelope usage is
-unclamped, recorded as anomalous and disables the owner control. Review expires
-at `2027-01-01T00:00:00Z`; source does not silently refresh it.
+unclamped, recorded as anomalous and disables the owner control. The review date
+`2027-01-01T00:00:00Z` is audit metadata only; it does not limit availability.
 
 Before any paid/private-photo activation, independently verify current tariff,
 actual model-version behavior and exact-route total generated bound including
@@ -159,7 +159,7 @@ with only the colour vocabulary and prompt changed, following the owner's
 response schema enum adds `burgundy`, `cream`, `khaki`, `light_blue`, `teal`,
 `gold` and `silver` to the earlier 14 codes, and the prompt adds one guidance
 sentence for them. `prompt_version` is 2; model, deployment, endpoint, region,
-tariff rates, reservation, limits and the 21 October 2026 review expiry are
+tariff rates, reservation, limits and the 21 October 2026 review date (audit metadata) are
 unchanged. Pinned SHA-256: prompt `f936938355042f9620fad74b3da848e1045bb76461a4a6e98a1f2ed8080cec46`,
 schema `36ab5116df2cfce8443c5db0a9a0747e15f8d018e7463b8c2296d98568503d6e`,
 settings `6713706fb27792e2771f1fd2d0e4586a5ce1d61fb8ecbfa8dfd88f89db504827`.

@@ -132,7 +132,7 @@ describe('fixed inactive Azure profile', () => {
   });
 });
 describe('historical receipt reading versus Azure-only new dispatch', () => {
-  it('reads Google and Azure ready receipts after Azure review expiry without admitting new analysis', () => {
+  it('reads Google and Azure ready receipts and keeps Azure new analysis available past the historical review date', () => {
     const reply = (modelId: string, promptVersion: number, colours: string[] = ['green']) => parseAnalysisReply({ code: 'OK',
       status: 'ready', accounting: { basis: 'estimated', amountMicro: '1034', currency: 'USD' },
       result: { schemaVersion: 1, requestId: '10000000-0000-4000-8000-000000000001',
@@ -149,15 +149,15 @@ describe('historical receipt reading versus Azure-only new dispatch', () => {
       policy: { activated: true, modelId: AZURE_MODEL, promptVersion: 2, noticeRevision: 2,
         executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351', resultTtlSeconds: 3600 },
       budget: { monthlyAllowanceMicro: '50000000', usedMicro: '0', remainingMicro: '50000000', warning: false } })!;
-    expect(supportedAiPolicy(status, Date.parse('2026-09-21'))).toBe(true);
-    expect(supportedAiPolicy(status, Date.parse('2026-10-21'))).toBe(false);
+    expect(supportedAiPolicy(status)).toBe(true);
+    expect(supportedAiPolicy({ ...status, serverTimeMs: Date.parse('2027-06-01') })).toBe(true);
     expect(aiNoticeProfile(status.policy)).toBe('azure');
     const withPolicy = (change: object) => ({ ...status, policy: { ...status.policy!, ...change } });
     const v1 = withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v1', promptVersion: 1 });
-    expect(supportedAiPolicy(v1, Date.parse('2026-09-21'))).toBe(true); expect(aiNoticeProfile(v1.policy)).toBe('azure');
+    expect(supportedAiPolicy(v1)).toBe(true); expect(aiNoticeProfile(v1.policy)).toBe('azure');
     for (const mixed of [withPolicy({ promptVersion: 1 }), withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v1' }),
       withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v3' })]) {
-      expect(supportedAiPolicy(mixed, Date.parse('2026-09-21'))).toBe(false); expect(aiNoticeProfile(mixed.policy)).toBeNull();
+      expect(supportedAiPolicy(mixed)).toBe(false); expect(aiNoticeProfile(mixed.policy)).toBeNull();
     }
     const legacy = { ...status, policy: { ...status.policy!, modelId: 'gemini-3.8-flash', noticeRevision: 1, promptVersion: 1,
       executionManifestId: 'google-eu-3.8-v1' } };

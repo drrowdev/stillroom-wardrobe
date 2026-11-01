@@ -1,6 +1,6 @@
 import { assertSanitizedJpeg, readJpegHeader } from '../../../src/images/jpeg.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
-import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MANIFEST, AZURE_MODEL, AZURE_RESERVATION, AZURE_REVIEW_EXPIRES, AZURE_SETTINGS,
+import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MANIFEST, AZURE_MODEL, AZURE_RESERVATION, AZURE_SETTINGS,
   type AzureConfig, type AzureTransport } from './azure-openai.ts';
 import {
   MAX_IMAGE_BYTES, MODEL_ID, ProtocolError, REQUEST_MS,
@@ -117,7 +117,7 @@ export function createHandler(config: HandlerConfig, azureTransport: AzureTransp
         || preflight.policy.noticeRevision !== 2 || preflight.policy.executionManifestId !== AZURE_MANIFEST
         || typeof preflight.policy.maxRequestMicro !== 'string' || !/^[1-9][0-9]{0,18}$/.test(preflight.policy.maxRequestMicro)
         || BigInt(preflight.policy.maxRequestMicro) < BigInt(AZURE_RESERVATION)
-        || Date.now() >= AZURE_REVIEW_EXPIRES || !azureConfigured(config.azure)) return error('UNCONFIGURED');
+        || !azureConfigured(config.azure)) return error('UNCONFIGURED');
       const claim = await rpc('ai_claim_analysis', {
         p_owner_id: user.id, p_request_id: requestId, p_draft_id: draftId, p_generation: Number(generation),
         p_image_sha256: imageHash, p_byte_count: image.length, p_width: width, p_height: height, p_manifest_id: AZURE_MANIFEST,

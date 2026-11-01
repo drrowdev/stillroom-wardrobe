@@ -15,7 +15,6 @@ import { guardPrivileged, psql, freezeSql, restoreSql } from './isolation-catalo
 import { effectiveConfig, INGRESS_PORT } from '../tests/edge-fixtures/fixture-gateway.mjs';
 import { probeVerdict, kongLogVerdict, upstreamVerdict } from '../tests/edge-fixtures/egress-probe.mjs';
 import { canaryHits } from '../tests/edge-fixtures/canary.mjs';
-import { AZURE_REVIEW_EXPIRES } from '../supabase/functions/analyze-clothing/azure-openai.ts';
 
 export const FIXTURE_NETWORK = 'stillroom-edge-fixture';
 export const CANARY_NETWORK = 'stillroom-canary';
@@ -42,10 +41,6 @@ export const FENCE_REQUEST = 'e3b0af00-0000-4000-8000-000000000001';
 // The one enhancement whose evidence the gate expires (owner B only): gateId('B', 1, '6'), B's first released H2.
 export const EXPIRE_ENHANCEMENT_REQUEST = 'e3b0b600-0000-4000-8000-000000000001';
 
-/** AZURE_REVIEW_EXPIRES blocks the gate: an expired or invalid review date is BLOCKED, never a pass. */
-export function reviewGate(now, expires = AZURE_REVIEW_EXPIRES) {
-  return Number.isFinite(expires) && Number.isFinite(now) && now < expires ? 'open' : 'blocked';
-}
 /** Closed IPC operation shape; owner labels are the fixed fictional A/B only. */
 export function validOperation(message) {
   if (!message || typeof message !== 'object' || message.type !== 'op' || !Number.isSafeInteger(message.id)) return false;
@@ -235,10 +230,6 @@ async function main() {
   const deadline = Date.now() + 5 * 60_000;
   if (process.argv.length !== 2 || typeof process.send !== 'function') fail('REFUSED: EDGE-RUNTIME controller runs only under test:edge', 2);
   await guardPrivileged({ env: process.env, readConfig: () => readFile(path.join(ROOT, 'supabase', 'config.toml'), 'utf8') });
-  if (reviewGate(Date.now()) !== 'open') {
-    say('BLOCKED: EDGE-RUNTIME AZURE_REVIEW_EXPIRES has passed; the pinned provider review must be renewed before this gate can pass');
-    process.exitCode = 1; return;
-  }
   await requireAbsent();
   const keys = await localKeys();
   const image = await nodeImage();

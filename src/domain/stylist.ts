@@ -9,7 +9,6 @@ export const STYLIST_ENDPOINT = 'https://stillroom-ai-eval.openai.azure.com/open
 export const STYLIST_PROMPT_VERSION = 2;
 export const STYLIST_NOTICE_REVISION = 1;
 export const STYLIST_REVIEW_EXPIRES_AT = '2026-12-01T00:00:00Z';
-export const STYLIST_REVIEW_EXPIRES = Date.parse(STYLIST_REVIEW_EXPIRES_AT);
 // Conservative valuation (LongCo 4.40/19.80 per million) of the 24,000/1,200 envelope, in micro-USD.
 export const STYLIST_RESERVATION_MICRO = '129360';
 export const STYLIST_LIMITS = Object.freeze({

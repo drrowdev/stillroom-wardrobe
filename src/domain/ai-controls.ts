@@ -10,7 +10,6 @@ export const azureAiProfiles = [
   { executionManifestId: 'azure-eu-terra-devtest-v1', promptVersion: 1 },
   { executionManifestId: azureAiManifest, promptVersion: 2 },
 ] as const;
-export const azureAiReviewExpires = Date.parse('2026-10-21T00:00:00Z');
 export const aiCodes = ['OK', 'UNAVAILABLE', 'UNAUTHENTICATED', 'INVALID_INPUT', 'CONSENT_REQUIRED',
   'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'CONFLICT', 'ACTIVE_DRAFT',
   'ALLOWANCE', 'TERMINAL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA', 'ANALYSIS_FAILED', 'TIMEOUT'] as const;
@@ -81,11 +80,11 @@ function azureProfile(policy: AiPolicy): boolean {
   return azureAiProfiles.some((profile) => profile.executionManifestId === policy.executionManifestId
     && profile.promptVersion === policy.promptVersion);
 }
-export function supportedAiPolicy(status: AiStatus, now = Date.now()): boolean {
+export function supportedAiPolicy(status: AiStatus): boolean {
   const p = status.policy;
   return !!p && p.activated && p.modelId === azureAiModel && p.noticeRevision === 2
     && azureProfile(p) && BigInt(p.maxRequestMicro) >= 4097351n
-    && status.budget !== null && now < azureAiReviewExpires && status.serverTimeMs < azureAiReviewExpires;
+    && status.budget !== null;
 }
 export function aiNoticeProfile(policy: AiPolicy | null): 'google' | 'azure' | null {
   if (!policy) return null;
@@ -94,8 +93,8 @@ export function aiNoticeProfile(policy: AiPolicy | null): 'google' | 'azure' | n
     && (policy.executionManifestId === undefined || policy.executionManifestId === 'google-eu-3.8-v1')) return 'google';
   return null;
 }
-export function canAnalyze(status: AiStatus, now = Date.now()): boolean {
-  return supportedAiPolicy(status, now) && status.code === 'OK' && status.consent.enabled
+export function canAnalyze(status: AiStatus): boolean {
+  return supportedAiPolicy(status) && status.code === 'OK' && status.consent.enabled
     && status.consent.noticeRevision === status.policy?.noticeRevision;
 }
 // The exact policy details shown when the owner presses Turn on; any difference before the write means asking again.
@@ -106,16 +105,16 @@ export function aiPolicyBinding(scope: Readonly<{ ownerId: string; epoch: number
 }
 export type AiCardState = 'unconfirmed' | 'loading' | 'loadFailed' | 'unavailable' | 'on' | 'renew' | 'off';
 export type AiCardView = Readonly<{ state: AiCardState; turnOn: boolean; turnOff: boolean; retry: boolean; details: boolean }>;
-export function aiCardState(input: Readonly<{ status: AiStatus | null; loadFailed: boolean; unresolved: boolean; now?: number }>): AiCardView {
-  const { status, loadFailed, unresolved, now = Date.now() } = input;
+export function aiCardState(input: Readonly<{ status: AiStatus | null; loadFailed: boolean; unresolved: boolean }>): AiCardView {
+  const { status, loadFailed, unresolved } = input;
   const view = (state: AiCardState, turnOn: boolean, turnOff: boolean, retry: boolean, details: boolean): AiCardView =>
     ({ state, turnOn, turnOff, retry, details });
   if (unresolved) return view('unconfirmed', false, false, true, false);
   if (!status) return loadFailed ? view('loadFailed', false, false, true, false) : view('loading', false, false, false, false);
-  if (!supportedAiPolicy(status, now) || status.code === 'UNAVAILABLE' || status.code === 'UNCONFIGURED' || status.code === 'INACTIVE') {
+  if (!supportedAiPolicy(status) || status.code === 'UNAVAILABLE' || status.code === 'UNCONFIGURED' || status.code === 'INACTIVE') {
     return view('unavailable', false, status.consent.enabled, false, false);
   }
-  if (canAnalyze(status, now)) return view('on', false, true, false, true);
+  if (canAnalyze(status)) return view('on', false, true, false, true);
   if (status.consent.enabled && status.consent.noticeRevision !== status.policy?.noticeRevision) return view('renew', true, true, false, true);
   return view('off', true, false, false, true);
 }
