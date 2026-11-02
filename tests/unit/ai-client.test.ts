@@ -304,13 +304,19 @@ describe('status validation and current policy', () => {
       { ...good.policy!, executionManifestId: 'other' }, { ...good.policy!, activated: false }])
       expect(supportedAiPolicy({ ...good, policy })).toBe(false);
   });
-  it('supports each Azure manifest only with its own prompt version', () => {
+  it('supports each Azure manifest only with its own prompt version and reservation floor', () => {
     const good = parseAiStatus(status())!;
     const v2 = { ...good.policy!, executionManifestId: 'azure-eu-terra-devtest-v2', promptVersion: 2 };
     expect(supportedAiPolicy({ ...good, policy: v2 })).toBe(true);
     for (const policy of [{ ...v2, promptVersion: 1 }, { ...good.policy!, promptVersion: 2 },
-      { ...v2, promptVersion: 3 }, { ...v2, executionManifestId: 'azure-eu-terra-devtest-v3' }])
+      { ...v2, promptVersion: 3 }, { ...v2, executionManifestId: 'azure-eu-terra-devtest-v4' }])
       expect(supportedAiPolicy({ ...good, policy })).toBe(false);
+    // v2 still holds the whole worst-case request; v3 holds the smallest amount the schema accepts.
+    expect(supportedAiPolicy({ ...good, policy: { ...v2, maxRequestMicro: '4097350' } })).toBe(false);
+    const v3 = { ...v2, executionManifestId: 'azure-eu-terra-devtest-v3' };
+    for (const amount of ['1', '112640', '4097351']) expect(supportedAiPolicy({ ...good, policy: { ...v3, maxRequestMicro: amount } })).toBe(true);
+    expect(supportedAiPolicy({ ...good, policy: { ...v3, maxRequestMicro: '0' } })).toBe(false);
+    expect(supportedAiPolicy({ ...good, policy: { ...v3, promptVersion: 1 } })).toBe(false);
   });
 });
 

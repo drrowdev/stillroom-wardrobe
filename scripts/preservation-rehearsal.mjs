@@ -31,14 +31,17 @@ const BUDGET1_PRIOR_VERSION = '20261009090000';
 const IDEA_PRIOR_VERSION = '20261010090000';
 const PHOTO_PRIOR_VERSION = '20261011090000';
 const AVAIL_PRIOR_VERSION = '20261011100000';
+const BUDGET2_PRIOR_VERSION = '20261101080000';
 // Exact applied prefix per labelled stage; 'target' is the full source inventory.
 const STAGE_VERSIONS = Object.freeze({ base: '20260905000000', 'hosted-source': HOSTED_SOURCE_VERSION,
   'prior-main': PRIOR_MAIN_VERSION, 'azure-target': AZURE_TARGET_VERSION, 'image-change': IMAGE_CHANGE_VERSION,
   colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, 'save1-prior': SAVE1_PRIOR_VERSION, 'budget1-prior': BUDGET1_PRIOR_VERSION,
-  'idea-prior': IDEA_PRIOR_VERSION, 'photo-prior': PHOTO_PRIOR_VERSION, 'avail-prior': AVAIL_PRIOR_VERSION, target: null });
+  'idea-prior': IDEA_PRIOR_VERSION, 'photo-prior': PHOTO_PRIOR_VERSION, 'avail-prior': AVAIL_PRIOR_VERSION,
+  'budget2-prior': BUDGET2_PRIOR_VERSION, target: null });
 const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], 'image-change': ['azure-target', 'hosted-source'],
   colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], 'budget1-prior': ['save1-prior'],
-  'idea-prior': ['budget1-prior'], 'photo-prior': ['idea-prior'], 'avail-prior': ['photo-prior'], target: ['avail-prior'] });
+  'idea-prior': ['budget1-prior'], 'photo-prior': ['idea-prior'], 'avail-prior': ['photo-prior'], 'budget2-prior': ['avail-prior'],
+  target: ['budget2-prior'] });
 
 // Prints, per stage, whether SYNTHETIC analysis claim/finish/Save/replacement evidence was used (lazy import keeps this module import-safe).
 const syntheticNote = async (stage) => (await import('../tests/integration/synthetic-analysis.sessions.mjs')).syntheticNote(stage);
@@ -80,6 +83,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261011090000_tryon_idea.sql', version: '20261011090000', time: '2026-10-11 09:00:00', bytes: 24325, sha256: '666e3da6a75033d7a6a43678f879c07f1584b4eea1b5b6867e379f3854ff4d4a' },
   { name: '20261011100000_tryon_person_photo.sql', version: '20261011100000', time: '2026-10-11 10:00:00', bytes: 21848, sha256: '465973355f31dd3137ffc2168820c318a77a87c417c01b1969e882ce5ee12331' },
   { name: '20261101080000_persistent_ai_availability.sql', version: '20261101080000', time: '2026-11-01 08:00:00', bytes: 47567, sha256: '9c483f9a2dce35bae501fb34842d718fdd7868443d001744f6c928ee10cb50e4' },
+  { name: '20261101090000_unreserved_analysis_manifest.sql', version: '20261101090000', time: '2026-11-01 09:00:00', bytes: 26207, sha256: '8252bd121eb000b34d3d2ffa76fcda1a858639ccd2ab74b6ad9fee216d7b42cd' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1411,14 +1415,15 @@ async function main() {
       stage = 'PHOTO1-tryon-photo';
       await tryonPhotoProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `PHOTO1-${label}`; });
       colourFinalizer.assertRunning();
-      // AVAIL1: every frozen historical check above ran at its exact inventory; the availability migration is applied last.
+      // AVAIL1: every frozen historical check above ran at its exact inventory; the availability migration is applied to a
+      // populated checkpoint and its own proofs run at budget2-prior (exactly 20261101080000), unchanged, before BUDGET2.
       stage = 'AVAIL1-checkpoint';
       const { availabilityCheckpoint, availabilityCompare, availabilityCatalogProbe, availabilityBehaviourProbes } = await import('../tests/integration/persistent-availability.sessions.mjs');
       const availBefore = await availabilityCheckpoint(privilegedLocalSql);
-      stage = 'AVAIL1-prior-to-target';
-      await migrateToStage(run, 'avail-prior', 'target');
+      stage = 'AVAIL1-prior-to-budget2-prior';
+      await migrateToStage(run, 'avail-prior', 'budget2-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
-      await history('target'); await verifyCiStorageGuard();
+      await history('budget2-prior'); await verifyCiStorageGuard();
       stage = 'AVAIL1-compare';
       await availabilityCompare(availBefore, privilegedLocalSql, (label) => { stage = `AVAIL1-${label}`; });
       stage = 'AVAIL1-catalog';
@@ -1427,7 +1432,25 @@ async function main() {
       await availabilityBehaviourProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `AVAIL1-${label}`; });
       await syntheticNote('AVAIL1-behaviour');
       colourFinalizer.assertRunning();
+      // BUDGET2: the AVAIL1 proofs above ran at their exact inventory; the unreserved-analysis migration is applied alone to
+      // the populated state they left, compared before any probe writes, and then probed with the real functions.
+      stage = 'BUDGET2-checkpoint';
+      const { budget2Checkpoint, budget2Compare, budget2CatalogProbe, budget2BehaviourProbes } = await import('../tests/integration/unreserved-analysis.sessions.mjs');
+      const budget2Before = await budget2Checkpoint(privilegedLocalSql);
+      stage = 'BUDGET2-prior-to-target';
+      await migrateToStage(run, 'budget2-prior', 'target');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('target'); await verifyCiStorageGuard();
+      stage = 'BUDGET2-compare';
+      await budget2Compare(budget2Before, privilegedLocalSql, (label) => { stage = `BUDGET2-${label}`; });
+      stage = 'BUDGET2-catalog';
+      await budget2CatalogProbe(privilegedLocalSql, (label) => { stage = `BUDGET2-${label}`; });
+      stage = 'BUDGET2-behaviour';
+      await budget2BehaviourProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BUDGET2-${label}`; });
+      await syntheticNote('BUDGET2-behaviour');
+      colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
+    console.log('PASS: BUDGET2 unreserved analysis; the migration was applied alone to a populated checkpoint that stayed identical apart from the six replaced bodies and one added manifest row (no controls row, usage, consent, trigger or object changed), the bodies equal the migration source, and the real v3 claim holds one micro-USD, finishes at the recorded cost, saves with its manifest lineage and replaces an image, a burst can pass the allowance only by the cost in flight, concurrent claims are admitted one by one, an expired dispatched request keeps its held charge, an envelope overrun records its cost and deactivates analysis, the guarded controls switch refuses live requests and held charges, and the USD 200 ceiling holds; no provider calls');
     console.log('PASS: AVAIL1 persistent availability; the availability migration was applied alone to a populated checkpoint that stayed identical apart from the nine replaced bodies (owner, ACL, security configuration, every other body, manifests, triggers, rows and object bytes), those bodies equal the migration source and none but the legacy Google term reads a review date, and after the recorded review dates the real photo analysis lifecycle, analyzed Save, image replacement, Stylist and clean-up claim and finish succeed while consent, activation, configuration, allowance, provider availability and request lifetime still refuse and no hourly limit applies; try-on is not exercised here; no provider calls');
     console.log('PASS: TRYON-PHOTO1 saved reference photo; the photo migration was applied after the frozen checks, the configured notice moved to revision 2 with consent left at 1, a revision-1 consent cannot save a photo, saves are admitted only for the app\'s own JPEG shape, each owner has one private photo that only they can read, replace or remove, withdrawal and any notice change remove it, removal needs no activation, a save racing a withdrawal never survives it, and the platform-restore step removes every photo; no provider calls');
     console.log('PASS: TRYON-IDEA1 unsaved try-on; the idea migration was applied after the frozen checks, an idea chain is claimed from the owner\'s own items without an outfit, keeps its identity, is isolated per owner, and its results are visible and deletable without an outfit while outfit try-on is unchanged; no provider calls');

@@ -21,6 +21,8 @@ import { registerSourceLoader } from './src-loader.mjs';
 export const ROUNDTRIP_BOUND_MS = 420_000;
 const PASSPHRASE = 'synthetic attribution round trip';
 const MANIFEST = 'azure-eu-terra-devtest-v2';
+// BUDGET2: where the manifest exists, a third item is recorded under it as well; the v2 records above stay as they are.
+const MANIFEST_V3 = 'azure-eu-terra-devtest-v3';
 const WIDTH = 128, HEIGHT = 96;
 // BG2c-1: new claims admit only the clean-up manifest (notice revision 2).
 const ENHANCE_MANIFEST = 'azure-global-image25-sunburst-cleanup-v1';
@@ -167,14 +169,16 @@ async function main() {
     equal((await client.rpc(a, 'ai_set_consent', { p_enabled: true, p_notice_revision: 2, p_expected_version: profile.version }))?.code, 'OK');
 
     // One stored analysis result for a photo, as the provider stand-in.
-    const analysed = async (n, bytes, fields) => {
+    const analysed = async (n, bytes, fields, manifest = MANIFEST) => {
       const id = analysisId('A', n);
       check((await db(`select public.ai_claim_analysis(${literal(a.uid)},${literal(id)},${literal(id)},1,
-        ${literal(sha256(bytes))},${bytes.length},${WIDTH},${HEIGHT},${literal(MANIFEST)});`)).claimed === true);
-      check((await db(`select public.ai_finish_analysis(${literal(a.uid)},${literal(id)},${literal(MANIFEST)},
+        ${literal(sha256(bytes))},${bytes.length},${WIDTH},${HEIGHT},${literal(manifest)});`)).claimed === true);
+      check((await db(`select public.ai_finish_analysis(${literal(a.uid)},${literal(id)},${literal(manifest)},
         ${json({ ...analysisFacts, fields: { ...analysisFacts.fields, ...fields } })},${json(analysisUsage)},'SUCCESS');`)).stored === true);
       return id;
     };
+    const useControls = (manifest, maxRequest) => privilegedLocalSql(`update private.ai_controls set execution_manifest_id=${literal(manifest)},
+      max_request_micro=${maxRequest},updated_at=clock_timestamp() where owner_id=${literal(a.uid)};`);
     const photo = (colour) => flatJpeg({ width: WIDTH, height: HEIGHT, colour });
     const h = analyzedHarness(client, a, env), ich = imageChangeHarness(client, a, env);
     // The thumbnail of a photo this small is the same size, so the same decodable bytes serve both variants.
@@ -184,8 +188,8 @@ async function main() {
           method: 'POST', body: bytes, binary: true, headers: { 'x-upsert': 'false', 'cache-control': '0' } })).ok);
       }
     };
-    const analyzedSave = async (n, bytes, colours) => {
-      const id = await analysed(n, bytes, { colours });
+    const analyzedSave = async (n, bytes, colours, manifest = MANIFEST) => {
+      const id = await analysed(n, bytes, { colours }, manifest);
       const value = analyzedIntent(a, 20 + n);
       value.p_image = { ...value.p_image, main_bytes: bytes.length, thumb_bytes: bytes.length, main_sha256: sha256(bytes),
         thumb_sha256: sha256(bytes), width: WIDTH, height: HEIGHT };
@@ -197,8 +201,8 @@ async function main() {
       await h.finalize(value, row);
       return { itemId: value.p_item.id, imageId: value.p_image.id };
     };
-    const analyzedReplacement = async (n, saved, bytes) => {
-      const id = await analysed(n, bytes, { pattern: 'solid' });
+    const analyzedReplacement = async (n, saved, bytes, manifest = MANIFEST) => {
+      const id = await analysed(n, bytes, { pattern: 'solid' }, manifest);
       const value = ich.make((await ich.read('items', saved.itemId))[0], (await ich.read('item_images', saved.imageId))[0]);
       value.image = { ...value.image, main_bytes: bytes.length, thumb_bytes: bytes.length, main_sha256: sha256(bytes),
         thumb_sha256: sha256(bytes), width: WIDTH, height: HEIGHT };
@@ -237,7 +241,36 @@ async function main() {
     }
     equal(recorded.get(first.itemId).map((entry) => entry.source_image_id), [first.imageId, replaced]);
     equal(recorded.get(second.itemId).map((entry) => entry.source_image_id), [second.imageId]);
+    const savedItems = [first.itemId, second.itemId];
     const sourceImages = [first.imageId, replaced, second.imageId];
+    let v3Entries = 0;
+    const v3Installed = (await db(`select to_jsonb(exists(select 1 from private.ai_execution_manifests where id=${literal(MANIFEST_V3)}));`)) === true;
+    if (v3Installed) {
+      // A third item recorded under manifest v3 (one-micro hold): its analyzed Save and analyzed replacement take part in the
+      // same export, restore, mapping and replay checks as the v2 records, and the controls return to v2 afterwards.
+      stage = 'recorded-v3';
+      await useControls(MANIFEST_V3, 1);
+      try {
+        const third = await analyzedSave(6, photo([60, 90, 200]), ['teal'], MANIFEST_V3);
+        const replacedThird = await analyzedReplacement(7, third, photo([220, 140, 40]), MANIFEST_V3);
+        const current = await history(a, third.itemId);
+        check(current.every((entry) => entry.origin === 'recorded'), 'v3-origin');
+        equal(current.map((entry) => entry.source_image_id), [third.imageId, replacedThird]);
+        equal(current.map((entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => key !== 'origin'))),
+          await client.rpc(a, 'item_attribution_history', { p_item_id: third.itemId }));
+        // The lineage names v3 (a Save and a replacement), not none: the owner-facing history never shows it.
+        check((await db(`select to_jsonb(count(*)) from private.item_attribution_history where owner_id=${literal(a.uid)}
+          and item_id=${literal(third.itemId)} and manifest_id=${literal(MANIFEST_V3)};`)) === 1, 'v3-lineage-save');
+        check((await db(`select to_jsonb(count(*)) from private.image_change_history where owner_id=${literal(a.uid)}
+          and item_id=${literal(third.itemId)} and manifest_id=${literal(MANIFEST_V3)};`)) === 1, 'v3-lineage-replacement');
+        recorded.set(third.itemId, current);
+        savedItems.push(third.itemId);
+        sourceImages.push(third.imageId, replacedThird);
+        v3Entries = current.length;
+      } finally {
+        await useControls(MANIFEST, 4097351);
+      }
+    }
 
     parent = await mkdtemp(path.join(tmpdir(), 'stillroom-p6d-roundtrip-'));
     const exportOwn = async (label, owner) => {
@@ -321,7 +354,7 @@ async function main() {
       return { next, itemMap, imageMap };
     };
 
-    const one = await generation('A-to-B', a, b, [first.itemId, second.itemId], sourceImages, recorded);
+    const one = await generation('A-to-B', a, b, savedItems, sourceImages, recorded);
     const two = await generation('B-to-A', b, a, [...one.itemMap.values()], [...one.imageMap.values()], one.next);
     stage = 'source-unchanged';
     for (const [itemId, entries] of recorded) equal(await history(a, itemId), entries);
@@ -331,7 +364,7 @@ async function main() {
       equal(await history(a, two.itemMap.get(one.itemMap.get(source))), expectedImported(entries, through));
     }
     const seconds = ((performance.now() - started) / 1000).toFixed(1);
-    console.log(`PASS: P6d genuine round trip; recorded history (analyzed Save + analyzed replacement) -> export-own -> restore-own into B -> re-export -> restore into A; items=2 entries=3 photos=3 generations=2 reruns=2; all imported, order/values/photo mappings equal; ${seconds}s`);
+    console.log(`PASS: P6d genuine round trip; recorded history (analyzed Save + analyzed replacement) -> export-own -> restore-own into B -> re-export -> restore into A; items=${savedItems.length} entries=${3 + v3Entries} photos=${sourceImages.length} generations=2 reruns=2; ${v3Installed ? 'v3-recorded items included; ' : ''}all imported, order/values/photo mappings equal; ${seconds}s`);
 
     // BG2b-2 v4 round trip: a recorded AI-edited photo leaves A through the real client export, passes the offline
     // verifier, and arrives in B through the shared restore engine as imported provenance with the same bytes. An edited

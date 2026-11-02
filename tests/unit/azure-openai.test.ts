@@ -155,8 +155,11 @@ describe('historical receipt reading versus Azure-only new dispatch', () => {
     const withPolicy = (change: object) => ({ ...status, policy: { ...status.policy!, ...change } });
     const v1 = withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v1', promptVersion: 1 });
     expect(supportedAiPolicy(v1)).toBe(true); expect(aiNoticeProfile(v1.policy)).toBe('azure');
+    const v3 = withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v3', maxRequestMicro: '1' });
+    expect(supportedAiPolicy(v3)).toBe(true); expect(aiNoticeProfile(v3.policy)).toBe('azure');
     for (const mixed of [withPolicy({ promptVersion: 1 }), withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v1' }),
-      withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v3' })]) {
+      withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v4' }),
+      withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v3', promptVersion: 1 })]) {
       expect(supportedAiPolicy(mixed)).toBe(false); expect(aiNoticeProfile(mixed.policy)).toBeNull();
     }
     const legacy = { ...status, policy: { ...status.policy!, modelId: 'gemini-3.8-flash', noticeRevision: 1, promptVersion: 1,

@@ -1,7 +1,8 @@
 import { assertSanitizedJpeg, readJpegHeader } from '../../../src/images/jpeg.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
-import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MANIFEST, AZURE_MODEL, AZURE_RESERVATION, AZURE_SETTINGS,
+import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MODEL,
   type AzureConfig, type AzureTransport } from './azure-openai.ts';
+import { azureProfileFor } from './azure-profiles.ts';
 import {
   MAX_IMAGE_BYTES, MODEL_ID, ProtocolError, REQUEST_MS,
   UUID, exact, object, readBounded, readJson, sha256, validAccounting, validResult, type JsonObject,
@@ -113,25 +114,27 @@ export function createHandler(config: HandlerConfig, azureTransport: AzureTransp
       if (!object(preflight.consent) || preflight.consent.enabled !== true
         || !Number.isInteger(preflight.policy.noticeRevision) || Number(preflight.policy.noticeRevision) < 1
         || preflight.consent.noticeRevision !== preflight.policy.noticeRevision) return error('CONSENT_REQUIRED');
-      if (!object(preflight.policy) || preflight.policy.modelId !== AZURE_MODEL || preflight.policy.promptVersion !== AZURE_SETTINGS.promptVersion
-        || preflight.policy.noticeRevision !== 2 || preflight.policy.executionManifestId !== AZURE_MANIFEST
+      // The manifest the account's controls name selects the profile; its own reservation is the policy's minimum.
+      const profile = object(preflight.policy) ? azureProfileFor(preflight.policy.executionManifestId) : null;
+      if (!object(preflight.policy) || !profile || preflight.policy.modelId !== AZURE_MODEL
+        || preflight.policy.promptVersion !== profile.promptVersion || preflight.policy.noticeRevision !== 2
         || typeof preflight.policy.maxRequestMicro !== 'string' || !/^[1-9][0-9]{0,18}$/.test(preflight.policy.maxRequestMicro)
-        || BigInt(preflight.policy.maxRequestMicro) < BigInt(AZURE_RESERVATION)
+        || BigInt(preflight.policy.maxRequestMicro) < BigInt(profile.reservationMicro)
         || !azureConfigured(config.azure)) return error('UNCONFIGURED');
       const claim = await rpc('ai_claim_analysis', {
         p_owner_id: user.id, p_request_id: requestId, p_draft_id: draftId, p_generation: Number(generation),
-        p_image_sha256: imageHash, p_byte_count: image.length, p_width: width, p_height: height, p_manifest_id: AZURE_MANIFEST,
+        p_image_sha256: imageHash, p_byte_count: image.length, p_width: width, p_height: height, p_manifest_id: profile.manifestId,
       }, true);
       if (claim.code === 'ALREADY_CLAIMED' && claim.claimed === false) return await status();
       if (claim.code !== 'OK' || claim.claimed !== true) return error(closedCode(claim.code));
       if (!exact(claim, ['code', 'claimed', 'manifestId', 'resultExpiresAtMs', 'dispatchBeforeMs'])
-        || claim.manifestId !== AZURE_MANIFEST || typeof claim.dispatchBeforeMs !== 'number' || !Number.isSafeInteger(claim.dispatchBeforeMs)
+        || claim.manifestId !== profile.manifestId || typeof claim.dispatchBeforeMs !== 'number' || !Number.isSafeInteger(claim.dispatchBeforeMs)
         || typeof claim.resultExpiresAtMs !== 'number' || !Number.isSafeInteger(claim.resultExpiresAtMs)
         || Date.now() >= Math.min(claim.dispatchBeforeMs, claim.resultExpiresAtMs)) return error('TIMEOUT');
       signal.throwIfAborted();
       const result = await analyzeAzure(config.azure, image, signal, azureTransport);
       const finished = await rpc('ai_finish_analysis', {
-        p_owner_id: user.id, p_request_id: requestId, p_manifest_id: AZURE_MANIFEST,
+        p_owner_id: user.id, p_request_id: requestId, p_manifest_id: profile.manifestId,
         p_facts: result.facts, p_usage: result.usage, p_code: result.facts ? 'SUCCESS' : 'FAILED',
       }, true);
       if (finished.code !== 'READY' || finished.stored !== true) return error('ANALYSIS_FAILED');
