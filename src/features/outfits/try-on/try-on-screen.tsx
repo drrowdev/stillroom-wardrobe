@@ -284,17 +284,17 @@ function RunView({ run, store, components, online, t, offer, onOffer, onAgain, o
   const index = phase.kind === 'ready' ? 0 : phase.index;
   const name = itemName(components, steps[index]!.itemId, t);
   const line = phase.kind === 'stopping' ? t('tryon.stopping')
+    : phase.kind === 'running' && phase.waiting ? t('tryon.waiting')
     : phase.kind === 'checking' ? t(phase.offline ? 'tryon.offline' : 'tryon.checking')
     : total === 1 ? t('tryon.addingOne', { name }) : t('tryon.adding', { name, step: index + 1, total });
   return <div className="stack">
     <div className="tryon-progress" aria-busy="true">
-      <div className="tryon-frame" aria-hidden="true" />
+      <ProgressFrame run={run} />
       <div className="tryon-bar" aria-hidden="true">
         {steps.map((step, at) => <span key={step.itemId} data-state={at < index ? 'done' : at === index ? 'now' : 'waiting'} />)}
       </div>
     </div>
     <p id="tryon-progress" tabIndex={-1} aria-live="polite" role="status">{line}</p>
-    <p className="muted">{t('tryon.limitLine')}</p>
     {offer && <KeepPhoto store={store} offer={offer} online={online} t={t} onOffer={onOffer} />}
     <div className="outfit-actions">
       <button ref={stopButton} id="tryon-stop" type="button" className="button button-secondary" disabled={phase.kind === 'stopping'}
@@ -305,6 +305,20 @@ function RunView({ run, store, components, online, t, offer, onOffer, onAgain, o
       onConfirm={() => { setConfirming(false); void run.stop(); focus('tryon-title'); }}
       onCancel={() => { setConfirming(false); requestAnimationFrame(() => stopButton.current?.focus()); }} />}
   </div>;
+}
+
+/** The frame shown while the picture is made: the owner's photo from memory, dimmed, or a plain tint when the run no longer holds it. */
+function ProgressFrame({ run }: { run: TryOnRun }) {
+  const [url, setUrl] = useState<string | null>(null);
+  // Taken once when the frame appears: the run releases its copy as soon as it stops, the frame goes with it.
+  useEffect(() => {
+    const bytes = run.referencePhoto;
+    if (!bytes) return;
+    const next = URL.createObjectURL(new Blob([bytes], { type: 'image/jpeg' }));
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [run]);
+  return <div className="tryon-frame" aria-hidden="true">{url && <img src={url} alt="" />}</div>;
 }
 
 /** One quiet offer, while the picture is being made, to keep the photo chosen just now as the saved reference photo. */

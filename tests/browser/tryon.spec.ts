@@ -191,11 +191,16 @@ test.describe('try-on happy paths', () => {
     await expect(page.locator('.tryon-bar span[data-state=done]')).toHaveCount(1);
     await expect(page.locator('.tryon-bar span[data-state=now]')).toHaveCount(1);
     await expect(page.locator('.tryon-result img')).toHaveCount(0);
-    await expect(page.getByText(text('tryon.limitLine'), { exact: true })).toBeVisible();
+    await expect(page.getByText(/AI budget/)).toHaveCount(0);
+    // The frame shows the photo held in memory, and its Blob URL is revoked once the run ends.
+    const shown = await page.locator('.tryon-frame img').getAttribute('src');
+    expect(shown).toMatch(/^blob:/);
+    expect(await page.evaluate((url) => fetch(url!).then(() => true, () => false), shown)).toBe(true);
     await axe(page);
     held.release();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('.tryon-frame')).toHaveCount(0);
+    expect(await page.evaluate((url) => fetch(url!).then(() => true, () => false), shown)).toBe(false);
   });
   test('a single garment says what is being added without a step count', async ({ page }) => {
     engineOnly();
@@ -311,19 +316,63 @@ test.describe('try-on failures', () => {
     await expect(page.locator('#tryon-choose')).toBeFocused();
     expect(api.tryonControl.requests.map((entry) => entry.step)).toEqual([1, 2]);
   });
-  test('busy at step 2: Try again sends exactly one more request', async ({ page }) => {
+  test('busy at step 2 waits and goes on by itself, without a failure screen', async ({ page }) => {
     const { api } = await start(page);
-    api.tryonControl.replies.push({}, { code: 'BUSY', status: 503 }, { code: 'BUSY', status: 503 });
+    api.tryonControl.replies.push({}, { code: 'BUSY', status: 503 });
     await openTryOn(page);
     await preparePhoto(page);
-    await expect(failureTitle(page)).toHaveText(text('tryon.failure.busy'));
-    expect(api.tryonControl.results).toHaveLength(0);
-    await button(page, 'common.retry').click();
-    await expect(failureTitle(page)).toHaveText(text('tryon.failure.busy'));
-    expect(api.tryonControl.requests.map((entry) => entry.step)).toEqual([1, 2, 2]);
-    await button(page, 'common.retry').click();
+    await expect(status(page)).toHaveText(text('tryon.waiting'));
+    await expect(page.locator('#tryon-stop')).toBeEnabled();
+    await expect(failureTitle(page)).toHaveCount(0);
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 30_000 });
+    expect(api.tryonControl.requests.map((entry) => entry.step)).toEqual([1, 2, 2, 3]);
+    expect(new Set(api.tryonControl.requests.map((entry) => entry.chainId)).size).toBe(1);
+  });
+  test('Stop while waiting for a busy step ends the run and sends nothing more', async ({ page }) => {
+    const { api } = await start(page);
+    api.tryonControl.replies.push({}, { code: 'BUSY', status: 503 });
+    await openTryOn(page);
+    await preparePhoto(page);
+    await expect(status(page)).toHaveText(text('tryon.waiting'));
+    await page.locator('#tryon-stop').click();
+    await page.locator('#tryon-stop-confirm-confirm').click();
+    await expect(page.getByText(text('tryon.stopped'), { exact: true })).toBeVisible();
+    await page.waitForTimeout(9_000);
+    expect(api.tryonControl.requests.map((entry) => entry.step)).toEqual([1, 2]);
+  });
+  test('the finished picture opens full screen, toggles to full size and closes with its button, Escape and the backdrop', async ({ page }) => {
+    const { api } = await start(page);
+    await openTryOn(page);
+    await preparePhoto(page);
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
-    expect(api.tryonControl.requests.map((entry) => entry.step)).toEqual([1, 2, 2, 2, 3]);
+    const shown = await page.locator('.tryon-result img').getAttribute('src');
+    expect((await page.locator('.tryon-result img').boundingBox())!.width).toBeLessThanOrEqual(481);
+    const zoom = page.locator('.tryon-zoom');
+    await zoom.click();
+    const viewer = page.locator('dialog.viewer');
+    await expect(viewer).toBeVisible();
+    await expect(viewer.locator('img')).toHaveAttribute('src', shown!);
+    await expect(page.locator('#tryon-viewer-close')).toBeFocused();
+    const fit = await viewer.locator('img').boundingBox();
+    await viewer.getByRole('button', { name: text('tryon.zoomIn') }).click();
+    await expect(viewer.getByRole('button', { name: text('tryon.zoomFit') })).toBeVisible();
+    expect((await viewer.locator('img').boundingBox())!.width).toBeGreaterThanOrEqual(1020);
+    expect(fit!.width).toBeLessThan(1020);
+    await viewer.getByRole('button', { name: text('tryon.zoomFit') }).click();
+    await page.locator('#tryon-viewer-close').click();
+    await expect(viewer).toHaveCount(0);
+    await expect(zoom).toBeFocused();
+    await zoom.click();
+    await expect(viewer).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(viewer).toHaveCount(0);
+    await expect(zoom).toBeFocused();
+    await zoom.click();
+    await viewer.locator('.viewer-scroll').click({ position: { x: 2, y: 2 } });
+    await expect(viewer).toHaveCount(0);
+    // The viewer used the picture's own Blob URL: no second download.
+    expect(api.tryonControl.requests).toHaveLength(3);
+    await axe(page);
   });
   test('a lost intermediate picture asks to start again', async ({ page }) => {
     engineOnly();

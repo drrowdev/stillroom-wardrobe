@@ -70,7 +70,7 @@ export const failureAction: Readonly<Record<FailureKind, 'retry' | 'photo' | 're
 
 export type RunPhase =
   | { kind: 'ready' }
-  | { kind: 'running'; index: number }
+  | { kind: 'running'; index: number; waiting?: true }
   | { kind: 'checking'; index: number; offline: boolean }
   | { kind: 'stopping'; index: number }
   | { kind: 'failed'; index: number; failure: FailureKind }
@@ -79,6 +79,12 @@ export type RunPhase =
 
 export const RECONCILE_EVERY_MS = 10_000;
 export const RECONCILE_FOR_MS = 240_000;
+/**
+ * A refused claim (BUSY) charges nothing, and the provider slots held by the chain's earlier steps free up within about 80 s:
+ * the same step is claimed again every 8 s for up to 100 s before the owner is asked.
+ */
+export const BUSY_RETRY_EVERY_MS = 8_000;
+export const BUSY_RETRY_FOR_MS = 100_000;
 /** How long a run may hold picture bytes: the chain's lifetime, counted from the first send (the server's starts later). */
 export const RUN_LIFETIME_MS = TRYON_LIMITS.chainMinutes * 60_000;
 
@@ -107,13 +113,16 @@ export class TryOnRun {
   private disposed = false;
   /** The picture the next attempt sends: the body photo for step 1, then the previous step's picture. */
   private person: Uint8Array<ArrayBuffer> | null;
+  /** The body photo the run started from, shown dimmed while the picture is made; released with `person`. */
+  private photo: Uint8Array<ArrayBuffer> | null;
   private inFlight: AbortController | null = null;
   private stopTimers: (() => void)[] = [];
   /** The run-lifetime timer and resume listener; unlike `stopTimers` they stay across sends. */
   private lifetime: (() => void)[] = [];
   private expiresAt: number | null = null;
   private generation = 0;
-
+  /** When the current step's automatic BUSY retries end; `null` until the step is first refused. */
+  private busyUntil: number | null = null;
   /** What step 1 names: a saved outfit's id, or an unsaved idea's garments (the planned steps' items, in order). */
   private readonly named: { outfitId: string } | { itemIds: readonly string[] };
 
@@ -123,6 +132,7 @@ export class TryOnRun {
     this.named = typeof subject === 'string' ? { outfitId: subject } : { itemIds: [...subject.itemIds] };
     this.chainId = env.uuid();
     this.person = photo;
+    this.photo = photo;
   }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   get = () => this.phase;
@@ -135,7 +145,9 @@ export class TryOnRun {
     for (const listener of this.listeners) listener();
   }
   private clearTimers() { for (const stop of this.stopTimers.splice(0)) stop(); }
-  private drop() { this.person = null; }
+  private drop() { this.person = null; this.photo = null; }
+  /** The body photo while the run still holds it; `null` once released. */
+  get referencePhoto() { return this.photo; }
   private endLifetime() { for (const stop of this.lifetime.splice(0)) stop(); }
   /** Starts the lifetime at the first send: however the run is left, no picture is held past it. */
   private armLifetime() {
@@ -169,16 +181,16 @@ export class TryOnRun {
     this.checkLifetime();
     if (this.disposed || !this.person) return;
     if (phase.kind === 'ready') void this.send(0);
-    else if (phase.kind === 'failed' && failureAction[phase.failure] === 'retry') void this.send(phase.index);
+    else if (phase.kind === 'failed' && failureAction[phase.failure] === 'retry') { this.busyUntil = null; void this.send(phase.index); }
   }
 
-  private async send(index: number): Promise<void> {
+  private async send(index: number, waiting = false): Promise<void> {
     const person = this.person;
     if (!person) return;
     if (this.session.stopped()) { this.fail(index, 'unavailable'); return; }
     const generation = ++this.generation;
     this.clearTimers();
-    this.set({ kind: 'running', index });
+    this.set(waiting ? { kind: 'running', index, waiting: true } : { kind: 'running', index });
     const controller = new AbortController();
     this.inFlight = controller;
     this.started = true;
@@ -219,12 +231,24 @@ export class TryOnRun {
       if (last || hash !== reply.sha256) { this.reconcile(index, generation); return; }
       this.session.recordStep('ok');
       this.person = reply.body;
+      this.busyUntil = null;
       void this.send(index + 1);
       return;
     }
+    if (reply.code === 'BUSY' && this.waitForSlot(index, generation)) return;
     if (ambiguous(reply.code)) { this.reconcile(index, generation); return; }
     this.session.recordStep('other');
     this.fail(index, failureOf(reply.code));
+  }
+
+  /** A BUSY claim was refused and charged nothing: claim the same step again shortly, within the budget. False once it is spent. */
+  private waitForSlot(index: number, generation: number): boolean {
+    const now = this.env.now();
+    this.busyUntil ??= now + BUSY_RETRY_FOR_MS;
+    if (now + BUSY_RETRY_EVERY_MS > this.busyUntil) return false;
+    this.set({ kind: 'running', index, waiting: true });
+    this.stopTimers.push(this.env.setTimer(() => { if (this.live(generation)) void this.send(index, true); }, BUSY_RETRY_EVERY_MS));
+    return true;
   }
 
   private fail(index: number, failure: FailureKind) {

@@ -24,6 +24,28 @@ export function ConfirmDialog({ id, title, text, confirm, cancel, danger, onConf
   </dialog>;
 }
 
+/** Full-screen view of one picture: fit to the screen or at full size to scroll, pinch or pan. The caller owns the Blob URL. */
+function PictureViewer({ url, alt, t, onClose }: { url: string; alt: string; t: Translate; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const close = useRef<HTMLButtonElement>(null);
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    const element = dialog.current;
+    element?.showModal();
+    close.current?.focus();
+    return () => element?.close();
+  }, []);
+  return <dialog ref={dialog} className="viewer" aria-label={alt} onCancel={(event) => { event.preventDefault(); onClose(); }}>
+    <div className="viewer-scroll" data-zoomed={full ? '' : undefined} onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <img src={url} alt={alt} onClick={() => setFull(value => !value)} />
+    </div>
+    <div className="viewer-actions">
+      <button type="button" className="button button-secondary" onClick={() => setFull(value => !value)}>{t(full ? 'tryon.zoomFit' : 'tryon.zoomIn')}</button>
+      <button ref={close} id="tryon-viewer-close" type="button" className="button button-primary" onClick={onClose}>{t('common.close')}</button>
+    </div>
+  </dialog>;
+}
+
 type Picture = { kind: 'loading' } | { kind: 'shown'; url: string } | { kind: 'failed' } | { kind: 'deleted' };
 
 /**
@@ -39,6 +61,8 @@ export function TryOnPicture({ api, result, t, online, idPrefix, children, onDel
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteFailed, setDeleteFailed] = useState(false);
+  const [viewing, setViewing] = useState(false);
+  const zoomButton = useRef<HTMLButtonElement>(null);
   const deleteButton = useRef<HTMLButtonElement>(null);
   const gone = picture.kind === 'deleted';
   useEffect(() => {
@@ -68,7 +92,8 @@ export function TryOnPicture({ api, result, t, online, idPrefix, children, onDel
   }
   if (gone) return <p className="notice" role="status">{t('tryon.deleted')}</p>;
   return <figure className="tryon-result stack">
-    {picture.kind === 'shown' ? <img src={picture.url} alt={t('tryon.resultAlt')} width={1024} height={1280} />
+    {picture.kind === 'shown' ? <button ref={zoomButton} type="button" className="tryon-zoom" aria-label={t('tryon.zoomOpen')} onClick={() => setViewing(true)}>
+      <img src={picture.url} alt={t('tryon.resultAlt')} width={1024} height={1280} /></button>
       : picture.kind === 'failed' ? <div className="notice notice-error" role="alert"><span>{t('tryon.resultFailed')}</span>
         <button type="button" className="text-button" disabled={!online} onClick={() => setAttempt(value => value + 1)}>{t('common.retry')}</button></div>
       : <p role="status">{t('tryon.loadingResult')}</p>}
@@ -80,6 +105,8 @@ export function TryOnPicture({ api, result, t, online, idPrefix, children, onDel
       {children}
     </div>
     {deleting && <p className="muted" role="status">{t('common.saving')}</p>}
+    {viewing && picture.kind === 'shown' && <PictureViewer url={picture.url} alt={t('tryon.resultAlt')} t={t}
+      onClose={() => { setViewing(false); requestAnimationFrame(() => zoomButton.current?.focus()); }} />}
     {confirming && <ConfirmDialog id={`${idPrefix}-confirm`} title={t('tryon.deleteTitle')} confirm={t('common.delete')} cancel={t('common.cancel')} danger
       onConfirm={remove} onCancel={() => { setConfirming(false); requestAnimationFrame(() => deleteButton.current?.focus()); }} />}
   </figure>;
