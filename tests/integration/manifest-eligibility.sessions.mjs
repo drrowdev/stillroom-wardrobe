@@ -84,7 +84,7 @@ rollback;`;
 
 const line = (output, prefix) => String(output).split('\n').map((entry) => entry.trim()).find((entry) => entry.startsWith(prefix));
 
-export function createManifestEligibility(sql, { dates = MANIFEST_DATES, log = console.log } = {}) {
+export function createManifestEligibility(sql, { dates = MANIFEST_DATES, log = console.log, mark = () => {} } = {}) {
   let broken = false, active = false;
   const snapshot = async () => {
     const rows = JSON.parse(await sql(SNAPSHOT_SQL));
@@ -106,31 +106,42 @@ export function createManifestEligibility(sql, { dates = MANIFEST_DATES, log = c
   async function run(phase, fn) {
     requireEvidence(!broken && !active);
     active = true;
+    mark(phase, 'snapshot');
     const before = await snapshot();
     const ids = presentIn(before);
+    mark(phase, 'original-dates');
     exactDates(before, (id) => dates[id]);
+    mark(phase, 'refusal-before');
     await refusal();
     let value, failure, failed = false;
     try {
+      mark(phase, 'advance');
       await move('advance', ids.length);
+      mark(phase, 'advanced-dates');
       exactDates(await snapshot(), () => ELIGIBLE_UNTIL);
+      mark(phase, 'refusal-during');
       await refusal();
+      mark(phase, 'phase');
       value = await fn();
     } catch (error) { failed = true; failure = error; }
     try {
+      mark(phase, 'restore');
       // After a failed advance nothing moved (the transaction is atomic), so the restore is a no-op count of what moved.
       const current = await snapshot();
       const moved = presentIn(current).filter((id) => Date.parse(current.find((row) => row.id === id).review_expires_at) === Date.parse(ELIGIBLE_UNTIL));
       if (moved.length > 0) await move('restore', ids.length);
       const after = await snapshot();
+      mark(phase, 'compare');
       requireEvidence(isDeepStrictEqual(after, before));
       exactDates(after, (id) => dates[id]);
+      mark(phase, 'refusal-after');
       await refusal();
     } catch {
       broken = true; active = false;
       throw new Error('ELIGIBILITY_RESTORE_FAILED');
     }
     active = false;
+    mark(phase, 'done');
     if (failed) throw failure;
     log(`PASS: ${phase}: ${ELIGIBILITY_LABEL}; ${ids.length} manifest date(s) moved and restored exactly; the immutability trigger refused update and delete before, during and after`);
     return value;

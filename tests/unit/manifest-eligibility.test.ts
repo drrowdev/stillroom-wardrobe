@@ -258,7 +258,7 @@ describe('rehearsal wiring', () => {
     const tail = rehearsal.slice(rehearsal.indexOf("stage = 'AVAIL1-checkpoint'"));
     expect(tail).not.toContain('eligible.run(');
     expect(rehearsal).not.toMatch(/PRESERVATION_REVIEW_CLOCK|createReviewClock|review-clock/);
-    expect(rehearsal).toContain('const eligible = createManifestEligibility(privilegedLocalSql);');
+    expect(rehearsal).toContain('const eligible = createManifestEligibility(privilegedLocalSql, { mark:');
     expect(rehearsal).toContain("['stylist', 'enhance', 'tryon']);");
     expect(rehearsal).toContain("admission_no=1;')).trim(), ['google']);");
   });

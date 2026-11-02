@@ -1160,7 +1160,7 @@ async function main() {
     await assertMigrationInventory();
     // Behavioural phases that replay frozen Stylist, clean-up, try-on and Google bodies run inside a bounded manifest-eligibility
     // window (their review dates moved and restored exactly; see tests/integration/manifest-eligibility.sessions.mjs).
-    const eligible = createManifestEligibility(privilegedLocalSql);
+    const eligible = createManifestEligibility(privilegedLocalSql, { mark: (phase, label) => { stage = label === 'done' ? phase : `${phase}-eligibility-${label}`; } });
     stage = 'capabilities';
     const help = [];
     for (const args of [['db', 'reset', '--help'], ['migration', 'up', '--help'], ['migration', 'list', '--help']]) {

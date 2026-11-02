@@ -7,7 +7,7 @@ export const IMMUTABLE_SQL: string;
 export const PROBES: Readonly<Record<string, Readonly<{ id: string; setup: (uid: string) => string; call: (uid: string) => string }>>>;
 export function moveSql(direction: 'advance' | 'restore', dates?: Readonly<Record<string, string>>): string;
 export function createManifestEligibility(sql: (text: string) => Promise<string>, options?: {
-  dates?: Readonly<Record<string, string>>; log?: (message: string) => void;
+  dates?: Readonly<Record<string, string>>; log?: (message: string) => void; mark?: (phase: string, label: string) => void;
 }): {
   run<T>(phase: string, fn: () => Promise<T>): Promise<T>;
   snapshot(): Promise<unknown[]>;
