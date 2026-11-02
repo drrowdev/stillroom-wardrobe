@@ -8,14 +8,17 @@ import type { MessageKey } from '../../i18n';
 import type { OutfitComponent, OutfitRecord } from '../../domain/outfits';
 import type { WardrobeItem } from '../../domain/wardrobe';
 
-type Loaded<T> = { data: T | null; error: MessageKey | null; loading: boolean };
+type Loaded<T> = { data: T | null; error: MessageKey | null; loading: boolean; seq: number };
 
-// Refetches on invalidation, when the app comes back online and on window focus. The latest request wins.
-function useLoaded<T>(load: (signal: AbortSignal) => Promise<T>, online: boolean, invalidation: number): Loaded<T> & { reload: () => void } {
-  const [state, setState] = useState<Loaded<T>>({ data: null, error: null, loading: true });
+// Refetches on invalidation, when the app comes back online and on window focus. The latest request wins. `seq` numbers the read that
+// produced `data`; `reload` returns the lowest number a read started after that call will have, so a caller can tell a fresh read
+// from one that was already under way.
+function useLoaded<T>(load: (signal: AbortSignal) => Promise<T>, online: boolean, invalidation: number): Loaded<T> & { reload: () => number } {
+  const [state, setState] = useState<Loaded<T>>({ data: null, error: null, loading: true, seq: 0 });
   const [tick, setTick] = useState(0);
+  const runs = useRef(0);
   const wasOnline = useRef(online);
-  const reload = useCallback(() => setTick(value => value + 1), []);
+  const reload = useCallback(() => { setTick(value => value + 1); return runs.current + 1; }, []);
   useEffect(() => {
     if (online && !wasOnline.current) reload();
     wasOnline.current = online;
@@ -26,9 +29,10 @@ function useLoaded<T>(load: (signal: AbortSignal) => Promise<T>, online: boolean
   }, [reload]);
   useEffect(() => {
     const controller = new AbortController();
+    const seq = ++runs.current;
     setState(current => ({ ...current, loading: true }));
     load(controller.signal).then(data => {
-      if (!controller.signal.aborted) setState({ data, error: null, loading: false });
+      if (!controller.signal.aborted) setState({ data, error: null, loading: false, seq });
     }, (problem: unknown) => {
       if (!controller.signal.aborted && !isAborted(problem)) setState(current => ({ ...current, error: errorKey(problem), loading: false }));
     });

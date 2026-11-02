@@ -750,6 +750,60 @@ test.describe('saved reference photo (TRYON-PHOTO1)', () => {
     expect(api.tryonControl.requests).toHaveLength(sent + 3);
   });
 
+  test('a typed link or history step to another try-on route starts nothing and spends nothing', async ({ page }) => {
+    engineOnly();
+    const { api, clothes, outfitId } = await start(page);
+    const other = seedOutfit(api, [clothes.top.id, clothes.shoes.id], 'Second');
+    await savePhotoDuringFirstRun(page, api);
+    // The Try on click is used up by the screen it opens.
+    await page.locator('#tryon-open').click();
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+    const sent = api.tryonControl.requests.length;
+    expect(sent).toBe(6);
+    await page.goto(`/#/outfits/${other}/try-on`);
+    await expect(page.locator('#tryon-title')).toHaveText(text('tryon.title', 'en', { name: 'Second' }));
+    await expect(page.locator('#tryon-start')).toHaveText(text('tryon.open'));
+    await page.goBack();
+    await expect(page.locator('#tryon-title')).toHaveText(text('tryon.title', 'en', { name: 'Weekend' }));
+    await expect(page.locator('#tryon-start')).toHaveText(text('tryon.open'));
+    await page.goForward();
+    await expect(page.locator('#tryon-title')).toHaveText(text('tryon.title', 'en', { name: 'Second' }));
+    await expect(page.locator('#tryon-start')).toHaveText(text('tryon.open'));
+    await page.goto(`/#/outfits/${outfitId}/try-on`);
+    await expect(page.locator('#tryon-start')).toBeVisible();
+    await page.waitForTimeout(500);
+    expect(api.tryonControl.requests).toHaveLength(sent);
+    expect(api.tryonControl.results).toHaveLength(2);
+  });
+
+  test('Start again waits for a fresh read of the outfit and uses its garments', async ({ page }) => {
+    engineOnly();
+    const { api, clothes, outfitId } = await start(page);
+    await savePhotoDuringFirstRun(page, api);
+    const before = api.tryonControl.requests.length;
+    let holding = false;
+    const held = gate();
+    await page.route('**/rest/v1/outfits*', async route => {
+      if (holding) await held.hold;
+      await route.fallback();
+    });
+    api.tryonControl.replies.push({}, { code: 'CHAIN_MISMATCH', status: 409 });
+    await page.locator('#tryon-open').click();
+    await expect(failureTitle(page)).toHaveText(text('tryon.failure.mismatch'));
+    expect(api.tryonControl.requests).toHaveLength(before + 2);
+    // The shoes are taken out of the outfit while its next read is held.
+    holding = true;
+    api.outfitItems.splice(api.outfitItems.findIndex((row) => row.outfit_id === outfitId && row.item_id === clothes.shoes.id), 1);
+    await button(page, 'tryon.startAgain').click();
+    await page.waitForTimeout(700);
+    expect(api.tryonControl.requests).toHaveLength(before + 2);
+    await expect(page.locator('#tryon-progress')).toHaveCount(0);
+    held.release();
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+    expect(api.tryonControl.requests.slice(before + 2).map((entry) => entry.step)).toEqual([1, 2]);
+    expect(api.tryonControl.chains.at(-1)!.steps.map((step) => step.slot)).toEqual(['top', 'bottom']);
+  });
+
   test('a blocked try-on offers another photo for this try-on only, and leaves the saved photo alone', async ({ page }) => {
     engineOnly();
     const { api } = await start(page);

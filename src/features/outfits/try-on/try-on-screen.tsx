@@ -17,7 +17,7 @@ import { ConfirmDialog, TryOnPicture } from './try-on-parts';
 import { useBodyPhotoPicker } from './use-body-photo';
 
 type Common = { client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; onBack: () => void };
-type Props = Common & { id: string | null; armed: boolean };
+type Props = Common & { id: string | null; armed: boolean; onArmUsed: () => void };
 
 const focus = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
 
@@ -31,15 +31,27 @@ export function TryOnScreen(props: Props) {
   const status = useTryOnStatus(store);
   const view = useOutfit(client, scope, id, online, 0);
   const [run, setRun] = useState<TryOnRun | null>(null);
+  // The button press that opened this screen is used up here, once: this screen and no later one starts a chain by itself.
+  const [armed, setArmed] = useState(props.armed);
+  const { onArmUsed } = props;
+  useEffect(() => { onArmUsed(); }, [onArmUsed]);
+  // After Start again the garments are read once more; the old selection (which may be what the server refused) is never reused.
+  const [freshAfter, setFreshAfter] = useState<number | null>(null);
+  const waitingFresh = freshAfter !== null && view.seq < freshAfter;
+  const [refocus, setRefocus] = useState(false);
+  const refresh = () => { setArmed(true); setRefocus(true); setFreshAfter(view.reload()); };
   // Owned here rather than by the flow, so a remount of that view never ends a running chain.
   useEffect(() => () => run?.abandon(), [run]);
   const record = view.data?.record ?? null;
   const title = record ? t('tryon.title', { name: record.title }) : t('tryon.open');
-  const flow = (selection: TryOnSelection | null) => store && <TryOnFlow {...props} store={store} components={view.data?.components ?? new Map()}
-    selection={selection} run={run} onRun={setRun} onRefresh={view.reload}
+  const flow = (selection: TryOnSelection | null) => store && <TryOnFlow {...props} armed={armed} refocus={refocus} store={store} components={view.data?.components ?? new Map()}
+    selection={selection} run={run} onRun={setRun} onRefresh={refresh}
     create={record ? (steps, photo) => new TryOnRun(store.api, store, browserEnvironment(), record.id, steps, photo) : null} />;
   let body;
   if (run && store) body = flow(null);
+  else if (waitingFresh) body = view.error && !view.loading
+    ? <div className="notice notice-error" role="alert"><span>{t(view.error)}</span><button type="button" className="text-button" disabled={!online} onClick={() => setFreshAfter(view.reload())}>{t('common.retry')}</button></div>
+    : <p role="status">{t('common.loading')}</p>;
   else if (id === null || view.data !== null && record === null) body = <p className="notice notice-error" role="alert">{t('outfits.unavailable')}</p>;
   else if (!view.data || !record) body = view.error
     ? <div className="notice notice-error" role="alert"><span>{t(view.error)}</span><button type="button" className="text-button" disabled={!online} onClick={view.reload}>{t('common.retry')}</button></div>
@@ -95,7 +107,7 @@ type FlowProps = Common & {
   /** `null` while a run exists: the planned steps then come from the run itself. */
   selection: TryOnSelection | null; run: TryOnRun | null; onRun: (run: TryOnRun | null) => void;
   create: ((steps: TryOnStep[], photo: Uint8Array<ArrayBuffer>) => TryOnRun) | null;
-  armed: boolean; onRefresh?: () => void;
+  armed: boolean; refocus?: boolean; onRefresh?: () => void;
 };
 /** The photo offered for saving while a run is going: held only until it is saved, or the run ends. */
 type Offer = { photo: BodyPhoto | null; done: boolean };
@@ -107,7 +119,7 @@ function TryOnFlow(props: FlowProps) {
   const [forcePicker, setForcePicker] = useState(false);
   const [offer, setOffer] = useState<Offer | null>(null);
   // Set once the owner has pressed Try again, Start again or Choose another photo: the pressed button is gone, so focus is placed.
-  const [refocus, setRefocus] = useState(false);
+  const [refocus, setRefocus] = useState(props.refocus ?? false);
   function again(mode: Again) {
     run?.abandon();
     onRun(null);
