@@ -50,20 +50,25 @@ set local lock_timeout='5s'; set local statement_timeout='30s';
 do $eligibility$
 declare v_role text := current_setting('session_replication_role'); v_trigger "char"; v_expected integer; v_moved integer;
 begin
-  ${TRIGGER_STATE.replace('select t.tgenabled', 'select t.tgenabled into v_trigger')};
-  if v_role<>'origin' or v_trigger is distinct from 'O' then raise exception 'ELIGIBILITY_PRECONDITION'; end if;
-  select count(*) into v_expected from private.ai_execution_manifests where id in (${ids.map(literal).join(',')});
-  perform set_config('session_replication_role','replica',true);
-  update private.ai_execution_manifests m set review_expires_at=v.to_at
-    from (values ${rows.join(',')}) v(id,from_at,to_at) where m.id=v.id and m.review_expires_at=v.from_at;
-  get diagnostics v_moved = row_count;
-  perform set_config('session_replication_role',v_role,true);
-  if current_setting('session_replication_role') is distinct from 'origin' then raise exception 'ELIGIBILITY_ROLE_NOT_RESTORED'; end if;
-  if v_moved<>v_expected then raise exception 'ELIGIBILITY_ROWS_NOT_AS_EXPECTED'; end if;
-  if (${TRIGGER_STATE}) is distinct from v_trigger then raise exception 'ELIGIBILITY_TRIGGER_CHANGED'; end if;
-  perform set_config('eligibility.moved',v_moved::text,true);
+  begin
+    ${TRIGGER_STATE.replace('select t.tgenabled', 'select t.tgenabled into v_trigger')};
+    if v_role<>'origin' or v_trigger is distinct from 'O' then raise exception 'ELIGIBILITY_PRECONDITION'; end if;
+    select count(*) into v_expected from private.ai_execution_manifests where id in (${ids.map(literal).join(',')});
+    perform set_config('session_replication_role','replica',true);
+    update private.ai_execution_manifests m set review_expires_at=v.to_at
+      from (values ${rows.join(',')}) v(id,from_at,to_at) where m.id=v.id and m.review_expires_at=v.from_at;
+    get diagnostics v_moved = row_count;
+    perform set_config('session_replication_role',v_role,true);
+    if current_setting('session_replication_role') is distinct from 'origin' then raise exception 'ELIGIBILITY_ROLE_NOT_RESTORED'; end if;
+    if v_moved<>v_expected then raise exception 'ELIGIBILITY_ROWS_NOT_AS_EXPECTED'; end if;
+    if (${TRIGGER_STATE}) is distinct from v_trigger then raise exception 'ELIGIBILITY_TRIGGER_CHANGED'; end if;
+    perform set_config('eligibility.moved',v_moved::text,true);
+  exception when others then
+    -- Everything above, including the local role change, is rolled back with this block; the cause is reported, not hidden.
+    perform set_config('eligibility.error',sqlstate||':'||sqlerrm,true);
+  end;
 end $eligibility$;
-select 'MOVED:'||current_setting('eligibility.moved');
+select 'MOVED:'||coalesce(current_setting('eligibility.moved',true),'')||'|'||coalesce(current_setting('eligibility.error',true),'');
 commit;`;
 }
 
@@ -105,7 +110,10 @@ export function createManifestEligibility(sql, { dates = MANIFEST_DATES, log = c
     requireEvidence(reply === 'REFUSAL:Not available|Not available');
   };
   const move = async (direction, count) => {
-    requireEvidence(line(await sql(moveSql(direction, dates)), 'MOVED:') === `MOVED:${count}`);
+    const reply = line(await sql(moveSql(direction, dates)), 'MOVED:');
+    const [moved, error = ''] = String(reply).slice('MOVED:'.length).split(/\|(.*)/s);
+    if (error !== '') mark(currentPhase, `${direction}-error-${error.replace(/[^A-Za-z0-9_.:,-]+/g, '').slice(0, 100)}`);
+    requireEvidence(reply !== undefined && error === '' && moved === String(count));
   };
 
   // Moves the dates, runs the phase, and always restores them before returning; a failed restoration aborts the rehearsal.
