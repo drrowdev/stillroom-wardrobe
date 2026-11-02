@@ -45,30 +45,31 @@ export function moveSql(direction, dates = MANIFEST_DATES) {
     const [from, to] = direction === 'advance' ? [dates[id], ELIGIBLE_UNTIL] : [ELIGIBLE_UNTIL, dates[id]];
     return `(${literal(id)},${literal(from)}::timestamptz,${literal(to)}::timestamptz)`;
   });
+  // The role switches are top-level SET LOCAL statements (set_config() is refused for this parameter under the local stack's
+  // role hooks); the checks run in blocks that abort the whole transaction on any deviation.
   return `begin;
 set local lock_timeout='5s'; set local statement_timeout='30s';
-do $eligibility$
-declare v_role text := current_setting('session_replication_role'); v_trigger "char"; v_expected integer; v_moved integer;
+do $before$
+declare v_trigger "char";
 begin
-  begin
-    ${TRIGGER_STATE.replace('select t.tgenabled', 'select t.tgenabled into v_trigger')};
-    if v_role<>'origin' or v_trigger is distinct from 'O' then raise exception 'ELIGIBILITY_PRECONDITION'; end if;
-    select count(*) into v_expected from private.ai_execution_manifests where id in (${ids.map(literal).join(',')});
-    perform set_config('session_replication_role','replica',true);
-    update private.ai_execution_manifests m set review_expires_at=v.to_at
-      from (values ${rows.join(',')}) v(id,from_at,to_at) where m.id=v.id and m.review_expires_at=v.from_at;
-    get diagnostics v_moved = row_count;
-    perform set_config('session_replication_role',v_role,true);
-    if current_setting('session_replication_role') is distinct from 'origin' then raise exception 'ELIGIBILITY_ROLE_NOT_RESTORED'; end if;
-    if v_moved<>v_expected then raise exception 'ELIGIBILITY_ROWS_NOT_AS_EXPECTED'; end if;
-    if (${TRIGGER_STATE}) is distinct from v_trigger then raise exception 'ELIGIBILITY_TRIGGER_CHANGED'; end if;
-    perform set_config('eligibility.moved',v_moved::text,true);
-  exception when others then
-    -- Everything above, including the local role change, is rolled back with this block; the cause is reported, not hidden.
-    perform set_config('eligibility.error',sqlstate||':'||sqlerrm,true);
-  end;
-end $eligibility$;
-select 'MOVED:'||coalesce(current_setting('eligibility.moved',true),'')||'|'||coalesce(current_setting('eligibility.error',true),'');
+  ${TRIGGER_STATE.replace('select t.tgenabled', 'select t.tgenabled into v_trigger')};
+  if current_setting('session_replication_role')<>'origin' or v_trigger is distinct from 'O' then raise exception 'ELIGIBILITY_PRECONDITION'; end if;
+  perform set_config('eligibility.trigger',v_trigger::text,true);
+  perform set_config('eligibility.expected',(select count(*)::text from private.ai_execution_manifests where id in (${ids.map(literal).join(',')})),true);
+end $before$;
+set local session_replication_role = replica;
+with moved as (
+  update private.ai_execution_manifests m set review_expires_at=v.to_at
+    from (values ${rows.join(',')}) v(id,from_at,to_at) where m.id=v.id and m.review_expires_at=v.from_at returning m.id)
+select set_config('eligibility.moved',count(*)::text,true) from moved;
+set local session_replication_role = origin;
+do $after$
+begin
+  if current_setting('session_replication_role') is distinct from 'origin' then raise exception 'ELIGIBILITY_ROLE_NOT_RESTORED'; end if;
+  if current_setting('eligibility.moved') is distinct from current_setting('eligibility.expected') then raise exception 'ELIGIBILITY_ROWS_NOT_AS_EXPECTED'; end if;
+  if (${TRIGGER_STATE})::text is distinct from current_setting('eligibility.trigger') then raise exception 'ELIGIBILITY_TRIGGER_CHANGED'; end if;
+end $after$;
+select 'MOVED:'||current_setting('eligibility.moved')||'|';
 commit;`;
 }
 

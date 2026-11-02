@@ -82,14 +82,16 @@ describe('the move', () => {
       expect(sql.startsWith('begin;')).toBe(true);
       expect(sql.trimEnd().endsWith('commit;')).toBe(true);
       expect(sql.match(/update private\.ai_execution_manifests/g)).toHaveLength(1);
-      expect(sql.match(/set_config\('session_replication_role','replica',true\)/g)).toHaveLength(1);
-      expect(sql.match(/set_config\('session_replication_role',v_role,true\)/g)).toHaveLength(1);
-      expect(sql.indexOf("'replica'")).toBeLessThan(sql.indexOf('update private.ai_execution_manifests'));
-      expect(sql.indexOf('update private.ai_execution_manifests')).toBeLessThan(sql.indexOf("set_config('session_replication_role',v_role,true)"));
-      expect(sql.indexOf("set_config('session_replication_role',v_role,true)")).toBeLessThan(sql.indexOf('commit;'));
+      expect(sql.match(/^set local session_replication_role = replica;$/gm)).toHaveLength(1);
+      expect(sql.match(/^set local session_replication_role = origin;$/gm)).toHaveLength(1);
+      expect(sql).not.toContain("set_config('session_replication_role'");
+      expect(sql.indexOf('= replica;')).toBeLessThan(sql.indexOf('update private.ai_execution_manifests'));
+      expect(sql.indexOf('update private.ai_execution_manifests')).toBeLessThan(sql.indexOf('= origin;'));
+      expect(sql.indexOf('= origin;')).toBeLessThan(sql.indexOf('ELIGIBILITY_ROLE_NOT_RESTORED'));
+      expect(sql.indexOf('ELIGIBILITY_ROLE_NOT_RESTORED')).toBeLessThan(sql.indexOf('commit;'));
       for (const needle of ['ELIGIBILITY_PRECONDITION', 'ELIGIBILITY_ROLE_NOT_RESTORED', 'ELIGIBILITY_ROWS_NOT_AS_EXPECTED', 'ELIGIBILITY_TRIGGER_CHANGED',
-        "v_role<>'origin'", "tgname='ai_manifest_immutable'"]) expect(sql, needle).toContain(needle);
-      expect(sql).not.toMatch(/disable trigger|alter table|drop trigger|session_replication_role\s*=|set session|set role/i);
+        "current_setting('session_replication_role')<>'origin'", "tgname='ai_manifest_immutable'"]) expect(sql, needle).toContain(needle);
+      expect(sql).not.toMatch(/disable trigger|alter table|drop trigger|set session|set role/i);
       expect(sql).not.toMatch(/\bdelete\b|\binsert\b/i);
       for (const id of Object.keys(MANIFEST_DATES)) expect(sql, id).toContain(`'${id}'`);
       expect(sql).not.toContain('azure-eu-terra-devtest');
