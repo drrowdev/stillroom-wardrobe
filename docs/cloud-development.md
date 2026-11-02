@@ -1392,7 +1392,7 @@ read-and-finish only.
 The six explicit input/output/total/reasoning/cache-read/cache-write counters
 have no missing-to-zero defaults. Input/output rates are respectively
 USD 4.40/19.80 per million tokens; their combined estimate is rounded up once
-to micro-USD. The 4,097,351 micro-USD reservation is allowance arithmetic, not
+to micro-USD. The 4,097,351 micro-USD reservation of manifest v2 is allowance arithmetic (v3 holds one micro-USD; see BUDGET2), not
 an invoice ceiling. Both cache reads and writes must be zero. Positive applicable
 cache counters or identity/control anomalies deny new admissions and ready facts,
 preserve accepted/confirmed accounting (or the hold), and deactivate the affected
@@ -1423,6 +1423,62 @@ live Azure normalization. Deployment wire/control compatibility, quality,
 privacy/retention and human/device acceptance remain live-activation gates.
 No private capture, paid call, hosted mutation, production deployment or owner
 activation is implied by this source packet.
+
+### BUDGET2 unreserved photo analysis and USD 200 ceiling - 1 November 2026
+
+Owner decision of 1 November 2026: the per-photo hold is removed and the monthly ceiling is USD 200. Source only; hosted
+apply, both deploys and the controls switch are separate owner/coordinator gates and are not done by this packet.
+
+- **What changed.** Migration `20261101090000_unreserved_analysis_manifest` adds the immutable manifest
+  `azure-eu-terra-devtest-v3` (same model, prompt 2, notice 2, rates and prompt/schema digests as v2) with a reservation of
+  1 micro-USD and an input envelope of 16,384 tokens (output 2,048). One micro-USD is the smallest hold the schema accepts:
+  `ai_controls.max_request_micro` and `ai_usage.reserved_micro` are `> 0` and a reserved/held row must account exactly its
+  reservation; the manifest reservation is only the floor the controls' amount must reach. It replaces, with their exact
+  current bodies and only the manifest id lists widened (plus, in `ai_finish_analysis`, the v3 anomaly rule below),
+  `ai_claim_analysis`, `ai_analysis_permitted`, `ai_finish_analysis`,
+  `ai_status` and `complete_analyzed_item_save` (a v3 Save keeps its manifest lineage), and `admin_set_budget` (ceiling
+  `200000000`). No controls row, usage row, consent or notice is written, so nobody is asked for consent again.
+- **Allowance, not a hold.** The monthly budget is a recorded-usage *admission allowance*: a new analysis is admitted while
+  recorded use (charges plus every reserved or held row of any feature) plus one micro-USD is within it, and finishing records
+  the real cost. It is not a hard actual-spend ceiling, not a monetary hold (the one micro-USD is a placeholder), and not an
+  account-wide bound on how many calls can start. An expired dispatched request keeps its held charge, now one micro-USD
+  instead of USD 4.10.
+
+  | Situation | Overshoot of the allowance |
+  |---|---|
+  | N analyses outstanding at once, each within the envelope | up to N × USD 0.112639 (16,384 input and 2,048 output tokens at 4.40/19.80 per million; a typical photo is about USD 0.01) |
+  | A reply beyond the envelope | its full unclamped cost, recorded afterwards; not bounded by the row above |
+  | Lost or invalid metering, or a request whose cost is never learned | not bounded: it keeps only its one-micro placeholder |
+  | After the budget is used up | no new analysis is admitted; in-flight ones still finish |
+
+  A positive one-micro-USD amount may show as USD 0.01 in cent-rounded displays; that rounding is never used in admission.
+- **Anomaly handling (v3).** A valid reply with more than 16,384 input or 2,048 output tokens keeps its unclamped estimate and
+  the evidence `anomaly` flag and fails only that photo (the photo is filled in by hand); analysis stays available for the next
+  photo and nothing is deactivated. v1 and v2 keep their deactivation, and for v3 too the other shutdowns are unchanged
+  (non-ordinary or contradictory controls and positive cache counters deactivate the control; a missing or unrecognised model
+  fails the photo and keeps the Settings notice; invalid or unobserved counters are rejected). The bound is about four times the
+  expected request (a high-detail 1600 px photo is about 3,000 image tokens, plus the fixed prompt and schema; the 24 September
+  probe used at most 2,049 input tokens). Monitoring after rollout, as counters only: evidence rows with `anomaly = true`, the
+  account's `activated`, and the maximum and 95th percentile of `normalized_usage->>'input'`.
+- **Rollout order.** (1) apply the migration; (2) deploy `analyze-clothing` (accepts v2 and v3, chosen by the account's
+  controls); (3) deploy Pages (v3 profile with a one-micro minimum and the USD 200 ceiling); (4) switch the owner's controls
+  with `scripts/budget2-controls-switch.mjs` (`forward`), one guarded transaction; (5) the owner raises the budget in the
+  admin screen (needs steps 1 and 3 only; the database first). Any earlier-numbered component alone leaves behaviour unchanged
+  or fails closed: controls on v3 with an older Edge function or Pages build make analysis unavailable (never a one-micro hold
+  under v2: a v2 account below 4,097,351 is refused by the claim).
+- **Guarded switch.** Both `forward` (v2 to v3) and `rollback` (v3 back to v2/4,097,351) use the same quiescence guards and
+  refuse with `BLOCKED` before any write unless: the controls are exactly the expected current row; no frozen analysed Save or
+  image replacement is still in progress (reported apart from an unreserved ready analysis); no request of the account is
+  alive, neither one in flight nor a ready analysis that was never saved (its manifest would no longer match, so it could not
+  be saved); and no reserved or held charge exists. A dispatched request that expired keeps its held charge, so it blocks
+  too, in both directions: the switch never erases an unknown charge to pass the guard, and reconciling one is a separately
+  authorised step. Rollback restores the controls before Edge and Pages are downgraded; activation and consent are never
+  written.
+- **Tests.** Unit: `unreserved-analysis-schema`, `budget2-controls-switch`, the endpoint, client, card and consent tests. CI:
+  the preservation rehearsal now runs the AVAIL1 proofs unchanged at `budget2-prior` (exactly `20261101080000`), then applies
+  BUDGET2 alone and proves its diff and the real v3 claim, finish, status, analysed Save, attribution and image replacement,
+  burst and concurrent claims, expired-held rows, the anomaly, the ready-draft reverse cutover, the guarded switch and the
+  ceiling. Fixtures that pin v2 and 4,097,351 stay as intentional compatibility coverage.
 
 ### COL1 garment colours and Azure v2 manifest - 24 September 2026
 

@@ -31,15 +31,18 @@ const BUDGET1_PRIOR_VERSION = '20261009090000';
 const IDEA_PRIOR_VERSION = '20261010090000';
 const PHOTO_PRIOR_VERSION = '20261011090000';
 const AVAIL_PRIOR_VERSION = '20261011100000';
-const LIMITS_PRIOR_VERSION = '20261101080000';
+const BUDGET2_PRIOR_VERSION = '20261101080000';
+const LIMITS_PRIOR_VERSION = '20261101090000';
 // Exact applied prefix per labelled stage; 'target' is the full source inventory.
 const STAGE_VERSIONS = Object.freeze({ base: '20260905000000', 'hosted-source': HOSTED_SOURCE_VERSION,
   'prior-main': PRIOR_MAIN_VERSION, 'azure-target': AZURE_TARGET_VERSION, 'image-change': IMAGE_CHANGE_VERSION,
   colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, 'save1-prior': SAVE1_PRIOR_VERSION, 'budget1-prior': BUDGET1_PRIOR_VERSION,
-  'idea-prior': IDEA_PRIOR_VERSION, 'photo-prior': PHOTO_PRIOR_VERSION, 'avail-prior': AVAIL_PRIOR_VERSION, 'limits-prior': LIMITS_PRIOR_VERSION, target: null });
+  'idea-prior': IDEA_PRIOR_VERSION, 'photo-prior': PHOTO_PRIOR_VERSION, 'avail-prior': AVAIL_PRIOR_VERSION,
+  'budget2-prior': BUDGET2_PRIOR_VERSION, 'limits-prior': LIMITS_PRIOR_VERSION, target: null });
 const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], 'image-change': ['azure-target', 'hosted-source'],
   colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], 'budget1-prior': ['save1-prior'],
-  'idea-prior': ['budget1-prior'], 'photo-prior': ['idea-prior'], 'avail-prior': ['photo-prior'], 'limits-prior': ['avail-prior'], target: ['limits-prior'] });
+  'idea-prior': ['budget1-prior'], 'photo-prior': ['idea-prior'], 'avail-prior': ['photo-prior'], 'budget2-prior': ['avail-prior'],
+  'limits-prior': ['budget2-prior'], target: ['limits-prior'] });
 
 // Prints, per stage, whether SYNTHETIC analysis claim/finish/Save/replacement evidence was used (lazy import keeps this module import-safe).
 const syntheticNote = async (stage) => (await import('../tests/integration/synthetic-analysis.sessions.mjs')).syntheticNote(stage);
@@ -81,6 +84,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261011090000_tryon_idea.sql', version: '20261011090000', time: '2026-10-11 09:00:00', bytes: 24325, sha256: '666e3da6a75033d7a6a43678f879c07f1584b4eea1b5b6867e379f3854ff4d4a' },
   { name: '20261011100000_tryon_person_photo.sql', version: '20261011100000', time: '2026-10-11 10:00:00', bytes: 21848, sha256: '465973355f31dd3137ffc2168820c318a77a87c417c01b1969e882ce5ee12331' },
   { name: '20261101080000_persistent_ai_availability.sql', version: '20261101080000', time: '2026-11-01 08:00:00', bytes: 47567, sha256: '9c483f9a2dce35bae501fb34842d718fdd7868443d001744f6c928ee10cb50e4' },
+  { name: '20261101090000_unreserved_analysis_manifest.sql', version: '20261101090000', time: '2026-11-01 09:00:00', bytes: 26207, sha256: '8252bd121eb000b34d3d2ffa76fcda1a858639ccd2ab74b6ad9fee216d7b42cd' },
   { name: '20261101200000_tryon_limits.sql', version: '20261101200000', time: '2026-11-01 20:00:00', bytes: 61538, sha256: '92a5e37d8b8f57795523d863ef7144f75aed7f3f4e33fb2675fb34db82131bcc' },
 ]);
 
@@ -1413,14 +1417,15 @@ async function main() {
       stage = 'PHOTO1-tryon-photo';
       await tryonPhotoProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `PHOTO1-${label}`; });
       colourFinalizer.assertRunning();
-      // AVAIL1: every frozen historical check above ran at its exact inventory; the availability migration is applied last.
+      // AVAIL1: every frozen historical check above ran at its exact inventory; the availability migration is applied to a
+      // populated checkpoint and its own proofs run at budget2-prior (exactly 20261101080000), unchanged, before BUDGET2.
       stage = 'AVAIL1-checkpoint';
       const { availabilityCheckpoint, availabilityCompare, availabilityCatalogProbe, availabilityBehaviourProbes } = await import('../tests/integration/persistent-availability.sessions.mjs');
       const availBefore = await availabilityCheckpoint(privilegedLocalSql);
-      stage = 'AVAIL1-prior-to-limits-prior';
-      await migrateToStage(run, 'avail-prior', 'limits-prior');
+      stage = 'AVAIL1-prior-to-budget2-prior';
+      await migrateToStage(run, 'avail-prior', 'budget2-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
-      await history('limits-prior'); await verifyCiStorageGuard();
+      await history('budget2-prior'); await verifyCiStorageGuard();
       stage = 'AVAIL1-compare';
       await availabilityCompare(availBefore, privilegedLocalSql, (label) => { stage = `AVAIL1-${label}`; });
       stage = 'AVAIL1-catalog';
@@ -1429,7 +1434,24 @@ async function main() {
       await availabilityBehaviourProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `AVAIL1-${label}`; });
       await syntheticNote('AVAIL1-behaviour');
       colourFinalizer.assertRunning();
-      // TRYON-LIMITS1: the AVAIL1 proofs above ran unchanged at their own exact inventory (20261101080000). Both owners are configured
+      // BUDGET2: the AVAIL1 proofs above ran at their exact inventory; the unreserved-analysis migration is applied alone to
+      // the populated state they left, compared before any probe writes, and then probed with the real functions.
+      stage = 'BUDGET2-checkpoint';
+      const { budget2Checkpoint, budget2Compare, budget2CatalogProbe, budget2BehaviourProbes } = await import('../tests/integration/unreserved-analysis.sessions.mjs');
+      const budget2Before = await budget2Checkpoint(privilegedLocalSql);
+      stage = 'BUDGET2-prior-to-limits-prior';
+      await migrateToStage(run, 'budget2-prior', 'limits-prior');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('limits-prior'); await verifyCiStorageGuard();
+      stage = 'BUDGET2-compare';
+      await budget2Compare(budget2Before, privilegedLocalSql, (label) => { stage = `BUDGET2-${label}`; });
+      stage = 'BUDGET2-catalog';
+      await budget2CatalogProbe(privilegedLocalSql, (label) => { stage = `BUDGET2-${label}`; });
+      stage = 'BUDGET2-behaviour';
+      await budget2BehaviourProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BUDGET2-${label}`; });
+      await syntheticNote('BUDGET2-behaviour');
+      colourFinalizer.assertRunning();
+      // TRYON-LIMITS1: the BUDGET2 proofs above ran unchanged at their own exact inventory (20261101090000). Both owners are configured
       // at the v1 manifest and notice 2 with consent at 2, a saved reference photo and results (one past its old 7-day mark) are seeded,
       // the limits migration is applied alone, and every seeded result must survive it before the new contract is probed.
       stage = 'LIMITS1-seed';
@@ -1445,6 +1467,7 @@ async function main() {
       await tryonLimitsProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `LIMITS1-${label}`; });
       colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
+    console.log('PASS: BUDGET2 unreserved analysis; the migration was applied alone to a populated checkpoint that stayed identical apart from the six replaced bodies and one added manifest row (no controls row, usage, consent, trigger or object changed), the bodies equal the migration source, and the real v3 claim holds one micro-USD, finishes at the recorded cost, saves with its manifest lineage and replaces an image, a burst can pass the allowance only by the cost in flight, concurrent claims are admitted one by one, an expired dispatched request keeps its held charge, an envelope overrun records its cost and deactivates analysis, the guarded controls switch refuses live requests and held charges, and the USD 200 ceiling holds; no provider calls');
     console.log('PASS: AVAIL1 persistent availability; the availability migration was applied alone to a populated checkpoint that stayed identical apart from the nine replaced bodies (owner, ACL, security configuration, every other body, manifests, triggers, rows and object bytes), those bodies equal the migration source and none but the legacy Google term reads a review date, and after the recorded review dates the real photo analysis lifecycle, analyzed Save, image replacement, Stylist and clean-up claim and finish succeed while consent, activation, configuration, allowance, provider availability and request lifetime still refuse and no hourly limit applies; try-on is not exercised here; no provider calls');
     console.log('PASS: TRYON-LIMITS1 more garments and kept results; the limits migration was applied alone after the frozen AVAIL1 checks to a seeded checkpoint, every result including one past its old 7-day mark survived byte for byte, configured accounts moved to the v2 manifest and notice revision 3 with consent left at 2, the saved reference photo was removed by the guard as for any notice change and can be saved again after consenting to revision 3, and a six-garment chain, the 200-result cap, results that never expire, withdrawal, Stop and the unchanged maintenance cleanup were probed; no provider calls');
     console.log('PASS: TRYON-PHOTO1 saved reference photo; the photo migration was applied after the frozen checks, the configured notice moved to revision 2 with consent left at 1, a revision-1 consent cannot save a photo, saves are admitted only for the app\'s own JPEG shape, each owner has one private photo that only they can read, replace or remove, withdrawal and any notice change remove it, removal needs no activation, a save racing a withdrawal never survives it, and the platform-restore step removes every photo; no provider calls');

@@ -59,7 +59,9 @@ describe('persistent AI availability migration (AVAIL1)', () => {
     expect(sql.trimEnd().endsWith('commit;')).toBe(true);
     expect(sql).not.toContain('\r');
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
-    expect(names).toContain(MAIN);
+    // Historical ordering: later migrations (BUDGET2 onward) may follow; nothing earlier-named sorts after it.
+    expect(names.indexOf(MAIN)).toBeGreaterThan(names.indexOf('20261011100000_tryon_person_photo.sql'));
+    expect(names.slice(0, names.indexOf(MAIN)).every((name) => name < MAIN)).toBe(true);
     expect([...sql.matchAll(/create or replace function ([a-z_0-9.]+)\(/g)].map((match) => match[1])).toEqual(TARGETS.map((t) => t.fn));
     const code = sql.split('\n').filter((line) => !line.trimStart().startsWith('--')).join('\n');
     expect(code).not.toMatch(/\bcreate function\b|\bdrop\b|\balter\b|\bgrant\b|\brevoke\b|\btruncate\b|\bupdate private\.ai_controls\b/);

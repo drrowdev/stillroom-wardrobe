@@ -839,7 +839,7 @@ before any input validation, target lookup or lock.
   from the locked admission row. Results: `OK {limits, belowUse}`,
   `UNCHANGED`, `CONFLICT` (stale version or expected values, or a lock is
   busy), `INVALID_LIMITS {field, reason}` (`REQUIRED`, `NOT_POSITIVE`,
-  `RANGE`, `APP_LIMIT` above USD 50 a month per account, `ABOVE_MONTHLY`,
+  `RANGE`, `APP_LIMIT` above USD 200 a month per account (USD 50 before BUDGET2), `ABOVE_MONTHLY`,
   `ABOVE_SHARED`, `BELOW_RESERVATION`), `INVALID_INPUT`, `UNCONFIGURED` or
   `UNAVAILABLE`. Every check runs before the update and the stored values must
   equal the request, so nothing is clamped. It never changes activation,
@@ -964,7 +964,7 @@ and admin functions keep their names and signatures. The request header
 `X-Stillroom-AI-Budget-Contract: 2` selects the one-monthly-budget replies:
 `budget {monthlyAllowanceMicro, usedMicro, remainingMicro, warning}` replaces the
 usage and allowance fields, and `admin_set_ai_limits_v2` sets one amount
-(positive, at most USD 50). Without the header the status functions answer
+(positive, at most USD 200; USD 50 before BUDGET2). Without the header the status functions answer
 `UNAVAILABLE`, enabling consent and admin writes refuse before any change,
 withdrawal still works, and `admin_ai_spending` / `admin_set_ai_limits` (v1)
 always answer `UNAVAILABLE`. The Edge functions require the header and a

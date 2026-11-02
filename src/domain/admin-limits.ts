@@ -21,8 +21,8 @@ export type AdminAccount = {
 export type ProbeAllocation = { count: number; allocationMicro: string; maxCalls: number };
 export type AdminSpending = { asOf: number; months: string[]; accounts: AdminAccount[] };
 
-/** USD 50 in micro-USD: the per-account app limit on the monthly budget. */
-export const APP_LIMIT_MICRO = 50_000_000n;
+/** USD 200 in micro-USD: the per-account app limit on the monthly budget (BUDGET2; also enforced in private.admin_set_budget). */
+export const APP_LIMIT_MICRO = 200_000_000n;
 const MICRO = /^(0|[1-9][0-9]{0,11})$/;
 const MONTH = /^[0-9]{4}-(0[1-9]|1[0-2])$/;
 const VERSION = /^[0-9a-f]{64}$/;

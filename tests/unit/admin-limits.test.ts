@@ -181,13 +181,14 @@ describe('budget form', () => {
       expect(limitsFromDraft(text, 'en')).toEqual({ limits: null, errors: { monthlyAllowanceMicro: 'FORMAT' } });
     }
   });
-  it('accepts any positive amount up to exactly USD 50, including one below current use', () => {
-    expect(limitsFromDraft('50', 'en').limits).toEqual({ monthlyAllowanceMicro: '50000000' });
+  it('accepts any positive amount up to exactly USD 200, including one below current use', () => {
+    expect(limitsFromDraft('200', 'en').limits).toEqual({ monthlyAllowanceMicro: '200000000' });
+    expect(limitsFromDraft('50.000001', 'en').limits).toEqual({ monthlyAllowanceMicro: '50000001' });
     expect(limitsFromDraft('0.000001', 'en').limits).toEqual({ monthlyAllowanceMicro: '1' });
-    expect(limitsFromDraft('50.000001', 'en')).toEqual({ limits: null, errors: { monthlyAllowanceMicro: 'APP_LIMIT' } });
+    expect(limitsFromDraft('200.000001', 'en')).toEqual({ limits: null, errors: { monthlyAllowanceMicro: 'APP_LIMIT' } });
     expect(limitsFromDraft('0', 'en')).toEqual({ limits: null, errors: { monthlyAllowanceMicro: 'NOT_POSITIVE' } });
-    expect(checkLimits({ monthlyAllowanceMicro: '50000000' })).toEqual({});
-    expect(checkLimits({ monthlyAllowanceMicro: '50000001' })).toEqual({ monthlyAllowanceMicro: 'APP_LIMIT' });
+    expect(checkLimits({ monthlyAllowanceMicro: '200000000' })).toEqual({});
+    expect(checkLimits({ monthlyAllowanceMicro: '200000001' })).toEqual({ monthlyAllowanceMicro: 'APP_LIMIT' });
     expect(checkLimits({ monthlyAllowanceMicro: '0' })).toEqual({ monthlyAllowanceMicro: 'NOT_POSITIVE' });
   });
   it('says when the use already passes the budget', () => {

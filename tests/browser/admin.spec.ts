@@ -236,7 +236,7 @@ test.describe('AD1b admin spending and limits', () => {
     await field(page, 1).fill('0');
     await button(account(page, 1), 'admin.review').click();
     await expect(page.locator('#admin-account-1-monthly-error')).toHaveText(text('admin.errPositive'));
-    await field(page, 1).fill('50.000001');
+    await field(page, 1).fill('200.000001');
     await button(account(page, 1), 'admin.review').click();
     await expect(page.locator('#admin-account-1-monthly-error')).toHaveText(text('admin.overAppLimit'));
     expect(api.adminControl.writes).toEqual([]);

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHandler } from '../../supabase/functions/analyze-clothing/handler';
+import { frozenV2Analyze } from '../fixtures/frozen-v2-analyze-handler';
 import { AZURE_MODEL, AZURE_MANIFEST } from '../../supabase/functions/analyze-clothing/azure-openai';
 import { analyzeGoogle, estimatedMicro, googleToken, normalizeUsage, TOKEN_URL } from '../../supabase/functions/analyze-clothing/google-cloud';
 import {
@@ -268,6 +269,89 @@ describe('B1 source runtime and fixed protocol', () => {
     expect(await response.json()).toEqual({ code: 'TIMEOUT' });
     expect(calls).toEqual(['user', 'ai_status', 'ai_claim_analysis']);
     expect(provider).not.toHaveBeenCalled();
+  });
+  describe('BUDGET2 manifest v3', () => {
+    const V3 = 'azure-eu-terra-devtest-v3';
+    const run = async (policyChange: object, claimManifest?: string, succeed = false) => {
+      const calls: string[] = [], claims: Record<string, unknown>[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+        calls.push(url.split('/').at(-1)!);
+        if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
+        if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
+          policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2, executionManifestId: V3,
+            maxRequestMicro: '1', ...policyChange }, budget: BUDGET });
+        claims.push(JSON.parse(String(init.body)));
+        return Response.json({ code: 'OK', claimed: true, manifestId: claimManifest ?? claims.at(-1)!.p_manifest_id,
+          resultExpiresAtMs: Date.now() + 10000, dispatchBeforeMs: Date.now() + 1000 });
+      }));
+      const provider = vi.fn(async () => {
+        if (!succeed) throw new DOMException('fixture timeout', 'TimeoutError');
+        return Response.json({ model: AZURE_MODEL, usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130,
+          prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 }, completion_tokens_details: { reasoning_tokens: 20 } },
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', refusal: null, content: '{}' } }] });
+      });
+      const response = await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
+      return { body: await response.json(), calls, claims, provider };
+    };
+    // The import-free v2-only oracle, driven by injected recorders instead of fetch.
+    const runFrozen = async (policyChange: object) => {
+      const calls: string[] = [], claims: Record<string, unknown>[] = [];
+      const provider = vi.fn(async () => {});
+      const outcome = await frozenV2Analyze({
+        providerConfigured: true, provider,
+        authenticate: async () => { calls.push('user'); },
+        rpc: async (name, body) => {
+          calls.push(name);
+          if (name === 'ai_status') return { code: 'OK', consent: { enabled: true, noticeRevision: 2 },
+            policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2, executionManifestId: V3,
+              maxRequestMicro: '1', ...policyChange }, budget: BUDGET };
+          claims.push(body);
+          return name === 'ai_claim_analysis' ? { code: 'OK', claimed: true, manifestId: body.p_manifest_id } : { code: 'READY', stored: true };
+        },
+      });
+      return { outcome, calls, claims, provider };
+    };
+    it('refuses v3 controls in an older v2-only deployment before any claim or provider call (deployment skew)', async () => {
+      // The frozen oracle stands for an Edge function deployed before the migration's controls switch.
+      const skewed = await runFrozen({});
+      expect(skewed.outcome).toEqual({ code: 'UNCONFIGURED' });
+      expect(skewed.calls).toEqual(['user', 'ai_status']);
+      expect(skewed.claims).toEqual([]);
+      expect(skewed.provider).not.toHaveBeenCalled();
+      for (const change of [{ maxRequestMicro: '112640' }, { maxRequestMicro: '4097351' }]) {
+        const again = await runFrozen(change);
+        expect([again.outcome, again.calls, again.claims.length, again.provider.mock.calls.length]).toEqual([{ code: 'UNCONFIGURED' }, ['user', 'ai_status'], 0, 0]);
+      }
+      // The oracle itself is a working v2 Edge flow, so the refusal above is the manifest, not a broken copy.
+      const legacy = await runFrozen({ executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' });
+      expect(legacy.outcome).toEqual({ code: 'READY' });
+      expect(legacy.calls).toEqual(['user', 'ai_status', 'ai_claim_analysis', 'ai_finish_analysis']);
+      expect(legacy.provider).toHaveBeenCalledTimes(1);
+      // v2 controls below the v2 floor (one micro-USD) are also refused by the oracle, with no claim.
+      const floor = await runFrozen({ executionManifestId: AZURE_MANIFEST });
+      expect([floor.calls, floor.claims.length, floor.provider.mock.calls.length]).toEqual([['user', 'ai_status'], 0, 0]);
+    });
+    it('dispatches v3 at the one-micro hold, claiming and finishing under the controls\' own manifest', async () => {
+      const seen = await run({}, undefined, true);
+      expect(seen.calls).toEqual(['user', 'ai_status', 'ai_claim_analysis', 'ai_finish_analysis']);
+      expect(seen.claims.map((body) => body.p_manifest_id)).toEqual([V3, V3]);
+      expect(seen.provider).toHaveBeenCalledTimes(1);
+    });
+    it('keeps v2 on its whole-request floor and v3 on its own', async () => {
+      for (const [change, dispatched] of [[{ executionManifestId: AZURE_MANIFEST }, false],
+        [{ executionManifestId: AZURE_MANIFEST, maxRequestMicro: '4097351' }, true],
+        [{ maxRequestMicro: '0' }, false], [{ maxRequestMicro: '' }, false], [{ promptVersion: 1 }, false],
+        [{ executionManifestId: 'azure-eu-terra-devtest-v4' }, false], [{ noticeRevision: 1 }, false]] as const) {
+        const seen = await run(change);
+        expect(seen.provider).toHaveBeenCalledTimes(dispatched ? 1 : 0);
+        expect(seen.calls.includes('ai_claim_analysis')).toBe(dispatched);
+      }
+    });
+    it('refuses a claim acknowledgement for another manifest without a provider call', async () => {
+      const seen = await run({}, AZURE_MANIFEST);
+      expect(seen.body).toEqual({ code: 'TIMEOUT' });
+      expect(seen.provider).not.toHaveBeenCalled();
+    });
   });
 });
 describe('Google usage estimates are not confirmed billing', () => {
