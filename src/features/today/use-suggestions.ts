@@ -222,7 +222,8 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
 
   const more = useCallback((shownKeys: readonly (string | null)[] = []) => {
     if (!result || settling) return;
-    const skip = skipAfterPaging(run.skip, result.suggestions, shownKeys, knownCores.current);
+    // Only the ideas Today actually showed are skipped; an idea of this page that was never shown stays reachable.
+    const skip = skipAfterPaging(run.skip, [], shownKeys, knownCores.current);
     newPage();
     setRun({ feedback: feedbackFrom(votesRef.current), excluded: excludedRef.current, skip, paged: true });
     setFailed(null); setUnresolved(null);

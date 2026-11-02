@@ -1,4 +1,4 @@
-/* Today: one featured idea, header weather and a "…" menu. Loaded with the Today route only. */
+/* Today: the ideas, header weather and a "…" menu on each idea. Loaded with the Today route only. */
 .today-page .today-context { flex-direction: column; gap: 12px; }
 .weather-widget { position: relative; }
 .weather-trigger { display: flex; align-items: center; gap: 8px; min-height: 44px; max-width: 100%; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--primary); font: inherit; font-size: .875rem; cursor: pointer; }
@@ -25,6 +25,17 @@
 .weather-widget .text-button { min-height: 44px; }
 .today-page .today-selects { display: flex; flex-wrap: wrap; gap: 12px 16px; }
 .today-page .today-ideas { grid-template-columns: minmax(0, 1fr); max-width: 640px; }
+/* The ideas: a swipe row on phones and tablets (one card mostly visible, the next peeking), three side by side from 900px. */
+.today-page .today-set { list-style: none; margin: 0; padding: 4px 2px 8px; display: flex; gap: 12px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; }
+.today-page .today-set > li { flex: 0 0 min(85%, 24rem); display: flex; min-width: 0; scroll-snap-align: start; }
+.today-page .today-set > li:only-child { flex-basis: 100%; }
+.today-page .today-set > li > .today-card { flex: 1 1 auto; }
+.today-more-ideas { margin-top: 8px; }
+@media (min-width: 900px) {
+  .today-page .today-set { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; overflow: visible; scroll-snap-type: none; }
+  .today-page .today-set > li { flex: none; }
+  .today-page .today-set .today-featured .today-pieces { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+}
 .today-page .today-featured { gap: 14px; padding: 20px; }
 .today-page .today-featured .today-pieces { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 14px; }
 .today-idea-title { margin: 0; font-size: 1.125rem; }

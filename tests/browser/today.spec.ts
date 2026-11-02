@@ -15,19 +15,21 @@ const button = (page: Page, key: MessageKey, language: Language = 'en') => page.
 const navLink = (page: Page, key: 'nav.today' | 'nav.wardrobe' | 'nav.outfits', language: Language = 'en') =>
   shellNav(page).getByRole('link', { name: text(key, language), exact: true });
 const cards = (page: Page) => page.locator('.today-card');
-// Today features one idea at a time.
-const featured = (page: Page) => page.locator('.today-card.today-featured');
-const ideaTitle = (page: Page) => page.locator('#today-featured-title');
-const moreOptions = (page: Page) => page.locator('#today-more-options');
-const menuPanel = (page: Page) => page.locator('#today-more-options-panel');
-const menuButton = (page: Page, key: MessageKey, language: Language = 'en') => menuPanel(page).getByRole('button', { name: text(key, language), exact: true });
-async function openMenu(page: Page) {
-  if (await moreOptions(page).getAttribute('aria-expanded') !== 'true') await moreOptions(page).click();
-  await expect(menuPanel(page)).toBeVisible();
+// Today shows up to three ideas together; the first card is "the idea showing" unless a test says otherwise.
+const featured = (page: Page) => cards(page).first();
+const idea = (page: Page, index: number) => cards(page).nth(index);
+const ideaTitle = (page: Page) => page.locator('.today-idea-title').first();
+const ideaTitleText = (number: number, total: number, language: Language = 'en') => text('today.ideaOf', language, { number, total });
+const moreOptions = (page: Page, index = 0) => idea(page, index).locator('.today-menu-toggle');
+const menuPanel = (page: Page, index = 0) => idea(page, index).locator('.today-menu-panel');
+const menuButton = (page: Page, key: MessageKey, language: Language = 'en', index = 0) => menuPanel(page, index).getByRole('button', { name: text(key, language), exact: true });
+async function openMenu(page: Page, index = 0) {
+  if (await moreOptions(page, index).getAttribute('aria-expanded') !== 'true') await moreOptions(page, index).click();
+  await expect(menuPanel(page, index)).toBeVisible();
 }
-async function fromMenu(page: Page, key: MessageKey, language: Language = 'en') {
-  await openMenu(page);
-  await menuButton(page, key, language).click();
+async function fromMenu(page: Page, key: MessageKey, language: Language = 'en', index = 0) {
+  await openMenu(page, index);
+  await menuButton(page, key, language, index).click();
 }
 // Read names only once the card's pieces have rendered, so a capture is never an empty list.
 async function names(card: Locator) {
@@ -35,15 +37,26 @@ async function names(card: Locator) {
   return card.locator('.outfit-component-name').allTextContents();
 }
 const joined = (card: Locator) => card.evaluate(node => [...node.querySelectorAll('.outfit-component-name')].map(name => name.textContent ?? '').join(' + '));
-async function allNames(page: Page) {
-  await expect(featured(page).locator('.outfit-component-name')).not.toHaveCount(0);
-  return [await joined(featured(page))];
+// The outfits of every card showing, in order. Collapsed cards (hidden) have no pieces and are left out.
+async function pageIdeas(page: Page) {
+  await expect(ideaTitle(page)).toBeVisible();
+  const found: string[] = [];
+  for (const card of await cards(page).all()) {
+    if (await card.evaluate(node => node.classList.contains('today-card-hidden'))) continue;
+    await expect(card.locator('.outfit-component-name')).not.toHaveCount(0);
+    found.push(await joined(card));
+  }
+  return found;
 }
-// Show another, then wait until a different idea (or the end of the ideas) is showing.
+// Show other ideas, then wait until a different set (or the end of the ideas) is showing.
 async function showAnother(page: Page, language: Language = 'en') {
-  const before = await ideaTitle(page).textContent();
+  const before = await ideaTitle(page).getAttribute('id', { timeout: 500 }).catch(() => null);
   await button(page, 'today.more', language).click();
-  await expect(ideaTitle(page).filter({ hasNotText: before ?? '' }).or(page.locator('#today-no-more, #today-gone'))).toBeVisible();
+  await expect(async () => {
+    const ended = await page.locator('#today-no-more, #today-gone').count();
+    const now = await ideaTitle(page).getAttribute('id', { timeout: 500 }).catch(() => null);
+    expect(ended > 0 || now !== null && now !== before).toBe(true);
+  }).toPass();
 }
 const missing = (language: Language, categories: MessageKey[]) =>
   text('today.missing', language, { categories: new Intl.ListFormat(locales[language], { type: 'conjunction' }).format(categories.map(key => text(key, language))) });
@@ -83,14 +96,14 @@ function traffic(page: Page) {
   });
   return paths;
 }
-// Shows every idea with Show another until the ideas run out. Collapsed cards (hidden or avoided) are passed over.
+// Shows every page of ideas with Show other ideas until the ideas run out. Collapsed cards (hidden) are passed over.
 async function pageThrough(page: Page, visit?: (card: Locator) => Promise<void>) {
   const seen: string[] = [];
   for (let round = 0; round < 40; round++) {
     await expect(ideaTitle(page).or(page.locator('#today-no-more'))).toBeVisible();
     if (await page.locator('#today-no-more').isVisible()) break;
-    const card = featured(page);
-    if (!await card.evaluate(node => node.classList.contains('today-card-hidden'))) {
+    for (const card of await cards(page).all()) {
+      if (await card.evaluate(node => node.classList.contains('today-card-hidden'))) continue;
       await expect(card.locator('.outfit-component-name')).not.toHaveCount(0);
       seen.push(await joined(card));
       await visit?.(card);
@@ -99,29 +112,31 @@ async function pageThrough(page: Page, visit?: (card: Locator) => Promise<void>)
   }
   return seen;
 }
-// Leaving Today and coming back starts again from the first idea.
-async function startAgain(page: Page) {
+// Leaving Today and coming back starts again from the first page of ideas.
+async function startAgain(page: Page, total = 3) {
   await navLink(page, 'nav.wardrobe').click();
   await navLink(page, 'nav.today').click();
-  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+  await expect(ideaTitle(page)).toHaveText(ideaTitleText(1, total));
 }
 
-test('I15 features one idea with reasons, shows every idea in turn and starts over', async ({ page }) => {
+test('I15 shows three ideas with reasons, pages through every idea and starts over', async ({ page }) => {
   const paths = traffic(page);
   await start(page);
   await expect(page.locator('#today-title')).toBeFocused();
   await expect(navLink(page, 'nav.today')).toHaveAttribute('aria-current', 'page');
-  await expect(cards(page)).toHaveCount(1);
-  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+  await expect(cards(page)).toHaveCount(3);
+  for (const index of [0, 1, 2]) await expect(idea(page, index).locator('.today-idea-title')).toHaveText(ideaTitleText(index + 1, 3));
   const card = featured(page);
   await expect(card.locator('.today-pieces li')).toHaveCount(3);
   await expect(card.locator('.today-pieces img')).toHaveCount(3);
   await expect(card.locator('.today-reasons li').first()).toBeVisible();
-  await expect(card.locator('.button-primary')).toHaveText(text('calendar.wearToday'));
-  const first = await allNames(page);
+  for (const each of await cards(page).all()) await expect(each.locator('.button-primary')).toHaveText(text('calendar.wearToday'));
+  const first = await pageIdeas(page);
+  expect(new Set(first).size).toBe(3);
   await showAnother(page);
-  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 2 }));
-  await expect(ideaTitle(page)).toBeFocused();
+  await expect(cards(page)).toHaveCount(3);
+  await expect(page.getByRole('status').filter({ hasText: text('today.newIdeas') })).toBeVisible();
+  expect((await pageIdeas(page)).filter(entry => first.includes(entry))).toEqual([]);
   await startAgain(page);
   const seen = await pageThrough(page);
   expect(seen).toHaveLength(3 * 2 * 2);
@@ -129,19 +144,23 @@ test('I15 features one idea with reasons, shows every idea in turn and starts ov
   await expect(page.locator('#today-no-more')).toBeFocused();
   await expect(button(page, 'today.more')).toHaveCount(0);
   await button(page, 'today.startOver').click();
-  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+  await expect(ideaTitle(page)).toHaveText(ideaTitleText(1, 3));
   await expect(ideaTitle(page)).toBeFocused();
-  expect(await allNames(page)).toEqual(first);
+  expect(await pageIdeas(page)).toEqual(first);
   expect(paths.filter(entry => /wear_event|\/functions\/|analy/i.test(entry))).toEqual([]);
 });
 
-test('I15 Show another walks three ideas a page, then the next page, never one twice', async ({ page }) => {
+test('I15 Show other ideas replaces the set with the next three, never repeating an idea', async ({ page }) => {
   const { api } = await start(page);
   const shown: string[] = [];
-  for (let index = 0; index < 6; index++) {
-    await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: index + 1 }));
-    shown.push((await allNames(page))[0]!);
-    await showAnother(page);
+  for (let index = 0; index < 2; index++) {
+    await expect(cards(page)).toHaveCount(3);
+    shown.push(...await pageIdeas(page));
+    // Pressed from the keyboard: Safari does not focus a button that is clicked.
+    await button(page, 'today.more').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('status').filter({ hasText: text('today.newIdeas') })).toBeVisible();
+    await expect(button(page, 'today.more')).toBeFocused();
   }
   expect(new Set(shown).size).toBe(6);
   await startAgain(page);
@@ -149,7 +168,7 @@ test('I15 Show another walks three ideas a page, then the next page, never one t
   expect(api.suggestionFeedback).toHaveLength(0);
 });
 
-test('Show another offers other bottoms, tops and shoes within six ideas when one bottom is slightly favoured', async ({ page }) => {
+test('Show other ideas offers other bottoms, tops and shoes within six ideas when one bottom is slightly favoured', async ({ page }) => {
   const seed = (api: Api) => {
     ['Linen shirt', 'Cotton tee', 'Oxford shirt', 'Poplin shirt', 'Jersey tee', 'Camp shirt'].forEach(title => add(api, title, { colours: ['white'], seasons: ['summer'] }));
     add(api, 'Favourite chinos', { category: 'bottom', colours: ['navy'], favourite: true, seasons: ['summer'] });
@@ -158,9 +177,9 @@ test('Show another offers other bottoms, tops and shoes within six ideas when on
   };
   const { api } = await start(page, 'en', seed, { clothes: false });
   const shown: string[][] = [];
-  for (let index = 0; index < 6; index++) {
-    await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: index + 1 }));
-    shown.push(await names(featured(page)));
+  for (let index = 0; index < 2; index++) {
+    await expect(cards(page)).toHaveCount(3);
+    for (const card of await cards(page).all()) shown.push(await names(card));
     await showAnother(page);
   }
   const bottoms = shown.map(pieces => pieces.find(name => /chinos/.test(name)));
@@ -181,25 +200,30 @@ test('I15 Like persists, Don\'t suggest this outfit hides it for good and Undo b
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([1]);
   expect(await names(featured(page))).toEqual(liked);
 
-  await showAnother(page);
-  const hiddenNames = await names(featured(page));
+  const second = idea(page, 1);
+  const hiddenNames = await names(second);
+  const others = [await names(featured(page)), await names(idea(page, 2))];
   const bodies: Row[] = [];
   page.on('request', request => {
     if (new URL(request.url()).pathname === '/rest/v1/suggestion_feedback' && request.method() === 'POST') bodies.push(request.postDataJSON() as Row);
   });
-  await fromMenu(page, 'today.notForMe');
-  await expect(featured(page)).toContainText(text('today.hidden'));
-  await expect(featured(page).getByRole('button', { name: text('common.undo'), exact: true })).toBeFocused();
+  await fromMenu(page, 'today.notForMe', 'en', 1);
+  await expect(second).toContainText(text('today.hidden'));
+  await expect(second.getByRole('button', { name: text('common.undo'), exact: true })).toBeFocused();
+  // The other two ideas stay where they are.
+  await expect(cards(page)).toHaveCount(3);
+  expect(await names(featured(page))).toEqual(others[0]);
+  expect(await names(idea(page, 2))).toEqual(others[1]);
   expect(bodies).toHaveLength(1);
   expect(bodies[0]).toMatchObject({ vote: -1, item_ids: [...idsOf(api, hiddenNames)].sort() });
   expect(api.suggestionFeedback.map(row => row.vote).sort()).toEqual([-1, 1]);
-  await featured(page).getByRole('button', { name: text('common.undo'), exact: true }).click();
-  await expect(featured(page).locator('.outfit-component-name')).toHaveText(hiddenNames);
-  await expect(moreOptions(page)).toBeFocused();
+  await second.getByRole('button', { name: text('common.undo'), exact: true }).click();
+  await expect(second.locator('.outfit-component-name')).toHaveText(hiddenNames);
+  await expect(moreOptions(page, 1)).toBeFocused();
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([1]);
-  await fromMenu(page, 'today.notForMe');
-  await expect(featured(page)).toContainText(text('today.hidden'));
-  // A hidden idea keeps Show another.
+  await fromMenu(page, 'today.notForMe', 'en', 1);
+  await expect(second).toContainText(text('today.hidden'));
+  // A hidden idea keeps Show other ideas.
   await expect(button(page, 'today.more')).toBeEnabled();
 
   await startAgain(page);
@@ -222,10 +246,9 @@ test('I15 a choice whose reply is lost is checked against what was stored', asyn
     const url = new URL(request.url());
     if (url.pathname === '/rest/v1/suggestion_feedback' && url.searchParams.has('signature') && request.method() === 'GET') checks.push(url.search);
   });
-  await showAnother(page);
-  const hidden = featured(page);
+  const hidden = idea(page, 1);
   api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 });
-  await fromMenu(page, 'today.notForMe');
+  await fromMenu(page, 'today.notForMe', 'en', 1);
   await expect(hidden).toContainText(text('today.hidden'));
   await expect(page.getByText(text('today.voteFailed'), { exact: true })).toHaveCount(0);
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
@@ -264,7 +287,6 @@ test('I15 a choice whose reply is lost is checked against what was stored', asyn
 
 test('I15 a stored Don\'t suggest whose reply and check both fail is settled by Try again', async ({ page }) => {
   const { api } = await start(page);
-  await showAnother(page);
   const card = featured(page);
   const hiddenNames = await names(card);
   api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
@@ -286,7 +308,6 @@ test('I15 a stored Don\'t suggest whose reply and check both fail is settled by 
 
 test('I15 an unsettled choice keeps its card and Try again through a reconnect refresh', async ({ page }) => {
   const { api } = await start(page);
-  await showAnother(page);
   const card = featured(page);
   const title = await ideaTitle(page).textContent();
   api.feedbackControl.faults.push({ method: 'POST', commit: true, fail: 503 }, { method: 'READ', commit: false, fail: 500 });
@@ -299,7 +320,7 @@ test('I15 an unsettled choice keeps its card and Try again through a reconnect r
   await page.context().setOffline(false);
   await expect.poll(reads).toBeGreaterThan(before);
   await page.waitForTimeout(500);
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(3);
   await expect(ideaTitle(page)).toHaveText(title!);
   const retry = card.getByRole('button', { name: text('common.retry'), exact: true });
   await expect(retry).toBeEnabled();
@@ -312,7 +333,6 @@ test('I15 an unsettled choice keeps its card and Try again through a reconnect r
 
 test('I15 paging and context stay put while a choice is written, so its Try again is kept', async ({ page }) => {
   const { api } = await start(page);
-  await showAnother(page);
   const card = featured(page);
   const shown = await names(card);
   let release = () => {};
@@ -342,7 +362,6 @@ test('I15 paging and context stay put while a choice is written, so its Try agai
 
 test('I15 an older refresh never brings back an idea hidden while it was loading', async ({ page }) => {
   const { api } = await start(page);
-  await showAnother(page);
   const hiddenNames = await names(featured(page));
   const gate = api.holdFeedbackReads();
   await page.context().setOffline(true);
@@ -364,14 +383,10 @@ test('I15 an older refresh never brings back an idea hidden while it was loading
   expect(api.suggestionFeedback.map(row => row.vote)).toEqual([-1]);
 });
 
-test('I15 a refresh keeps the idea showing when earlier ideas drop out, and moves on only when it goes', async ({ page }) => {
+test('I15 a refresh keeps the ideas showing, drops a card that goes and never swaps in another', async ({ page }) => {
   const { api } = await start(page);
-  const first = await names(featured(page));
-  await showAnother(page);
-  const second = await names(featured(page));
-  await showAnother(page);
-  const third = await names(featured(page));
-  const title = await ideaTitle(page).textContent();
+  const shown = await pageIdeas(page);
+  expect(shown).toHaveLength(3);
   const itemReads = () => api.requests.filter(entry => entry.path === '/rest/v1/items' && entry.method === 'GET').length;
   const refresh = async () => {
     const before = itemReads();
@@ -381,45 +396,36 @@ test('I15 a refresh keeps the idea showing when earlier ideas drop out, and move
     await expect.poll(itemReads).toBeGreaterThan(before);
     await page.waitForTimeout(300);
   };
-  const shown = [first, second, third].map(idea => idea.join(' + '));
-  // Whatever a refresh does, the idea number stays and Today shows the same idea, one not shown yet, or a short status.
-  const settled = async () => {
-    await expect(ideaTitle(page).or(page.locator('#today-gone'))).toBeVisible();
-    if (!await ideaTitle(page).isVisible()) {
-      await expect(page.locator('#today-gone')).toHaveText(text('today.ideaGone'));
-      await expect(button(page, 'today.more')).toBeEnabled();
-      return null;
-    }
-    await expect(ideaTitle(page)).toHaveText(title!);
-    return joined(featured(page));
-  };
-  // A refresh that changes the clothes but not the ideas keeps the idea showing.
-  const renamed = first.find(name => !second.includes(name) && !third.includes(name))!;
+  // A refresh that changes the clothes but not the ideas keeps every card.
+  const pieces = shown.map(idea => idea.split(' + '));
+  const renamed = pieces[0]!.find(name => !pieces[1]!.includes(name) && !pieces[2]!.includes(name)) ?? pieces[0]![0]!;
   Object.assign(api.items.find(row => row.title === renamed)!, { title: `${renamed} 2`, version: 2 });
   await refresh();
-  await expect(ideaTitle(page)).toHaveText(title!);
-  await expect(featured(page).locator('.outfit-component-name')).toHaveText(third);
+  await expect(cards(page)).toHaveCount(3);
+  const before = shown.map(idea => idea.replace(renamed, `${renamed} 2`));
+  expect(await pageIdeas(page)).toEqual(before);
 
-  // A piece only the first idea has goes to the laundry. The page is ranked again: the idea showing stays if it is still
-  // on the page, and is otherwise replaced by one not shown yet. Ideas already shown never come back.
-  Object.assign(api.items.find(row => row.title === `${renamed} 2`)!, { availability: 'laundry' });
-  await refresh();
-  const afterFirst = await settled();
-  if (afterFirst !== null && afterFirst !== shown[2]) expect(shown).not.toContain(afterFirst);
-
-  // A piece of the idea showing goes: it is replaced in the same way.
-  const current = afterFirst?.split(' + ') ?? third;
-  const leaving = current.find(name => !first.includes(name) && !second.includes(name)) ?? current[0]!;
+  // A piece goes to the laundry. The page is ranked again. Cards without that piece stay, in their order, and no new idea is mixed in;
+  // if every card goes, the ideas not shown before take their place.
+  const leaving = pieces[0]!.find(name => name !== renamed)!;
   Object.assign(api.items.find(row => row.title === leaving)!, { availability: 'laundry' });
   await refresh();
-  const afterCurrent = await settled();
-  if (afterCurrent !== null) {
-    expect(afterCurrent).not.toContain(leaving);
-    expect(shown).not.toContain(afterCurrent);
-  }
+  await expect(cards(page).first().or(page.locator('#today-gone'))).toBeVisible();
+  const remaining = await cards(page).count() ? await pageIdeas(page) : [];
+  for (const idea of remaining) expect(idea).not.toContain(leaving);
+  const kept = remaining.filter(idea => before.includes(idea));
+  expect(kept.length === 0 || kept.length === remaining.length).toBe(true);
+  expect(kept).toEqual(before.filter(idea => kept.includes(idea)));
+  if (!remaining.length) await expect(page.locator('#today-gone')).toHaveText(text('today.ideaGone'));
+  await expect(button(page, 'today.more')).toBeEnabled();
+  // Show other ideas then offers ideas not shown before and without the piece that went.
+  const onScreen = remaining;
   await showAnother(page);
-  const later = await pageThrough(page);
-  for (const idea of later) expect(idea.includes(renamed) || idea.includes(leaving) || shown.includes(idea)).toBe(false);
+  for (const idea of await pageThrough(page)) {
+    expect(before).not.toContain(idea);
+    expect(onScreen).not.toContain(idea);
+    expect(idea).not.toContain(leaving);
+  }
 });
 
 test('I15 an idea shown before a refresh pushed it off the page does not come back on the next page', async ({ page }) => {
@@ -430,9 +436,8 @@ test('I15 an idea shown before a refresh pushed it off the page does not come ba
     add(api, 'Boots', { category: 'footwear', colours: ['black'] });
   };
   const { api } = await start(page, 'en', seed, { clothes: false });
-  const shown = [(await allNames(page))[0]!];
-  for (let index = 0; index < 2; index++) { await showAnother(page); shown.push((await allNames(page))[0]!); }
-  expect(new Set(shown).size).toBe(3);
+  const shown = await pageIdeas(page);
+  expect(shown).toHaveLength(3);
   const before = api.requests.filter(entry => entry.path === '/rest/v1/items' && entry.method === 'GET').length;
   // Three favourites come back from the laundry and rank first: every idea already shown leaves the page.
   for (const row of api.items.filter(item => String(item.title).startsWith('Favourite polo'))) Object.assign(row, { availability: 'ready', version: 2 });
@@ -441,15 +446,19 @@ test('I15 an idea shown before a refresh pushed it off the page does not come ba
   await page.context().setOffline(false);
   await expect.poll(() => api.requests.filter(entry => entry.path === '/rest/v1/items' && entry.method === 'GET').length).toBeGreaterThan(before);
   await page.waitForTimeout(300);
-  if (await page.locator('#today-gone').isVisible()) await button(page, 'today.more').click();
+  // Every idea shown has left the page, so the ideas not shown before take their place; nothing shown comes back.
+  await expect.poll(async () => (await cards(page).count()) === 3 && (await pageIdeas(page)).every(idea => !shown.includes(idea))).toBe(true);
+  const fresh = await pageIdeas(page);
+  expect(fresh.every(idea => idea.includes('Favourite polo'))).toBe(true);
+  await button(page, 'today.more').click();
   const later = await pageThrough(page);
   // Nothing already shown returns, and every idea not shown yet is still reached.
-  expect(later.filter(idea => shown.includes(idea))).toEqual([]);
+  expect(later.filter(idea => shown.includes(idea) || fresh.includes(idea))).toEqual([]);
   expect(new Set(later).size).toBe(later.length);
-  expect(new Set([...shown, ...later]).size).toBe(8);
+  expect(new Set([...shown, ...fresh, ...later]).size).toBe(8);
   // Start over forgets what was shown: the earlier ideas can come back.
   await button(page, 'today.startOver').click();
-  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+  await expect(ideaTitle(page)).toHaveText(ideaTitleText(1, 3));
   expect((await pageThrough(page)).some(idea => shown.includes(idea))).toBe(true);
 });
 test('I15 a held read for one account never shows after signing in as another', async ({ page }) => {
@@ -544,20 +553,23 @@ test('I15 Save as outfit opens a filled-in editor and saves once through save_ou
 test('I15 offline keeps the idea visible but disables wearing, saving and choices; a language change keeps the same idea', async ({ page }) => {
   const paths = traffic(page);
   await start(page);
-  await expect(cards(page)).toHaveCount(1);
-  const before = await allNames(page);
+  await expect(cards(page)).toHaveCount(3);
+  const before = await pageIdeas(page);
   await page.context().setOffline(true);
   await expect(page.locator('.notice-offline')).toBeVisible();
-  for (const key of ['calendar.wearToday', 'today.save', 'today.like'] as const) await expect(featured(page).getByRole('button', { name: text(key), exact: true })).toBeDisabled();
-  await expect(moreOptions(page)).toBeDisabled();
+  for (const each of await cards(page).all()) {
+    for (const key of ['calendar.wearToday', 'today.save', 'today.like'] as const) await expect(each.getByRole('button', { name: text(key), exact: true })).toBeDisabled();
+  }
+  for (const index of [0, 1, 2]) await expect(moreOptions(page, index)).toBeDisabled();
   const writes = paths.length;
   await page.context().setOffline(false);
   await openAccountMenu(page, 'en');
   await page.getByRole('button', { name: 'Suomi', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('lang', 'fi');
   await expect(page.locator('#today-title')).toHaveText(text('today.title', 'fi'));
-  await expect(cards(page)).toHaveCount(1);
-  expect(await allNames(page)).toEqual(before);
+  await expect(cards(page)).toHaveCount(3);
+  expect(await pageIdeas(page)).toEqual(before);
+  await expect(ideaTitle(page)).toHaveText(ideaTitleText(1, 3, 'fi'));
   await expect(button(page, 'today.more', 'fi')).toBeVisible();
   expect(paths.slice(0, writes).filter(entry => entry.startsWith('POST /rest/v1/suggestion') || entry.startsWith('DELETE'))).toEqual([]);
   expect(paths.filter(entry => /wear_event|\/functions\/|analy/i.test(entry))).toEqual([]);
@@ -587,7 +599,7 @@ test('I15 More options opens and closes with the keyboard and returns focus to i
   const occasion = page.getByRole('combobox', { name: text('outfits.occasion'), exact: true });
   await occasion.focus();
   await occasion.selectOption('smart');
-  await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+  await expect(ideaTitle(page)).toHaveText(ideaTitleText(1, 3));
   await page.waitForTimeout(300);
   await expect(occasion).toBeFocused();
 });
@@ -620,8 +632,6 @@ test('I15 accessibility: axe on every state, keyboard, 320px and 200% text with 
       expect(box !== null && box.x >= 0 && box.x + box.width <= 320.5 && box.height >= 44).toBe(true);
     }
     await featured(page).getByRole('button', { name: text('calendar.wearToday'), exact: true }).focus();
-    await page.keyboard.press('Tab');
-    await expect(button(page, 'today.more')).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(featured(page).getByRole('button', { name: text('today.save'), exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
@@ -852,19 +862,21 @@ async function watchSummary(page: Page) {
   return async () => page.evaluate(() => (window as unknown as { summaryShown: boolean }).summaryShown);
 }
 
-test('Don\'t pair these saves a two-piece pair once, shows the next idea without a summary and Undo brings it back', async ({ page }) => {
+test('Don\'t pair these saves a two-piece pair once, removes only that idea and Undo brings it back', async ({ page }) => {
   const paths = traffic(page);
   const { api } = await start(page, 'en', api => { seedDresses(api); }, { clothes: false });
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(3);
+  const before = await pageIdeas(page);
   const pieces = await names(featured(page));
   expect(pieces).toHaveLength(2);
   const summaryShown = await watchSummary(page);
   await fromMenu(page, 'today.dontPair');
   await expect(undoPair(page)).toBeVisible();
-  await expect(ideaNames(page)).not.toHaveText(pieces);
-  const next = await names(featured(page));
-  expect(next).toHaveLength(2);
-  expect(together(next.join(' + '), pieces[0]!, pieces[1]!)).toBe(false);
+  // The idea goes and the others stay, in their order, without a replacement.
+  await expect(cards(page)).toHaveCount(2);
+  expect(await pageIdeas(page)).toEqual(before.slice(1));
+  await expect(ideaTitle(page)).toHaveText(ideaTitleText(1, 2));
+  for (const idea of await pageIdeas(page)) expect(together(idea, pieces[0]!, pieces[1]!)).toBe(false);
   await expect(undoPair(page)).toHaveText(text('common.undo'));
   await expect(ideaTitle(page)).toBeFocused();
   await expect(featured(page).getByRole('button', { name: text('today.save'), exact: true })).toBeEnabled();
@@ -874,20 +886,23 @@ test('Don\'t pair these saves a two-piece pair once, shows the next idea without
 
   await undoPair(page).click();
   await expect(undoPair(page)).toHaveCount(0);
-  await expect(ideaNames(page)).toHaveText(pieces);
+  await expect(cards(page)).toHaveCount(3);
+  expect(await pageIdeas(page)).toEqual(before);
   await expect(ideaTitle(page)).toBeFocused();
   expect(api.combinationRules).toHaveLength(0);
   expect(await summaryShown()).toBe(false);
 });
 
-test('Don\'t pair these moves on to the next page, then the end, and keeps Undo for the latest pair', async ({ page }) => {
+test('Don\'t pair these removes each idea, moves on to the next page when none is left, then the end, and keeps Undo for the latest pair', async ({ page }) => {
   const { api } = await start(page, 'en', api => { seedDresses(api); }, { clothes: false });
   const avoided: string[][] = [];
-  // Four ideas over two pages: the third avoided pair needs the next page.
+  // Four ideas over two pages: the third avoided pair empties the first page.
   for (let round = 0; round < 4; round++) {
     const idea = await names(featured(page));
     avoided.push(idea);
     await fromMenu(page, 'today.dontPair');
+    if (round < 2) await expect(cards(page)).toHaveCount(2 - round);
+    if (round === 2) await expect(cards(page)).toHaveCount(1);
     if (round < 3) {
       await expect(ideaNames(page)).not.toHaveText(idea);
       const next = await names(featured(page));
@@ -904,14 +919,14 @@ test('Don\'t pair these moves on to the next page, then the end, and keeps Undo 
   await expect(undoPair(page)).toHaveCount(0);
   expect(rulesOf(api)).toHaveLength(3);
   expect(rulesOf(api)).not.toContainEqual({ owner_id: owners.a, ...pairOf(api, avoided[3]![0]!, avoided[3]![1]!) });
-  await startAgain(page);
+  await startAgain(page, 1);
   expect((await pageThrough(page)).filter(idea => together(idea, avoided[3]![0]!, avoided[3]![1]!))).toHaveLength(1);
 });
 
-test('Don\'t pair these asks which two, then moves on and keeps the two apart afterwards', async ({ page }) => {
+test('Don\'t pair these asks which two, then removes the ideas holding both and keeps the two apart afterwards', async ({ page }) => {
   const paths = traffic(page);
   const { api } = await start(page);
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(3);
   const card = cards(page).nth(0);
   const pieces = await names(card);
   expect(pieces).toHaveLength(3);
@@ -1018,7 +1033,7 @@ test('Don\'t pair these checks a lost reply against what was stored, moves on on
 
 test('Don\'t pair these settles a stored choice whose reply and check were lost when Today refreshes after a reconnect', async ({ page }) => {
   const { api } = await start(page, 'en', api => { seedDresses(api); }, { clothes: false });
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(3);
   const card = cards(page).nth(0);
   const pieces = await names(card);
   const reads = () => api.requests.filter(entry => entry.path === '/rest/v1/combination_rules' && entry.method === 'GET').length;
@@ -1081,12 +1096,12 @@ async function holdPairCheck(page: Page) {
 test('Don\'t pair these keeps an unsettled card with only Try again when a refresh overlaps its check, in either order', async ({ page }) => {
   const paths = traffic(page);
   const { api } = await start(page, 'en', api => { seedDresses(api); }, { clothes: false });
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(3);
   const card = cards(page).nth(0);
   const pieces = await names(card);
   const feedbackReads = () => api.requests.filter(entry => entry.path === '/rest/v1/suggestion_feedback' && entry.method === 'GET').length;
   const settlingCard = async () => {
-    await expect(cards(page)).toHaveCount(1);
+    await expect(cards(page)).toHaveCount(3);
     await expect(card.locator('.outfit-component-name')).toHaveText(pieces);
     await expect(card.getByRole('button', { name: text('common.retry'), exact: true })).toBeEnabled();
     for (const key of ['today.save', 'today.like', 'today.notForMe', 'today.dontPair', 'common.undo'] as const) {
@@ -1135,7 +1150,7 @@ test('Don\'t pair these keeps an unsettled card with only Try again when a refre
   await expect.poll(feedbackReads).toBeGreaterThan(before);
   await page.waitForTimeout(500);
   // Still being checked: the card stays, and nothing on it can be saved.
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(3);
   await expect(card.getByRole('button', { name: text('today.save'), exact: true })).toBeDisabled();
   later.release();
   await settlingCard();
@@ -1156,7 +1171,7 @@ test('Don\'t pair these keeps an unsettled card with only Try again when a refre
 test('Don\'t pair these is unavailable offline and sends nothing', async ({ page }) => {
   const paths = traffic(page);
   await start(page);
-  await expect(cards(page)).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(3);
   await page.context().setOffline(true);
   await expect(page.locator('.notice-offline')).toBeVisible();
   await expect(moreOptions(page)).toBeDisabled();
@@ -1361,19 +1376,20 @@ for (const mode of ['avoid', 'undo', 'undo-lost-reply'] as const) {
   test(`A pair choice confirmed after a new forecast arrives does not move the new context (${mode})`, async ({ page }) => {
     let forecast!: Awaited<ReturnType<typeof heldForecast>>;
     const { api } = await start(page, 'en', api => { seedWarmth(api); }, { clothes: false, weather: oulu, prepare: async () => { forecast = await heldForecast(page); } });
-    await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+    await expect(ideaTitle(page)).toHaveText(ideaTitleText(1, 3));
     // Begin on a Blue dress idea, which the forecast will not rank first.
-    for (let step = 0; step < 4 && (await names(featured(page)))[0] === 'Green dress'; step++) await showAnother(page);
-    const original = await names(featured(page));
+    const slot = (await pageIdeas(page)).findIndex(entry => entry.startsWith('Blue dress'));
+    expect(slot).toBeGreaterThanOrEqual(0);
+    const original = await names(idea(page, slot));
     expect(original[0]).toBe('Blue dress');
     let hold: { release: () => void };
     if (mode === 'avoid') {
       const write = await holdPairWrite(page, 'POST');
-      await fromMenu(page, 'today.dontPair');
+      await fromMenu(page, 'today.dontPair', 'en', slot);
       await expect.poll(write.held).toBe(1);
       hold = write;
     } else {
-      await fromMenu(page, 'today.dontPair');
+      await fromMenu(page, 'today.dontPair', 'en', slot);
       await expect(undoPair(page)).toBeVisible();
       if (mode === 'undo') {
         const write = await holdPairWrite(page, 'DELETE');
@@ -1397,7 +1413,7 @@ for (const mode of ['avoid', 'undo', 'undo-lost-reply'] as const) {
     await expect(button(page, 'today.more')).toBeEnabled();
     await expect(undoPair(page)).toHaveCount(0);
     await page.waitForTimeout(500);
-    await expect(ideaTitle(page)).toHaveText(text('today.idea', 'en', { number: 1 }));
+    await expect(ideaTitle(page)).toHaveText(ideaTitleText(1, 3));
     await expect(page.locator('#today-gone, #today-no-more')).toHaveCount(0);
     const first = await names(featured(page));
     expect(first[0]).toBe('Green dress');
@@ -1517,6 +1533,60 @@ test('Avoided pairs shows a failed removal, checks a lost reply and fits 320px a
   expect(box !== null && box.x >= 0 && box.x + box.width <= 320.5 && box.height >= 44).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });
+test('Today lays the ideas out as a swipe row on a phone and side by side on a wide screen', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await start(page);
+  const set = page.locator('.today-set');
+  await expect(cards(page)).toHaveCount(3);
+  const boxOf = async (index: number) => (await idea(page, index).boundingBox())!;
+  const row = (await set.boundingBox())!;
+  const [first, second] = [await boxOf(0), await boxOf(1)];
+  // One card is mostly visible and the next one peeks in; the row scrolls, the page does not.
+  expect(first.width).toBeGreaterThanOrEqual(row.width * 0.8);
+  expect(second.x).toBeGreaterThan(first.x + first.width);
+  expect(second.x).toBeLessThan(390 - 16);
+  expect(second.x + second.width).toBeGreaterThan(390);
+  expect(await set.evaluate(node => node.scrollWidth > node.clientWidth && getComputedStyle(node).scrollSnapType.startsWith('x'))).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  // Reaching a card with the keyboard brings it into view.
+  await idea(page, 2).getByRole('button', { name: text('calendar.wearToday'), exact: true }).focus();
+  await expect.poll(async () => { const box = await boxOf(2); return box.x >= 0 && box.x + box.width <= 390 + 1; }).toBe(true);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await expect.poll(async () => { const boxes = [await boxOf(0), await boxOf(1), await boxOf(2)]; return boxes.every(box => Math.abs(box.y - boxes[0]!.y) < 1) && boxes[1]!.x > boxes[0]!.x && boxes[2]!.x > boxes[1]!.x; }).toBe(true);
+  expect(await set.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});
+
+test('Today shows the ideas that exist when fewer than three can be made', async ({ page }) => {
+  await start(page, 'en', api => {
+    add(api, 'Only shirt', { colours: ['white'] });
+    add(api, 'Navy trousers', { category: 'bottom', colours: ['navy'] });
+    add(api, 'Grey trousers', { category: 'bottom', colours: ['grey'] });
+    add(api, 'Black boots', { category: 'footwear', colours: ['black'] });
+  }, { clothes: false });
+  await expect(cards(page)).toHaveCount(2);
+  await expect(ideaTitle(page)).toHaveText(ideaTitleText(1, 2));
+  await expect(idea(page, 1).locator('.today-idea-title')).toHaveText(ideaTitleText(2, 2));
+  await showAnother(page);
+  await expect(page.locator('#today-no-more')).toHaveText(text('today.noMore'));
+});
+
+test('Save as outfit and Wear today act on the idea of the card they are on', async ({ page }) => {
+  const { api } = await start(page);
+  const wear = await wearRoutes(page);
+  const third = await names(idea(page, 2));
+  await idea(page, 2).getByRole('button', { name: text('calendar.wearToday'), exact: true }).click();
+  await expect(wearPanel(page)).toContainText(text('calendar.markedWornDone'));
+  expect(wear.bodies).toHaveLength(1);
+  expect(wear.bodies[0]).toMatchObject({ p_item_ids: idsOf(api, third) });
+  const second = await names(idea(page, 1));
+  await idea(page, 1).getByRole('button', { name: text('today.save'), exact: true }).click();
+  await expect(page.locator('#outfit-editor-title')).toBeFocused();
+  await expect(page.locator('.outfit-slot .outfit-component-name')).toHaveText(second);
+});
+
 test.describe('bounded I15 visual evidence', () => {
   test.describe.configure({ retries: 0 });
   for (const selected of [{ project: 'chromium', language: 'en', width: 1280, suffix: 'en-desktop' },
@@ -1555,10 +1625,10 @@ test.describe('bounded I15 visual evidence', () => {
         await like.click();
         await expect(like).toHaveAttribute('aria-pressed', 'true');
         expect(api.suggestionFeedback).toHaveLength(1);
-        await expect(cards(page)).toHaveCount(1);
-        // Photos load as they scroll into view; bring the last piece in before the full-page capture.
-        await featured(page).locator('.today-pieces li').last().scrollIntoViewIfNeeded();
-        await expect(page.locator('.today-card img')).toHaveCount(3);
+        await expect(cards(page)).toHaveCount(3);
+        // Photos load as they scroll into view; bring every card's last piece in before the full-page capture.
+        for (const card of await cards(page).all()) await card.locator('.today-pieces li').last().scrollIntoViewIfNeeded();
+        await expect(page.locator('.today-card img')).toHaveCount(9);
         if (selected.suffix === 'en-desktop') {
           await openMenu(page);
           await expect(menuButton(page, 'today.dontPair', language)).toBeVisible();
@@ -1658,12 +1728,17 @@ test.describe('bounded PAIR1 visual evidence', () => {
       await page.setViewportSize({ width: selected.width, height: selected.height });
       const { api } = await start(page, language, api => { seedDresses(api); }, { clothes: false });
       const pieces = await names(featured(page));
-      await expect(page.locator('.today-card img')).toHaveCount(2);
+      const photos = async (count: number) => {
+        for (const card of await cards(page).all()) await card.locator('.today-pieces li').last().scrollIntoViewIfNeeded();
+        await expect(page.locator('.today-card img')).toHaveCount(count);
+      };
+      await photos(6);
       const summaryShown = await watchSummary(page);
       await fromMenu(page, 'today.dontPair', language);
       await expect(undoPair(page, language)).toBeVisible();
       await expect(ideaNames(page)).not.toHaveText(pieces);
-      await expect(page.locator('.today-card img')).toHaveCount(2);
+      await expect(cards(page)).toHaveCount(2);
+      await photos(4);
       await expect(ideaTitle(page)).toBeFocused();
       expect(await summaryShown()).toBe(false);
       expect(api.combinationRules).toHaveLength(1);

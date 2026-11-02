@@ -361,9 +361,9 @@ test('WEATHER2 current expiry, held refresh and current-only changes preserve th
   } });
   await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13));
   await expect(cards(page).first()).toContainText(text('today.addCoat'));
-  await button(page, 'today.more').click();
+  await expect(cards(page)).toHaveCount(2);
   await openDetails(page);
-  const idea = await cards(page).first().innerText();
+  const idea = await cards(page).nth(1).innerText();
   weather.hold.forecast.add('65.0');
   await page.clock.fastForward('00:10:01');
   await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
@@ -372,10 +372,10 @@ test('WEATHER2 current expiry, held refresh and current-only changes preserve th
   await page.clock.fastForward('00:01:00');
   await expect.poll(() => weather.held.length).toBe(1);
   await expect(bar(page)).toContainText(await lowLine(page, 4));
-  await expect(cards(page).first()).toHaveText(idea, { useInnerText: true });
+  await expect(cards(page).nth(1)).toHaveText(idea, { useInnerText: true });
   await weather.release('forecast', forecastReply({ temperature: 4, current: 18 }, 10800, at + 11 * 60_000));
   await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 18));
-  await expect(cards(page).first()).toHaveText(idea, { useInnerText: true });
+  await expect(cards(page).nth(1)).toHaveText(idea, { useInnerText: true });
   expect(weather.forecasts()).toHaveLength(2);
 });
 
@@ -468,9 +468,9 @@ test('WEATHER2 late-quarter cadence has brief grace gaps across successive quart
     service.clock.at = at; service.weather.set('65.0', { temperature: 4, current: 13 });
   } });
   await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13));
-  await button(page, 'today.more').click();
+  await expect(cards(page)).toHaveCount(2);
   await openDetails(page);
-  const idea = await cards(page).first().innerText();
+  const idea = await cards(page).nth(1).innerText();
   await page.clock.pauseAt(at + 10_000);
   for (let minute = 1; minute <= 32; minute++) {
     weather.weather.set('65.0', { temperature: 4, current: minute < 2 ? 13 : minute < 17 ? 18 : minute < 32 ? 19 : 20 });
@@ -480,8 +480,8 @@ test('WEATHER2 late-quarter cadence has brief grace gaps across successive quart
     if ([1, 16, 31].includes(minute)) await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
     else await expect(weatherTrigger(page)).toHaveText(await currentLine(page, minute < 17 ? 18 : minute < 32 ? 19 : 20));
     await expect(bar(page)).toContainText(await lowLine(page, 4));
-    await expect(cards(page).first()).toHaveText(idea, { useInnerText: true });
-    await expect(cards(page).first()).toContainText(text('today.addCoat'));
+    await expect(cards(page).nth(1)).toHaveText(idea, { useInnerText: true });
+    await expect(cards(page).nth(1)).toContainText(text('today.addCoat'));
   }
 });
 

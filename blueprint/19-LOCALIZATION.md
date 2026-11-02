@@ -103,8 +103,9 @@ toward your AI limit." (FI passive: "… voidaan silti laskea mukaan tekoälyraj
 
 UX4 update, 1 October 2026 (owner-approved UX review, packet 4): Today, weather,
 outfit and calendar copy is short and action-led. Reasons and weather details are
-chips without full stops ("For the season", "Low 4 °C", "Rain 40%"). Show another /
-Näytä toinen / Visa en annan steps through ideas; the More options (…) menu holds
+chips without full stops ("For the season", "Low 4 °C", "Rain 40%"). Show other ideas /
+Näytä muita ehdotuksia / Visa andra förslag replaces the three ideas on Today with the next ones (TODAY-IDEAS1,
+2 November 2026); each card is headed "Idea 1 of 3" / "Ehdotus 1/3" / "Förslag 1 av 3". The More options (…) menu holds
 Don't suggest this outfit / Älä ehdota tätä asua / Föreslå inte den här outfiten and
 Don't suggest these together / Älä ehdota näitä yhdessä / Föreslå inte de här
 tillsammans. The calendar action is Plan / Suunnittele / Planera, and the Plan
