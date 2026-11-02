@@ -19,7 +19,7 @@ import { pickerComponent } from '../outfits/use-outfits';
 import { defaultSeason, useSuggestions, type Pending } from './use-suggestions';
 import { useWeather, type WeatherStore } from './use-weather';
 import { WeatherBar } from './weather-bar';
-import { pageStart, pinPage, transitionToken, weatherRunId } from './featured';
+import { pageStart, pinPage, restorePinned, transitionToken, weatherRunId } from './featured';
 import { MoreMenu } from './more-menu';
 import { useWearToday, wearPanelId } from './use-wear-today';
 import { WearPanel } from './wear-today';
@@ -46,9 +46,14 @@ type Props = {
 const titleOf = (key: string) => `today-idea-${key}`;
 const lostFocus = (element: Element | null) => element === null || element === document.body || !element.isConnected || element.matches('main');
 // A move queued for the next frame only goes ahead if focus is still where it was when the move was decided, or still lost.
-const focusById = (id: string, from: Element | null = document.activeElement) => requestAnimationFrame(() => {
+// With several ids it lands on the first one that is on the page by then.
+const focusById = (id: string | readonly string[], from: Element | null = document.activeElement) => requestAnimationFrame(() => {
   const active = document.activeElement;
-  if (active === from || lostFocus(active)) document.getElementById(id)?.focus();
+  if (active !== from && !lostFocus(active)) return;
+  for (const candidate of typeof id === 'string' ? [id] : id) {
+    const element = document.getElementById(candidate);
+    if (element) { element.focus(); return; }
+  }
 });
 
 export function TodayScreen({ client, scope, images, online, language, t, timeZone, invalidation, weather, weatherStore, onSave, onAddItem, onTurnOnWeather, onTryOn, stylist, onStylist, onWorn, onWriting }: Props) {
@@ -134,7 +139,10 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
     const lost = lostFocus(active);
     if (lost) focusFrom.current = active;
     if (restored && ideas.restored && keys.includes(ideas.restored.key)) {
-      if (lost) focusById(titleOf(ideas.restored.key), active);
+      // The card returns in its slot even if a refresh has since replaced the pinned ideas.
+      const back = ideas.restored.key;
+      setStored(value => restorePinned(value, back, keys));
+      if (lost) focusById([titleOf(back), ...shownKeys.map(titleOf), 'today-title'], active);
     } else if (restored && !avoided) {
       if (lost) focusById(shownKeys[0] ? titleOf(shownKeys[0]) : 'today-title', active);
     } else if (shownKeys.length === 0 && status === 'ideas') {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { pageStart, pinPage, transitionToken, weatherRunId } from '../../src/features/today/featured';
+import { pageStart, pinPage, restorePinned, transitionToken, weatherRunId } from '../../src/features/today/featured';
 import { recommend, type EngineContext, type EngineItem } from '../../src/domain/recommendations';
 import type { Category } from '../../src/domain/wardrobe';
 
@@ -103,6 +103,27 @@ describe('the pinned page', () => {
     const { state } = pinPage(['a', 'b', 'c'], pageStart(token));
     expect(pinPage(['a', 'c'], state).shown).toEqual(['a', 'c']);
     expect(pinPage(['a', 'b', 'c'], state).shown).toEqual(['a', 'b', 'c']);
+  });
+
+  it('restores an undone idea into a page a refresh has since replaced, in the slot its place in the list gives it', () => {
+    const first = pinPage(['a', 'b', 'c'], pageStart(token)).state;
+    // "a" is dismissed, then a refresh leaves only d and e: they are pinned in place of the page.
+    const replaced = pinPage(['d', 'e'], first);
+    expect(replaced.shown).toEqual(['d', 'e']);
+    // Undo brings "a" back to the list; without restoring it the pinned d and e would keep it off the page.
+    expect(pinPage(['a', 'd', 'e'], replaced.state).shown).toEqual(['d', 'e']);
+    const restored = restorePinned(replaced.state, 'a', ['a', 'd', 'e']);
+    expect(pinPage(['a', 'd', 'e'], restored).shown).toEqual(['a', 'd', 'e']);
+    expect(restorePinned(replaced.state, 'a', ['d', 'a', 'e']).keys).toEqual(['d', 'a', 'e']);
+    expect(restorePinned(replaced.state, 'a', ['d', 'e', 'a']).keys).toEqual(['d', 'e', 'a']);
+  });
+
+  it('restores nothing that is already pinned, not in the list, or on a page not yet pinned', () => {
+    const { state } = pinPage(['a', 'b'], pageStart(token));
+    expect(restorePinned(state, 'a', ['a', 'b'])).toBe(state);
+    expect(restorePinned(state, 'z', ['a', 'b'])).toBe(state);
+    const start = pageStart(token);
+    expect(restorePinned(start, 'a', ['a'])).toBe(start);
   });
 
   it('changes the transition token only for paging, occasion, season or applied weather', () => {

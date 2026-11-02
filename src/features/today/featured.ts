@@ -19,6 +19,16 @@ export function pinPage(keys: readonly string[], state: Page): { state: Page; sh
   return { state: { ...state, keys: fresh, seen: [...state.seen, ...fresh] }, shown: fresh };
 }
 
+// An idea whose avoided pair was undone returns to the pinned page in the slot its place in the current list gives it, even when a
+// refresh has replaced the pinned ideas meanwhile. Nothing else is added or moved.
+export function restorePinned(state: Page, key: string, keys: readonly string[]): Page {
+  if (!state.armed || state.keys === null || state.keys.includes(key) || !keys.includes(key)) return state;
+  const rank = keys.indexOf(key);
+  const slot = state.keys.findIndex(entry => keys.indexOf(entry) > rank);
+  const pinned = slot === -1 ? [...state.keys, key] : [...state.keys.slice(0, slot), key, ...state.keys.slice(slot)];
+  return { ...state, keys: pinned, seen: state.seen.includes(key) ? state.seen : [...state.seen, key] };
+}
+
 // The same fields, in the same order, as useSuggestions' own weather id, so Today starts again from the first ideas on the
 // same render the hook does.
 export const weatherRunId = (weather: WeatherContext) =>
