@@ -9,33 +9,37 @@ import '../../../i18n/tryon';
 import { BODY_ASPECT, type BodyPhoto } from '../../../images/body-photo';
 import { CropEditor } from '../../../images/crop-editor';
 import { tryOnStoreFor, type TryOnStore } from '../../settings/tryon-store';
-import { loadPersonPhoto, readPersonPhoto, removePersonPhoto, saveConfirmed, startPersonPhotoSave, type LoadedPersonPhoto } from '../../settings/tryon-photo';
+import { loadPersonPhoto, readPersonPhoto, saveConfirmed, startPersonPhotoSave } from '../../settings/tryon-photo';
 import { SavedPhotoCard } from '../../settings/saved-photo-card';
 import { useOutfit } from '../use-outfits';
-import { browserEnvironment, deletionDate, failureAction, ideaSelection, itemName, slotKey, TryOnRun, tryOnSelection, useTryOnStatus, type FailureKind, type RunPhase } from '../use-try-on';
+import { browserEnvironment, failureAction, ideaSelection, itemName, slotKey, TryOnRun, tryOnSelection, useTryOnStatus, type FailureKind, type RunPhase } from '../use-try-on';
 import { ConfirmDialog, TryOnPicture } from './try-on-parts';
 import { useBodyPhotoPicker } from './use-body-photo';
 
 type Common = { client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; onBack: () => void };
-type Props = Common & { id: string | null };
+type Props = Common & { id: string | null; armed: boolean };
 
 const focus = (id: string) => requestAnimationFrame(() => document.getElementById(id)?.focus());
 
-/** Route `#/outfits/<id>/try-on`: the garments, a photo of the owner, then one try-on chain. */
+/**
+ * Route `#/outfits/<id>/try-on`: opened by the Try on button, it starts one try-on chain at once from the saved photo (or asks for a
+ * photo first). Opened any other way (reload, pasted link, history) it waits for the owner to press Try on, so nothing is spent unasked.
+ */
 export function TryOnScreen(props: Props) {
   const { client, scope, id, online, t } = props;
   const store = tryOnStoreFor(client, scope);
   const status = useTryOnStatus(store);
   const view = useOutfit(client, scope, id, online, 0);
   const [run, setRun] = useState<TryOnRun | null>(null);
-  // Owned here rather than by the keyed run view, so a remount of that view never ends a running chain.
+  // Owned here rather than by the flow, so a remount of that view never ends a running chain.
   useEffect(() => () => run?.abandon(), [run]);
   const record = view.data?.record ?? null;
   const title = record ? t('tryon.title', { name: record.title }) : t('tryon.open');
+  const flow = (selection: TryOnSelection | null) => store && <TryOnFlow {...props} store={store} components={view.data?.components ?? new Map()}
+    selection={selection} run={run} onRun={setRun} onRefresh={view.reload}
+    create={record ? (steps, photo) => new TryOnRun(store.api, store, browserEnvironment(), record.id, steps, photo) : null} />;
   let body;
-  if (run && store) body = <RunView key={run.id} {...props} store={store} run={run} components={view.data?.components ?? new Map()}
-    onRestart={() => { run.abandon(); setRun(null); view.reload(); focus('tryon-choose'); }}
-    onClose={() => { run.abandon(); props.onBack(); }} />;
+  if (run && store) body = flow(null);
   else if (id === null || view.data !== null && record === null) body = <p className="notice notice-error" role="alert">{t('outfits.unavailable')}</p>;
   else if (!view.data || !record) body = view.error
     ? <div className="notice notice-error" role="alert"><span>{t(view.error)}</span><button type="button" className="text-button" disabled={!online} onClick={view.reload}>{t('common.retry')}</button></div>
@@ -45,13 +49,7 @@ export function TryOnScreen(props: Props) {
     <p className="notice" role="status">{t(status.code === 'CONSENT_REQUIRED' ? 'tryon.failure.turnedOff' : 'tryon.failure.unavailable')}</p>
     <SavedPhotoCard store={store} online={online} language={props.language} t={t} />
   </>;
-  else body = <Setup {...props} store={store} components={view.data.components} selection={tryOnSelection(record, view.data.components)}
-    onStart={(steps, photo) => {
-      const next = new TryOnRun(store.api, store, browserEnvironment(), record.id, steps, photo.bytes);
-      setRun(next);
-      next.start();
-      focus('tryon-progress-title');
-    }} />;
+  else body = flow(tryOnSelection(record, view.data.components));
   return <section className="detail-page tryon-page" aria-labelledby="tryon-title">
     <button type="button" className="text-button" onClick={(event) => { event.currentTarget.focus(); run?.abandon(); props.onBack(); }}>{t('outfits.back')}</button>
     <header className="settings-heading"><h1 id="tryon-title" tabIndex={-1}>{title}</h1></header>
@@ -62,7 +60,7 @@ export function TryOnScreen(props: Props) {
 /** An unsaved Today idea: its garments are kept in memory by the app for this route only and nothing is saved. */
 export type TryOnIdeaSeed = { itemIds: readonly string[]; components: ReadonlyMap<string, OutfitComponent> };
 
-/** Route `#/today/try-on`: the idea's garments, a photo of the owner, then one try-on chain that names the garments, not an outfit. */
+/** Route `#/today/try-on`: Show on me starts one try-on chain at once; it names the garments, not an outfit. */
 export function IdeaTryOnScreen(props: Common & { idea: TryOnIdeaSeed | null }) {
   const { client, scope, idea, t, onBack } = props;
   const store = tryOnStoreFor(client, scope);
@@ -73,22 +71,18 @@ export function IdeaTryOnScreen(props: Common & { idea: TryOnIdeaSeed | null }) 
   // After a reload or a pasted link the idea is gone and there is nothing to try on.
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only a missing idea sends the owner back
   useEffect(() => { if (!idea) onBack(); }, [idea]);
+  // The idea held in memory is itself the owner's request for this try-on.
+  const flow = (picked: TryOnSelection | null) => store && idea && <TryOnFlow {...props} store={store} components={idea.components} armed
+    selection={picked} run={run} onRun={setRun}
+    create={(steps, photo) => new TryOnRun(store.api, store, browserEnvironment(), { itemIds: steps.map(step => step.itemId) }, steps, photo)} />;
   let body;
-  if (run && store && idea) body = <RunView key={run.id} {...props} store={store} run={run} components={idea.components}
-    onRestart={() => { run.abandon(); setRun(null); focus('tryon-choose'); }}
-    onClose={() => { run.abandon(); onBack(); }} />;
+  if (run && store && idea) body = flow(null);
   else if (!idea || !selection || !store || status === null) body = <><p role="status">{t('common.loading')}</p>{store && <SavedPhotoCard store={store} online={props.online} language={props.language} t={t} />}</>;
   else if (!tryOnReady(status)) body = <>
     <p className="notice" role="status">{t(status.code === 'CONSENT_REQUIRED' ? 'tryon.failure.turnedOff' : 'tryon.failure.unavailable')}</p>
     <SavedPhotoCard store={store} online={props.online} language={props.language} t={t} />
   </>;
-  else body = <Setup {...props} store={store} components={idea.components} selection={selection}
-    onStart={(steps, photo) => {
-      const next = new TryOnRun(store.api, store, browserEnvironment(), { itemIds: steps.map(step => step.itemId) }, steps, photo.bytes);
-      setRun(next);
-      next.start();
-      focus('tryon-progress-title');
-    }} />;
+  else body = flow(selection);
   return <section className="detail-page tryon-page" aria-labelledby="tryon-title">
     <button type="button" className="text-button" onClick={(event) => { event.currentTarget.focus(); run?.abandon(); onBack(); }}>{t('outfits.back')}</button>
     <header className="settings-heading"><h1 id="tryon-title" tabIndex={-1}>{t('tryon.open')}</h1></header>
@@ -96,152 +90,182 @@ export function IdeaTryOnScreen(props: Common & { idea: TryOnIdeaSeed | null }) 
   </section>;
 }
 
-type SetupProps = Common & {
-  store: TryOnStore; selection: TryOnSelection; components: ReadonlyMap<string, OutfitComponent>;
-  onStart: (steps: TryOnStep[], photo: BodyPhoto) => void;
+type FlowProps = Common & {
+  store: TryOnStore; components: ReadonlyMap<string, OutfitComponent>;
+  /** `null` while a run exists: the planned steps then come from the run itself. */
+  selection: TryOnSelection | null; run: TryOnRun | null; onRun: (run: TryOnRun | null) => void;
+  create: ((steps: TryOnStep[], photo: Uint8Array<ArrayBuffer>) => TryOnRun) | null;
+  armed: boolean; onRefresh?: () => void;
 };
-type Stored = { kind: 'idle' | 'loading' | 'none' | 'unknown' | 'unusable' | 'failed' } | { kind: 'ready'; photo: Extract<LoadedPersonPhoto, { kind: 'ready' }>; url: string };
+/** The photo offered for saving while a run is going: held only until it is saved, or the run ends. */
+type Offer = { photo: BodyPhoto | null; done: boolean };
+type Again = 'same' | 'photo' | 'restart';
 
-function Setup({ store, selection, components, online, language, t, onStart }: SetupProps) {
-  const input = useRef<HTMLInputElement>(null);
-  const focusStart = useRef(false);
-  const [savedThis, setSavedThis] = useState(false);
-  const picker = useBodyPhotoPicker({
-    onFocus: (target) => focus(target === 'edit' ? 'tryon-edit' : 'tryon-choose'),
-    onPrepared: () => { setSavedThis(false); focusStart.current = true; },
-    onReset: () => setSavedThis(false),
-  });
-  const { source, sourceUrl, edit, editing, preparing, photo, photoUrl, error } = picker;
-  // TRYON-PHOTO1: the saved reference photo. Its bytes are fetched here for this screen only and dropped with it.
+function TryOnFlow(props: FlowProps) {
+  const { run, onRun } = props;
+  const [go, setGo] = useState(props.armed);
+  const [forcePicker, setForcePicker] = useState(false);
+  const [offer, setOffer] = useState<Offer | null>(null);
+  // Set once the owner has pressed Try again, Start again or Choose another photo: the pressed button is gone, so focus is placed.
+  const [refocus, setRefocus] = useState(false);
+  function again(mode: Again) {
+    run?.abandon();
+    onRun(null);
+    setOffer(null); setForcePicker(mode === 'photo'); setGo(true); setRefocus(true);
+    if (mode === 'restart') props.onRefresh?.();
+  }
+  if (run) return <RunView key={run.id} {...props} run={run} offer={offer} onOffer={setOffer} onAgain={again} />;
+  if (!props.selection || !props.create) return null;
+  return <Prepare {...props} selection={props.selection} create={props.create} go={go} forcePicker={forcePicker} refocus={refocus} onGo={() => setGo(true)} onOffer={setOffer} />;
+}
+
+type Stored = { kind: 'idle' | 'loading' | 'none' | 'unknown' | 'unusable' | 'failed' } | { kind: 'ready'; bytes: Uint8Array<ArrayBuffer> };
+
+/** The saved reference photo's bytes for one try-on, fetched only while `enabled` and dropped as soon as it is not. */
+function useSavedPhoto(store: TryOnStore, enabled: boolean) {
   const saved = useSyncExternalStore(store.subscribePhoto, store.getPhoto);
   const savedAt = saved.saved?.savedAtMs ?? null;
-  const [stored, setStored] = useState<Stored>({ kind: 'idle' });
-  const [attempt, setAttempt] = useState(0);
-  const [removing, setRemoving] = useState(false);
-  const [removedNote, setRemovedNote] = useState(false);
-  const removeButton = useRef<HTMLButtonElement>(null);
-  const photoChosen = photo !== null;
   const readKnown = saved.read !== 'unknown';
   // A failed status read with nothing confirmed: a photo may or may not exist, so it is never treated as "none".
   const statusUnknown = saved.read === 'failed' && saved.saved === null;
-  useEffect(() => { void readPersonPhoto(store); }, [store]);
+  const [stored, setStored] = useState<Stored>({ kind: 'idle' });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => { if (enabled) void readPersonPhoto(store); }, [store, enabled]);
   useEffect(() => {
-    if (photoChosen) return;
-    if (!readKnown) { setStored({ kind: 'idle' }); return; }
+    if (!enabled || !readKnown) { setStored({ kind: 'idle' }); return; }
     if (statusUnknown) { setStored({ kind: 'unknown' }); return; }
     if (savedAt === null) { setStored({ kind: 'none' }); return; }
     const controller = new AbortController();
-    let url: string | null = null;
     setStored({ kind: 'loading' });
     void loadPersonPhoto(store, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
-      if (result.kind === 'ready') {
-        url = URL.createObjectURL(new Blob([result.bytes], { type: 'image/jpeg' }));
-        setStored({ kind: 'ready', photo: result, url });
+      if (result.kind === 'ready') setStored({ kind: 'ready', bytes: result.bytes });
       // A save, removal or consent change moved the state while this was in flight: read it again instead of using the bytes.
-      } else if (result.kind === 'stale') {
-        if (!store.disposed) { void readPersonPhoto(store); setAttempt((value) => value + 1); }
-      } else { setStored({ kind: result.kind }); if (result.kind === 'none') void readPersonPhoto(store); }
+      else if (result.kind === 'stale') { if (!store.disposed) { void readPersonPhoto(store); setAttempt((value) => value + 1); } }
+      else { setStored({ kind: result.kind }); if (result.kind === 'none') void readPersonPhoto(store); }
     });
-    return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
-  }, [store, savedAt, readKnown, statusUnknown, photoChosen, attempt]);
-  const active: BodyPhoto | null = photo ?? (stored.kind === 'ready' ? stored.photo : null);
-  // The start button is enabled only once preparation has finished, so focus moves there after that render.
-  useEffect(() => {
-    if (preparing || !active || !focusStart.current) return;
-    focusStart.current = false;
-    document.getElementById('tryon-start')?.focus();
-  }, [preparing, active]);
-  const { clear } = picker;
-  const choose = (file: File | undefined) => { if (file) setRemovedNote(false); return picker.choose(file); };
-  const apply = picker.apply, cancelEdit = picker.cancelEdit;
-  async function keepPhoto() {
-    if (!photo) return;
-    const attempt = startPersonPhotoSave(store, photo);
-    if (saveConfirmed(store, attempt, await attempt.result)) setSavedThis(true);
-  }
-  async function removeSaved() {
-    setRemoving(false);
-    if (await removePersonPhoto(store)) { setRemovedNote(true); focus('tryon-choose'); }
-    else requestAnimationFrame(() => removeButton.current?.focus());
-  }
+    return () => controller.abort();
+  }, [store, enabled, savedAt, readKnown, statusUnknown, attempt]);
+  const retry = () => { if (statusUnknown) void readPersonPhoto(store); else setAttempt((value) => value + 1); };
+  return { saved, stored, statusUnknown, retry };
+}
+
+function Prepare({ store, selection, components, online, t, create, go, forcePicker, refocus, onGo, onOffer, onRun }: FlowProps & {
+  selection: TryOnSelection; create: NonNullable<FlowProps['create']>; go: boolean; forcePicker: boolean; refocus: boolean; onGo: () => void;
+  onOffer: (offer: Offer | null) => void;
+}) {
   const count = selection.steps.length;
-  const shownUrl = photoUrl ?? (stored.kind === 'ready' ? stored.url : null);
-  const waiting = !photo && (stored.kind === 'idle' || stored.kind === 'loading') && (!readKnown || savedAt !== null);
-  const storedProblem: MessageKey | null = photo ? null : stored.kind === 'unknown' ? 'tryon.photoStatusFailed' : stored.kind === 'unusable' ? 'tryon.photoUnusableSaved' : stored.kind === 'failed' ? 'tryon.photoLoadFailed' : null;
-  return <div className="stack">
-    {count > 0 && <p id="tryon-subset" className="tryon-subset">{t('tryon.subset')}</p>}
-    <ul className="tryon-garments" aria-label={t('tryon.steps')} aria-describedby={count > 0 ? 'tryon-subset' : undefined}>
+  const started = useRef(false);
+  const input = useRef<HTMLInputElement>(null);
+  const { saved, stored, statusUnknown, retry } = useSavedPhoto(store, go && !forcePicker && count > 0);
+  const picker = useBodyPhotoPicker({ onFocus: (target) => focus(target === 'edit' ? 'tryon-edit' : 'tryon-choose') });
+  const { source, sourceUrl, edit, editing, preparing, photo, error, clear } = picker;
+  function begin(bytes: Uint8Array<ArrayBuffer>, offer: BodyPhoto | null, moveFocus: boolean) {
+    started.current = true;
+    const next = create(selection.steps, bytes);
+    onRun(next);
+    onOffer(offer ? { photo: offer, done: false } : null);
+    next.start();
+    if (moveFocus || refocus || document.activeElement === document.body) focus('tryon-progress');
+  }
+  // A saved photo starts the run by itself, once; offline it only waits for the owner's next press.
+  useEffect(() => {
+    if (!go || forcePicker || count === 0 || stored.kind !== 'ready' || started.current) return;
+    if (!online) return;
+    begin(stored.bytes, null, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- begin only reads this render's props
+  }, [go, forcePicker, count, stored, online]);
+  // A photo chosen here starts the run as soon as it is cropped; the owner may then keep it for next time.
+  const offerable = saved.read !== 'unknown' && !statusUnknown && saved.saved === null;
+  useEffect(() => {
+    if (!photo || preparing || editing || started.current || !online) return;
+    const chosen = photo;
+    clear();
+    begin(chosen.bytes, offerable ? chosen : null, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- begin only reads this render's props
+  }, [photo, preparing, editing, online]);
+  const waiting = !forcePicker && !photo && (stored.kind === 'idle' || stored.kind === 'loading' || stored.kind === 'ready');
+  const showPicker = go && count > 0 && !waiting;
+  // After Try again or Choose another photo the pressed button is gone: focus goes to the photo choice.
+  useEffect(() => { if (showPicker && (refocus || document.activeElement === document.body)) focus('tryon-choose'); }, [showPicker, refocus]);
+  const list = <>
+    <ul className="tryon-garments">
       {selection.steps.map(step => <li key={step.itemId}>{t('tryon.slotLine', { slot: t(slotKey(step.slot)), name: itemName(components, step.itemId, t) })}</li>)}
     </ul>
     {selection.notIncluded.length > 0 && <p className="muted">{t('tryon.notIncluded', { names: selection.notIncluded.map(item => itemName(components, item, t)).join(', ') })}</p>}
-    {!count ? <p className="notice" role="status">{t('tryon.noGarments')}</p> : <>
-      <div className="photo-panel">
-        {editing && source && sourceUrl && edit ? <CropEditor preview={sourceUrl} width={source.width} height={source.height} accepted={edit}
-          preparing={preparing} t={t} aspect={BODY_ASPECT} applyUnchanged={!photo} onApply={(next) => { void apply(next); }} onCancel={cancelEdit} />
-          : <div className={`capture-photo tryon-photo ${shownUrl ? 'has-photo' : ''}`} aria-busy={preparing || waiting}>
-            {shownUrl ? <img src={shownUrl} alt={t(photo ? 'tryon.photoReady' : 'tryon.savedPhoto')} width={1024} height={1280} />
-              : preparing || waiting ? <p role="status">{t(preparing ? 'tryon.preparing' : 'common.loading')}</p>
-              : <p className="muted" id="tryon-photo-tip">{t('tryon.photoTip')}</p>}
-          </div>}
-        <input ref={input} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1} aria-label={t('tryon.choosePhoto')}
-          onChange={(event) => { void choose(event.target.files?.[0]); event.target.value = ''; }} />
-        {!editing && !photo && stored.kind === 'ready' && saved.saved && <p className="muted" id="tryon-saved-caption">{t('tryon.photoSavedOn', { date: deletionDate(saved.saved.savedAtMs, language) })}</p>}
-        {!editing && <div className="photo-actions">
-          <button id="tryon-choose" type="button" className="button button-secondary" disabled={preparing} aria-describedby={shownUrl ? undefined : 'tryon-photo-tip'}
-            onClick={() => input.current?.click()}>{t(active ? 'tryon.changePhoto' : 'tryon.choosePhoto')}</button>
-          {photo && source && <button id="tryon-edit" type="button" className="button button-quiet" disabled={preparing} onClick={() => picker.startEditing()}>{t('tryon.editCrop')}</button>}
-          {photo && !savedThis && readKnown && !statusUnknown && <button id="tryon-save-photo" type="button" className="button button-quiet" disabled={!online || preparing || saved.busy !== null}
-            onClick={() => { void keepPhoto(); }}>{t(saved.busy === 'save' ? 'common.saving' : savedAt !== null ? 'tryon.replacePhoto' : 'tryon.savePhoto')}</button>}
-          {!photo && (saved.saved || statusUnknown) && <button ref={removeButton} id="tryon-remove-photo" type="button" className="button button-quiet" disabled={!online || saved.busy !== null}
-            onClick={() => setRemoving(true)}>{t('tryon.removePhoto')}</button>}
-          {(storedProblem === 'tryon.photoLoadFailed' || statusUnknown) && <button id="tryon-photo-retry" type="button" className="button button-quiet" disabled={!online}
-            onClick={() => { if (statusUnknown) void readPersonPhoto(store); else setAttempt((value) => value + 1); }}>{t('common.retry')}</button>}
+  </>;
+  if (count === 0) return <p className="notice" role="status">{t('tryon.noGarments')}</p>;
+  if (!go) return <div className="stack">
+    {list}
+    {!online && <p className="notice" role="status">{t('tryon.offlineStart')}</p>}
+    <div className="outfit-actions">
+      <button id="tryon-start" type="button" className="button button-primary" disabled={!online} onClick={onGo}>{t('tryon.open')}</button>
+    </div>
+  </div>;
+  if (waiting) return <div className="stack">{list}<p role="status" aria-busy="true">{t(online ? 'common.loading' : 'tryon.offlineStart')}</p></div>;
+  const problem: MessageKey | null = forcePicker || photo ? null : stored.kind === 'unknown' ? 'tryon.photoStatusFailed'
+    : stored.kind === 'unusable' ? 'tryon.photoUnusableSaved' : stored.kind === 'failed' ? 'tryon.photoLoadFailed' : null;
+  return <div className="stack">
+    {list}
+    <div className="photo-panel">
+      {editing && source && sourceUrl && edit ? <CropEditor preview={sourceUrl} width={source.width} height={source.height} accepted={edit}
+        preparing={preparing} t={t} aspect={BODY_ASPECT} applyUnchanged={!photo} onApply={(next) => { void picker.apply(next); }} onCancel={picker.cancelEdit} />
+        : <div className="capture-photo tryon-photo" aria-busy={preparing}>
+          {preparing || photo ? <p role="status">{t(preparing ? 'tryon.preparing' : 'tryon.offlineStart')}</p> : <p className="muted" id="tryon-photo-tip">{t('tryon.photoTip')}</p>}
         </div>}
-        {photo && statusUnknown && <p className="notice notice-error" role="alert">{t('tryon.photoStatusFailed')}</p>}
-        {photo && savedThis && saved.error === null && <p role="status">{t('tryon.photoSaved')}</p>}
-        {removedNote && !saved.saved && <p role="status">{t('tryon.photoRemoved')}</p>}
-        {saved.error === 'save' && <p className="notice notice-error" role="alert">{t('tryon.photoSaveFailed')}</p>}
-        {saved.error === 'remove' && <p className="notice notice-error" role="alert">{t('tryon.removePhotoFailed')}</p>}
-        {storedProblem && <p className="notice notice-error" role="alert">{t(storedProblem)}</p>}
-        {error && <p className="notice notice-error" role="alert">{t(error)}</p>}
-        {removing && <ConfirmDialog id="tryon-remove-photo-confirm" title={t('tryon.removePhotoTitle')} text={t('tryon.removePhotoText')}
-          confirm={t('tryon.removePhoto')} cancel={t('common.cancel')} danger onConfirm={() => { void removeSaved(); }}
-          onCancel={() => { setRemoving(false); requestAnimationFrame(() => removeButton.current?.focus()); }} />}
-      </div>
-      {active && !editing && <div className="stack">
-        <p className="muted" id="tryon-limit">{t('tryon.limitLine')}</p>
-        <button id="tryon-start" type="button" className="button button-primary" aria-describedby="tryon-limit" disabled={!online || preparing}
-          onClick={() => { const bytes = active; clear(); onStart(selection.steps, bytes); }}>
-          {count === 1 ? t('tryon.startOne') : t('tryon.startMany', { count })}</button>
+      <input ref={input} className="sr-only" type="file" accept="image/jpeg,image/png,image/webp" tabIndex={-1} aria-label={t('tryon.choosePhoto')}
+        onChange={(event) => { void picker.choose(event.target.files?.[0]); event.target.value = ''; }} />
+      {!editing && <div className="photo-actions">
+        <button id="tryon-choose" type="button" className="button button-primary" disabled={preparing} aria-describedby={photo ? undefined : 'tryon-photo-tip'}
+          onClick={() => input.current?.click()}>{t(photo || forcePicker ? 'tryon.changePhoto' : 'tryon.choosePhoto')}</button>
+        {(stored.kind === 'failed' || stored.kind === 'unknown') && !forcePicker && !photo && <button id="tryon-photo-retry" type="button" className="button button-quiet" disabled={!online}
+          onClick={retry}>{t('common.retry')}</button>}
       </div>}
-    </>}
+      {problem && <p className="notice notice-error" role="alert">{t(problem)}</p>}
+      {error && <p className="notice notice-error" role="alert">{t(error)}</p>}
+    </div>
   </div>;
 }
 
 const failureKey = (failure: FailureKind): MessageKey => `tryon.failure.${failure}` as MessageKey;
 
-function RunView({ run, store, components, online, t, onRestart, onClose }: Common & {
-  run: TryOnRun; store: TryOnStore; components: ReadonlyMap<string, OutfitComponent>;
-  onRestart: () => void; onClose: () => void;
+function RunView({ run, store, components, online, t, offer, onOffer, onAgain, onBack }: FlowProps & {
+  run: TryOnRun; offer: Offer | null; onOffer: (offer: Offer | null) => void; onAgain: (mode: Again) => void;
 }) {
   const phase: RunPhase = useSyncExternalStore(run.subscribe, run.get);
   const [confirming, setConfirming] = useState(false);
+  const [kept, setKept] = useState(false);
+  const keptRef = useRef(false);
   const stopButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (phase.kind === 'failed') focus('tryon-failure-title');
     else if (phase.kind === 'result' || phase.kind === 'stopped') focus('tryon-title');
   }, [phase.kind]);
-  const total = run.steps.length;
+  // Nothing outlives the screen unless the owner pressed Save: the picture the server stored is deleted when the owner tries again
+  // or leaves. If that fails, it stays listed under Try-ons, where it can be deleted.
+  useEffect(() => () => {
+    const last = run.get();
+    if (last.kind === 'result' && !keptRef.current) void store.api.deleteResult(last.resultId).catch(() => undefined);
+  }, [run, store]);
+  // The photo offered for saving is dropped as soon as the run is over.
+  useEffect(() => { if (offer?.photo && phase.kind !== 'running' && phase.kind !== 'checking' && phase.kind !== 'stopping') onOffer(null); }, [phase.kind, offer, onOffer]);
+  const steps = run.steps, total = steps.length;
   if (phase.kind === 'result') return <div className="stack">
     {phase.alreadyFinished && <p role="status">{t('tryon.alreadyFinished')}</p>}
-    <TryOnPicture api={store.api} result={{ id: phase.resultId }} t={t} online={online} idPrefix="tryon-result">
-      <button id="tryon-done" type="button" className="button button-primary" onClick={onClose}>{t('tryon.done')}</button>
+    <TryOnPicture api={store.api} result={{ id: phase.resultId }} t={t} online={online} idPrefix="tryon-result" hideDelete={!kept}>
+      {kept
+        ? <button id="tryon-done" type="button" className="button button-primary" onClick={onBack}>{t('tryon.done')}</button>
+        : <button id="tryon-save" type="button" className="button button-primary" onClick={() => { keptRef.current = true; setKept(true); }}>{t('tryon.save')}</button>}
+      <button id="tryon-again" type="button" className="button button-secondary" onClick={() => onAgain('same')}>{t('tryon.tryAgain')}</button>
     </TryOnPicture>
+    {kept && <p role="status">{t('tryon.savedToList')}</p>}
   </div>;
   if (phase.kind === 'stopped') return <div className="stack">
     <p role="status">{t('tryon.stopped')}</p>
-    <div className="outfit-actions"><button type="button" className="button button-secondary" onClick={onClose}>{t('common.close')}</button></div>
+    <div className="outfit-actions">
+      <button type="button" className="button button-primary" onClick={() => onAgain('same')}>{t('tryon.tryAgain')}</button>
+      <button type="button" className="button button-secondary" onClick={onBack}>{t('common.close')}</button>
+    </div>
   </div>;
   if (phase.kind === 'failed') {
     const action = failureAction[phase.failure];
@@ -249,26 +273,27 @@ function RunView({ run, store, components, online, t, onRestart, onClose }: Comm
       <h2 id="tryon-failure-title" tabIndex={-1}>{t(failureKey(phase.failure))}</h2>
       <div className="outfit-actions">
         {action === 'retry' && <button type="button" className="button button-primary" disabled={!online} onClick={() => run.start()}>{t('common.retry')}</button>}
-        {action === 'photo' && <button type="button" className="button button-primary" onClick={onRestart}>{t('tryon.changePhoto')}</button>}
-        {action === 'restart' && <button type="button" className="button button-primary" onClick={onRestart}>{t('tryon.startAgain')}</button>}
-        <button type="button" className="button button-secondary" onClick={onClose}>{t('common.close')}</button>
+        {action === 'photo' && <button type="button" className="button button-primary" onClick={() => onAgain('photo')}>{t('tryon.changePhoto')}</button>}
+        {action === 'restart' && <button type="button" className="button button-primary" onClick={() => onAgain('restart')}>{t('tryon.startAgain')}</button>}
+        <button type="button" className="button button-secondary" onClick={onBack}>{t('common.close')}</button>
       </div>
     </div>;
   }
   const index = phase.kind === 'ready' ? 0 : phase.index;
-  const slot = (at: number) => t(slotKey(run.steps[at]!.slot));
+  const name = itemName(components, steps[index]!.itemId, t);
   const line = phase.kind === 'stopping' ? t('tryon.stopping')
     : phase.kind === 'checking' ? t(phase.offline ? 'tryon.offline' : 'tryon.checking')
-    : t('tryon.progress', { step: index + 1, total, slot: slot(index) });
+    : total === 1 ? t('tryon.addingOne', { name }) : t('tryon.adding', { name, step: index + 1, total });
   return <div className="stack">
-    <h2 id="tryon-progress-title" tabIndex={-1}>{t('tryon.steps')}</h2>
-    <ol className="tryon-steps">
-      {run.steps.map((step, at) => <li key={step.itemId} aria-current={at === index ? 'step' : undefined}>
-        {t(at < index ? 'tryon.stepDone' : at === index ? 'tryon.stepNow' : 'tryon.stepWaiting', { slot: slot(at) })}
-        <span className="muted">{[' ', itemName(components, step.itemId, t)].join('· ')}</span>
-      </li>)}
-    </ol>
-    <p aria-live="polite" role="status">{line}</p>
+    <div className="tryon-progress" aria-busy="true">
+      <div className="tryon-frame" aria-hidden="true" />
+      <div className="tryon-bar" aria-hidden="true">
+        {steps.map((step, at) => <span key={step.itemId} data-state={at < index ? 'done' : at === index ? 'now' : 'waiting'} />)}
+      </div>
+    </div>
+    <p id="tryon-progress" tabIndex={-1} aria-live="polite" role="status">{line}</p>
+    <p className="muted">{t('tryon.limitLine')}</p>
+    {offer && <KeepPhoto store={store} offer={offer} online={online} t={t} onOffer={onOffer} />}
     <div className="outfit-actions">
       <button ref={stopButton} id="tryon-stop" type="button" className="button button-secondary" disabled={phase.kind === 'stopping'}
         onClick={() => setConfirming(true)}>{t('tryon.stop')}</button>
@@ -278,4 +303,23 @@ function RunView({ run, store, components, online, t, onRestart, onClose }: Comm
       onConfirm={() => { setConfirming(false); void run.stop(); focus('tryon-title'); }}
       onCancel={() => { setConfirming(false); requestAnimationFrame(() => stopButton.current?.focus()); }} />}
   </div>;
+}
+
+/** One quiet offer, while the picture is being made, to keep the photo chosen just now as the saved reference photo. */
+function KeepPhoto({ store, offer, online, t, onOffer }: { store: TryOnStore; offer: Offer; online: boolean; t: Translate; onOffer: (offer: Offer | null) => void }) {
+  const state = useSyncExternalStore(store.subscribePhoto, store.getPhoto);
+  if (offer.done) return state.error === null ? <p role="status">{t('tryon.photoSaved')}</p> : null;
+  const photo = offer.photo;
+  async function keep() {
+    if (!photo) return;
+    const attempt = startPersonPhotoSave(store, photo);
+    if (saveConfirmed(store, attempt, await attempt.result)) onOffer({ photo: null, done: true });
+  }
+  return <>
+    <div className="photo-actions">
+      <button id="tryon-keep-photo" type="button" className="button button-quiet" disabled={!online || state.busy !== null} onClick={() => { void keep(); }}>
+        {t(state.busy === 'save' ? 'common.saving' : 'tryon.keepPhoto')}</button>
+    </div>
+    {state.error === 'save' && <p className="notice notice-error" role="alert">{t('tryon.photoSaveFailed')}</p>}
+  </>;
 }

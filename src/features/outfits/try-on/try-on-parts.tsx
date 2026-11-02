@@ -30,9 +30,9 @@ type Picture = { kind: 'loading' } | { kind: 'shown'; url: string } | { kind: 'f
  * One saved try-on: the picture (a Blob URL revoked on replace and unmount), its label and Delete with a confirm. It stays until
  * the owner deletes it; it leaves the view when the server no longer has it.
  */
-export function TryOnPicture({ api, result, t, online, idPrefix, children, onDeleted }: {
+export function TryOnPicture({ api, result, t, online, idPrefix, children, hideDelete, onDeleted }: {
   api: TryOnClient; result: { id: string }; t: Translate; online: boolean;
-  idPrefix: string; children?: ReactNode; onDeleted?: () => void;
+  idPrefix: string; children?: ReactNode; hideDelete?: boolean; onDeleted?: () => void;
 }) {
   const [picture, setPicture] = useState<Picture>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
@@ -75,8 +75,8 @@ export function TryOnPicture({ api, result, t, online, idPrefix, children, onDel
     <figcaption>{t('tryon.madeWith')}</figcaption>
     {deleteFailed && <div className="notice notice-error" role="alert"><span>{t('tryon.deleteFailed')}</span></div>}
     <div className="outfit-actions">
-      <button ref={deleteButton} id={`${idPrefix}-delete`} type="button" className="button button-secondary" disabled={!online || deleting}
-        onClick={() => setConfirming(true)}>{t('common.delete')}</button>
+      {!hideDelete && <button ref={deleteButton} id={`${idPrefix}-delete`} type="button" className="button button-secondary" disabled={!online || deleting}
+        onClick={() => setConfirming(true)}>{t('common.delete')}</button>}
       {children}
     </div>
     {deleting && <p className="muted" role="status">{t('common.saving')}</p>}

@@ -79,7 +79,6 @@ async function preparePhoto(page: Page, language: Language = 'en') {
   await page.locator('.tryon-page input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: await syntheticPerson(page) });
   await expect(page.locator('#crop-editor-title')).toBeVisible({ timeout: 20_000 });
   await button(page, 'photo.applyCrop', language).click();
-  await expect(page.locator('#tryon-start')).toBeFocused({ timeout: 20_000 });
 }
 async function openFromToday(page: Page, language: Language = 'en') {
   await tryOn(page).click();
@@ -99,17 +98,14 @@ test.describe('try on an unsaved Today idea', () => {
     const { api, clothes } = await start(page);
     await expect(tryOn(page)).toHaveText(text('tryon.ideaOpen'));
     await openFromToday(page);
-    // Before any photo is chosen or anything is paid, the screen says which items will be tried on and which will not.
-    await expect(page.locator('#tryon-subset')).toHaveText(text('tryon.subset'));
+    // Nothing is sent until a photo is chosen; the screen says which items will be tried on.
+    await expect(page.locator('#tryon-photo-tip')).toHaveText(text('tryon.photoTip'));
+    expect(api.tryonControl.requests).toHaveLength(0);
     await expect(page.locator('.tryon-garments li')).toHaveText([
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.top'), name: 'Olive overshirt' }),
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.bottom'), name: 'Navy trousers' }),
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.footwear'), name: 'White trainers' })]);
     await preparePhoto(page);
-    await expect(page.locator('#tryon-start')).toHaveText(text('tryon.startMany', 'en', { count: 3 }));
-    await expect(page.locator('#tryon-limit')).toHaveText(text('tryon.limitLine'));
-    await expect(page.locator('#tryon-limit')).toContainText('AI budget');
-    await page.locator('#tryon-start').click();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
     const requests = api.tryonControl.requests;
     expect(requests.map((entry) => entry.step)).toEqual([1, 2, 3]);
@@ -121,6 +117,7 @@ test.describe('try on an unsaved Today idea', () => {
     expect(api.tryonControl.chains[0]!.outfitId).toBeNull();
     expect(api.tryonControl.results.map((row) => row.outfitId)).toEqual([null]);
     noWrites(api);
+    await button(page, 'tryon.save').click();
     await page.locator('#tryon-done').click();
     await expect(page).toHaveURL(/#\/today$/);
     await expect(page.locator('#today-title')).toBeVisible();
@@ -172,9 +169,8 @@ test.describe('try on an unsaved Today idea', () => {
     api.tryonControl.replies.push({}, { hold: held.hold });
     await openFromToday(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect.poll(() => api.tryonControl.requests.length).toBe(2);
-    await expect(status(page)).toHaveText(text('tryon.progress', 'en', { step: 2, total: 3, slot: text('tryon.slot.bottom') }));
+    await expect(status(page)).toHaveText(text('tryon.adding', 'en', { name: 'Navy trousers', step: 2, total: 3 }));
     await page.locator('#tryon-stop').click();
     await page.locator('#tryon-stop-confirm-confirm').click();
     await expect(page.getByText(text('tryon.stopped'), { exact: true })).toBeVisible();
@@ -193,7 +189,6 @@ test.describe('try on an unsaved Today idea', () => {
     api.tryonControl.replies.push({}, { hold: held.hold });
     await openFromToday(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect.poll(() => api.tryonControl.requests.length).toBe(2);
     await page.getByRole('button', { name: text('outfits.back'), exact: true }).click();
     await expect(page.locator('#today-title')).toBeVisible();
@@ -320,8 +315,8 @@ test.describe('try on an unsaved Today idea', () => {
       await start(page, { language });
       await expect(tryOn(page)).toHaveText(text('tryon.ideaOpen', language));
       await openFromToday(page, language);
-      await expect(page.locator('#tryon-subset')).toHaveText(text('tryon.subset', language));
-      await expect(page.locator('.tryon-garments')).toHaveAttribute('aria-label', text('tryon.steps', language));
+      await expect(page.locator('#tryon-photo-tip')).toHaveText(text('tryon.photoTip', language));
+      await expect(page.locator('#tryon-choose')).toHaveText(text('tryon.choosePhoto', language));
     });
   }
 });

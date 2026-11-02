@@ -40,7 +40,7 @@ function seedOutfit(api: Api, itemIds: string[], title: string, account: 'a' | '
   itemIds.forEach((itemId, position) => api.outfitItems.push({ owner_id: owner, outfit_id: id, item_id: itemId, position }));
   return id;
 }
-type Start = { language?: Language; setup?: Partial<TryOnSetup> | null; consent?: boolean; route?: 'detail' | 'try-on' | 'settings'; outfit?: 'full' | 'dress' | 'long' };
+type Start = { language?: Language; setup?: Partial<TryOnSetup> | null; consent?: boolean; route?: 'detail' | 'try-on' | 'settings'; outfit?: 'full' | 'dress' | 'long' | 'single' };
 async function start(page: Page, options: Start = {}) {
   const language = options.language ?? 'en';
   // Playwright's WebKit route interception reports an empty body for Blob uploads, so on that engine the try-on POST is
@@ -65,6 +65,7 @@ async function start(page: Page, options: Start = {}) {
   if (options.setup !== null) api.tryonControl.setup[owners.a] = { activated: true, ...options.setup };
   if (options.consent !== false) api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION;
   const outfitId = options.outfit === 'dress' ? seedOutfit(api, [clothes.dress.id, clothes.shoes.id], 'Summer party')
+    : options.outfit === 'single' ? seedOutfit(api, [clothes.top.id], 'Weekend')
     : options.outfit === 'long' ? seedOutfit(api, [clothes.coat.id, clothes.cardigan.id, clothes.top.id, clothes.trousers.id, clothes.shoes.id, clothes.watch.id, clothes.belt.id], 'Weekend')
       : seedOutfit(api, [clothes.top.id, clothes.trousers.id, clothes.shoes.id], 'Weekend');
   const hash = options.route === 'settings' ? '#/settings' : options.route === 'try-on' ? `#/outfits/${outfitId}/try-on` : `#/outfits/${outfitId}`;
@@ -94,8 +95,6 @@ async function preparePhoto(page: Page, language: Language = 'en', shirt?: strin
   await page.locator('.tryon-page input[type=file]').setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: await syntheticPerson(page, shirt) });
   await expect(page.locator('#crop-editor-title')).toBeVisible({ timeout: 20_000 });
   await button(page, 'photo.applyCrop', language).click();
-  await expect(page.locator('#tryon-start')).toBeFocused({ timeout: 20_000 });
-  await expect(page.locator('.tryon-photo img')).toBeVisible();
 }
 const gate = () => {
   let release = () => {};
@@ -125,10 +124,8 @@ test.describe('try-on happy paths', () => {
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.bottom'), name: 'Navy trousers' }),
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.footwear'), name: 'White trainers' })]);
     await expect(page.locator('#tryon-start')).toHaveCount(0);
+    await expect(page.locator('#tryon-photo-tip')).toHaveText(text('tryon.photoTip'));
     await preparePhoto(page);
-    await expect(page.locator('#tryon-start')).toHaveText(text('tryon.startMany', 'en', { count: 3 }));
-    await expect(page.locator('#tryon-limit')).toHaveText(text('tryon.limitLine'));
-    await page.locator('#tryon-start').click();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('#tryon-title')).toBeFocused();
     await expect(page.locator('.tryon-result figcaption')).toContainText('Made with AI');
@@ -136,12 +133,19 @@ test.describe('try-on happy paths', () => {
     expect(api.tryonControl.results).toHaveLength(1);
     expect(api.tryonControl.results[0]!.outfitId).toBe(outfitId);
     expect(api.tryonControl.cancels).toEqual([]);
+    // Until Save, only Save and Try again are offered; Save keeps the picture, and nothing is deleted.
+    await expect(button(page, 'tryon.save')).toBeVisible();
+    await expect(button(page, 'tryon.tryAgain')).toBeVisible();
+    await expect(page.locator('#tryon-result-delete')).toHaveCount(0);
+    await button(page, 'tryon.save').click();
+    await expect(page.getByText(text('tryon.savedToList'), { exact: true })).toBeVisible();
     await page.locator('#tryon-done').click();
     await expect(page.locator('#outfit-detail-title')).toBeVisible();
     // The saved try-on is listed on the outfit until it is deleted.
     await expect(page.locator('#tryon-saved-title')).toHaveText(text('tryon.saved'));
     await expect(page.locator('.tryon-saved-list img')).toBeVisible();
     expect(api.tryonControl.requests).toHaveLength(3);
+    expect(api.tryonControl.deletes).toEqual([]);
   });
   test('a six-garment outfit sends six requests in a fixed order and leaves the second accessory out', async ({ page }) => {
     engineOnly();
@@ -156,8 +160,6 @@ test.describe('try-on happy paths', () => {
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.accessory'), name: 'Silver watch' })]);
     await expect(page.getByText(text('tryon.notIncluded', 'en', { names: 'Brown belt' }), { exact: true })).toBeVisible();
     await preparePhoto(page);
-    await expect(page.locator('#tryon-start')).toHaveText(text('tryon.startMany', 'en', { count: 6 }));
-    await page.locator('#tryon-start').click();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 40_000 });
     checkRequests(api, 6);
     expect(api.tryonControl.chains[0]!.steps.map((step) => step.slot)).toEqual(['top', 'bottom', 'layer', 'outerwear', 'footwear', 'accessory']);
@@ -172,28 +174,38 @@ test.describe('try-on happy paths', () => {
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.one_piece'), name: 'Green dress' }),
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.footwear'), name: 'White trainers' })]);
     await preparePhoto(page);
-    await expect(page.locator('#tryon-start')).toHaveText(text('tryon.startMany', 'en', { count: 2 }));
-    await page.locator('#tryon-start').click();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
     checkRequests(api, 2);
     expect(api.tryonControl.chains[0]!.steps.map((step) => step.slot)).toEqual(['one_piece', 'footwear']);
   });
-  test('shows progress with the current step and no button when try-on is off', async ({ page }) => {
+  test('shows progress naming each garment, one step at a time, and replaces it with the picture', async ({ page }) => {
     const { api } = await start(page);
     const held = gate();
     api.tryonControl.replies.push({}, { hold: held.hold });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
-    await expect(status(page)).toHaveText(text('tryon.progress', 'en', { step: 2, total: 3, slot: text('tryon.slot.bottom') }));
-    await expect(page.locator('.tryon-steps li')).toHaveText([
-      `${text('tryon.stepDone', 'en', { slot: text('tryon.slot.top') })} · Olive overshirt`,
-      `${text('tryon.stepNow', 'en', { slot: text('tryon.slot.bottom') })} · Navy trousers`,
-      `${text('tryon.stepWaiting', 'en', { slot: text('tryon.slot.footwear') })} · White trainers`]);
-    await expect(page.locator('.tryon-steps li[aria-current=step]')).toHaveCount(1);
+    await expect(status(page)).toHaveText(text('tryon.adding', 'en', { name: 'Navy trousers', step: 2, total: 3 }));
+    await expect(page.locator('.tryon-bar span')).toHaveCount(3);
+    await expect(page.locator('.tryon-bar span[data-state=done]')).toHaveCount(1);
+    await expect(page.locator('.tryon-bar span[data-state=now]')).toHaveCount(1);
+    await expect(page.locator('.tryon-result img')).toHaveCount(0);
+    await expect(page.getByText(text('tryon.limitLine'), { exact: true })).toBeVisible();
     await axe(page);
     held.release();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('.tryon-frame')).toHaveCount(0);
+  });
+  test('a single garment says what is being added without a step count', async ({ page }) => {
+    engineOnly();
+    const { api } = await start(page, { outfit: 'single' });
+    const held = gate();
+    api.tryonControl.replies.push({ hold: held.hold });
+    await openTryOn(page);
+    await preparePhoto(page);
+    await expect(status(page)).toHaveText(text('tryon.addingOne', 'en', { name: 'Olive overshirt' }));
+    held.release();
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+    checkRequests(api, 1);
   });
 });
 
@@ -273,7 +285,6 @@ test.describe('try-on failures', () => {
     api.tryonControl.replies.push({ code: 'FILTERED', status: 422 });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect(failureTitle(page)).toHaveText(text('tryon.failure.filtered'));
     await expect(button(page, 'common.retry')).toHaveCount(0);
     await expect(button(page, 'common.close')).toBeVisible();
@@ -290,7 +301,6 @@ test.describe('try-on failures', () => {
     api.tryonControl.replies.push({}, { code: 'FILTERED', status: 422 });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect(failureTitle(page)).toHaveText(text('tryon.failure.filtered'));
     await expect(failureTitle(page)).toBeFocused();
     await expect(button(page, 'common.retry')).toHaveCount(0);
@@ -304,7 +314,6 @@ test.describe('try-on failures', () => {
     api.tryonControl.replies.push({}, { code: 'BUSY', status: 503 }, { code: 'BUSY', status: 503 });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect(failureTitle(page)).toHaveText(text('tryon.failure.busy'));
     expect(api.tryonControl.results).toHaveLength(0);
     await button(page, 'common.retry').click();
@@ -320,7 +329,6 @@ test.describe('try-on failures', () => {
     api.tryonControl.replies.push({ abort: true, commit: true });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect(failureTitle(page)).toHaveText(text('tryon.failure.lost'), { timeout: 20_000 });
     expect(api.tryonControl.chainReads).toBeGreaterThan(0);
     expect(api.tryonControl.requests).toHaveLength(1);
@@ -334,7 +342,6 @@ test.describe('try-on failures', () => {
     api.tryonControl.replies.push({}, {}, { abort: true, commit: true });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
     expect(api.tryonControl.requests).toHaveLength(3);
     expect(api.tryonControl.chainReads).toBeGreaterThan(0);
@@ -346,7 +353,6 @@ test.describe('try-on failures', () => {
     api.tryonControl.replies.push({ hold: held.hold, abort: true });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect.poll(() => api.tryonControl.requests.length).toBe(1);
     await context.setOffline(true);
     held.release();
@@ -366,7 +372,6 @@ test.describe('try-on failures', () => {
     api.tryonControl.replies.push({}, { code: 'CHAIN_MISMATCH', status: 409 });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect(failureTitle(page)).toHaveText(text('tryon.failure.mismatch'));
     await expect(button(page, 'common.retry')).toHaveCount(0);
     await button(page, 'tryon.startAgain').click();
@@ -379,7 +384,6 @@ test.describe('try-on failures', () => {
     api.tryonControl.replies.push({}, { hold: held.hold });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect.poll(() => api.tryonControl.requests.length).toBe(2);
     // The owner turns try-on off in Settings in another tab: consent is withdrawn and running chains end.
     api.tryonControl.consent[owners.a] = null;
@@ -398,7 +402,6 @@ test.describe('Stop and Delete', () => {
     api.tryonControl.replies.push({}, { hold: held.hold });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect.poll(() => api.tryonControl.requests.length).toBe(2);
     await page.locator('#tryon-stop').click();
     const dialog = page.getByRole('dialog', { name: text('tryon.stopTitle') });
@@ -413,6 +416,8 @@ test.describe('Stop and Delete', () => {
     await page.locator('#tryon-stop').click();
     await page.locator('#tryon-stop-confirm-confirm').click();
     await expect(page.getByText(text('tryon.stopped'), { exact: true })).toBeVisible();
+    await expect(button(page, 'tryon.tryAgain')).toBeVisible();
+    await expect(button(page, 'common.close')).toBeVisible();
     expect(api.tryonControl.cancels).toEqual([api.tryonControl.requests[0]!.chainId]);
     held.release();
     await page.waitForTimeout(200);
@@ -425,7 +430,6 @@ test.describe('Stop and Delete', () => {
     api.tryonControl.replies.push({ hold: held.hold });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect.poll(() => api.tryonControl.requests.length).toBe(1);
     const chainId = api.tryonControl.requests[0]!.chainId;
     // The server has not seen the chain yet: Stop records a stop for it and replies CANCELLED.
@@ -458,7 +462,6 @@ test.describe('Stop and Delete', () => {
     api.tryonControl.replies.push({}, {}, { hold: held.hold });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect.poll(() => api.tryonControl.requests.length).toBe(3);
     const chain = api.tryonControl.chains[0]!;
     const row = { id: randomUUID(), owner: owners.a, outfitId: chain.outfitId, itemIds: chain.steps.map((step) => step.itemId),
@@ -469,16 +472,16 @@ test.describe('Stop and Delete', () => {
     await page.locator('#tryon-stop-confirm-confirm').click();
     await expect(page.getByText(text('tryon.alreadyFinished'), { exact: true })).toBeVisible();
     await expect(page.locator('.tryon-result img')).toBeVisible();
-    await expect(page.locator('#tryon-result-delete')).toBeVisible();
+    await expect(button(page, 'tryon.save')).toBeVisible();
     held.release();
   });
-  test('Delete asks first and removes the try-on', async ({ page }) => {
+  test('Delete asks first and removes a saved try-on', async ({ page }) => {
     engineOnly();
     const { api } = await start(page);
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-start').click();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+    await button(page, 'tryon.save').click();
     await page.locator('#tryon-result-delete').click();
     const dialog = page.getByRole('dialog', { name: text('tryon.deleteTitle') });
     await expect(dialog).toBeVisible();
@@ -491,6 +494,37 @@ test.describe('Stop and Delete', () => {
     await expect(page.getByText(text('tryon.deleted'), { exact: true })).toBeVisible();
     expect(api.tryonControl.deletes).toEqual([api.tryonControl.chains[0]!.resultId]);
     expect(api.tryonControl.results).toHaveLength(0);
+  });
+  test('Try again and leaving delete a picture that was not saved; a saved one is kept', async ({ page }) => {
+    engineOnly();
+    const { api, outfitId } = await start(page);
+    await openTryOn(page);
+    await preparePhoto(page);
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+    const first = api.tryonControl.chains[0]!.resultId;
+    // Try again drops the unsaved picture and, the photo not being saved, asks for a photo again.
+    await button(page, 'tryon.tryAgain').click();
+    await expect.poll(() => api.tryonControl.deletes).toEqual([first]);
+    await expect(page.locator('#tryon-choose')).toBeFocused();
+    await preparePhoto(page);
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+    expect(api.tryonControl.results).toHaveLength(1);
+    // Back without Save deletes it as well.
+    await button(page, 'outfits.back').click();
+    await expect(page.locator('#outfit-detail-title')).toBeVisible();
+    await expect.poll(() => api.tryonControl.deletes.length).toBe(2);
+    expect(api.tryonControl.results).toHaveLength(0);
+    // A saved picture stays.
+    await page.locator('#tryon-open').click();
+    await preparePhoto(page);
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+    await button(page, 'tryon.save').click();
+    await button(page, 'outfits.back').click();
+    await expect(page.locator('#outfit-detail-title')).toBeVisible();
+    await expect(page.locator('.tryon-saved-list img')).toBeVisible();
+    expect(api.tryonControl.deletes).toHaveLength(2);
+    expect(api.tryonControl.results).toHaveLength(1);
+    expect(api.tryonControl.results[0]!.outfitId).toBe(outfitId);
   });
   test('a saved try-on stays on the outfit, without a date, until it is deleted', async ({ page }) => {
     engineOnly();
@@ -674,144 +708,120 @@ const confirmRemoval = async (page: Page, id = 'tryon-remove-photo-confirm') => 
   await page.locator(`#${id}-confirm`).click();
 };
 
+// The first run of a try-on without a saved photo, kept until the owner's photo is saved through the offer; then the picture is
+// saved too and the page is left, so the next Try on starts from the saved photo.
+async function savePhotoDuringFirstRun(page: Page, api: Api) {
+  const held = gate();
+  api.tryonControl.replies.push({}, { hold: held.hold });
+  await openTryOn(page);
+  await preparePhoto(page);
+  await expect(page.locator('#tryon-keep-photo')).toHaveText(text('tryon.keepPhoto'));
+  expect(api.tryonControl.photoCalls.put).toBe(0);
+  await page.locator('#tryon-keep-photo').click();
+  await expect(page.getByText(text('tryon.photoSaved'), { exact: true })).toBeVisible();
+  await expect(page.locator('#tryon-keep-photo')).toHaveCount(0);
+  held.release();
+  await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+  await button(page, 'tryon.save').click();
+  await page.locator('#tryon-done').click();
+  await expect(page.locator('#outfit-detail-title')).toBeVisible();
+}
+
 test.describe('saved reference photo (TRYON-PHOTO1)', () => {
-  test('is saved once, and later try-ons start from it without asking again', async ({ page }) => {
+  test('is offered for saving while the picture is made, and later try-ons start from it without asking', async ({ page }) => {
     const { api } = await start(page);
-    await openTryOn(page);
-    await preparePhoto(page);
-    // Saving is an explicit button, never automatic, and a try-on needs no save.
-    await expect(page.locator('#tryon-save-photo')).toHaveText(text('tryon.savePhoto'));
-    expect(api.tryonControl.photoCalls.put).toBe(0);
-    await page.locator('#tryon-save-photo').click();
-    await expect(page.getByText(text('tryon.photoSaved'), { exact: true })).toBeVisible();
-    await expect(page.locator('#tryon-save-photo')).toHaveCount(0);
+    await savePhotoDuringFirstRun(page, api);
     expect(api.tryonControl.photoCalls.put).toBe(1);
     const stored = api.tryonControl.photos[owners.a]!;
     expect(jpegSize(stored.jpeg)).toEqual({ width: 1024, height: 1280 });
     expect(stored.sha256).toBe(createHash('sha256').update(stored.jpeg).digest('hex'));
-    await page.reload();
-    await expect(page.locator('.tryon-photo img')).toBeVisible({ timeout: 20_000 });
-    await expect(page.locator('.tryon-photo img')).toHaveAttribute('alt', text('tryon.savedPhoto'));
-    await expect(page.locator('#tryon-saved-caption')).toContainText('Saved ');
-    await expect(page.locator('#tryon-choose')).toHaveText(text('tryon.changePhoto'));
-    await expect(page.locator('#tryon-remove-photo')).toHaveText(text('tryon.removePhoto'));
-    await expect(page.locator('#tryon-start')).toHaveText(text('tryon.startMany', 'en', { count: 3 }));
-    await axe(page);
-    await page.locator('#tryon-start').click();
+    await page.locator('#tryon-open').click();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
-    checkRequests(api, 3);
+    await expect(page.locator('.tryon-page input[type=file]')).toHaveCount(0);
+    await expect(page.locator('#tryon-keep-photo')).toHaveCount(0);
+    expect(api.tryonControl.requests.map((entry) => entry.step)).toEqual([1, 2, 3, 1, 2, 3]);
     // The very bytes that were saved are sent, and nothing is saved or removed by trying on.
-    expect(api.tryonControl.requests[0]!.bytes).toBe(stored.jpeg.length);
+    expect(api.tryonControl.requests[3]!.bytes).toBe(stored.jpeg.length);
     expect(api.tryonControl.photoCalls.put).toBe(1);
     expect(api.tryonControl.photoDeletes).toBe(0);
     expect(api.tryonControl.photos[owners.a]).toBe(stored);
   });
 
-  test('another photo is used once or replaces the saved one, only when asked', async ({ page }) => {
+  test('a reload or pasted link starts nothing until Try on is pressed', async ({ page }) => {
     engineOnly();
-    const { api } = await start(page);
-    await openTryOn(page);
-    await preparePhoto(page);
-    await page.locator('#tryon-save-photo').click();
-    await expect(page.getByText(text('tryon.photoSaved'), { exact: true })).toBeVisible();
-    const first = api.tryonControl.photos[owners.a]!.sha256;
+    const { api, outfitId } = await start(page);
+    await savePhotoDuringFirstRun(page, api);
+    const sent = api.tryonControl.requests.length;
+    await page.goto(`/#/outfits/${outfitId}/try-on`);
     await page.reload();
-    await expect(page.locator('.tryon-photo img')).toBeVisible({ timeout: 20_000 });
-    // Used once: the saved photo is not touched.
-    await preparePhoto(page, 'en', '#a33b3b');
-    await expect(page.locator('#tryon-save-photo')).toHaveText(text('tryon.replacePhoto'));
-    await expect(page.locator('#tryon-remove-photo')).toHaveCount(0);
+    await expect(page.locator('.tryon-garments li')).toHaveCount(3);
+    await expect(page.locator('#tryon-start')).toHaveText(text('tryon.open'));
+    await page.waitForTimeout(500);
+    expect(api.tryonControl.requests).toHaveLength(sent);
+    await axe(page);
     await page.locator('#tryon-start').click();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
-    expect(api.tryonControl.photoCalls.put).toBe(1);
-    expect(api.tryonControl.photos[owners.a]!.sha256).toBe(first);
-    await page.locator('#tryon-done').click();
-    // Replaced: only through the button.
-    await openTryOn(page);
-    await expect(page.locator('.tryon-photo img')).toBeVisible({ timeout: 20_000 });
-    await preparePhoto(page, 'en', '#a33b3b');
-    await page.locator('#tryon-save-photo').click();
-    await expect(page.getByText(text('tryon.photoSaved'), { exact: true })).toBeVisible();
-    expect(api.tryonControl.photoCalls.put).toBe(2);
-    expect(api.tryonControl.photos[owners.a]!.sha256).not.toBe(first);
+    expect(api.tryonControl.requests).toHaveLength(sent + 3);
   });
 
-  test('Remove asks first, removes it, and the screen asks for a photo again', async ({ page }) => {
+  test('a blocked try-on offers another photo for this try-on only, and leaves the saved photo alone', async ({ page }) => {
     engineOnly();
     const { api } = await start(page);
-    await openTryOn(page);
-    await preparePhoto(page);
-    await page.locator('#tryon-save-photo').click();
-    await expect(page.getByText(text('tryon.photoSaved'), { exact: true })).toBeVisible();
-    await page.reload();
-    await expect(page.locator('.tryon-photo img')).toBeVisible({ timeout: 20_000 });
-    await page.locator('#tryon-remove-photo').click();
-    await expect(page.getByRole('heading', { name: text('tryon.removePhotoTitle'), exact: true })).toBeVisible();
-    await page.getByRole('button', { name: text('common.cancel'), exact: true }).click();
-    expect(api.tryonControl.photoDeletes).toBe(0);
-    await expect(page.locator('#tryon-remove-photo')).toBeFocused();
-    await page.locator('#tryon-remove-photo').click();
-    await confirmRemoval(page);
-    await expect(page.getByText(text('tryon.photoRemoved'), { exact: true })).toBeVisible();
+    await savePhotoDuringFirstRun(page, api);
+    const first = api.tryonControl.photos[owners.a]!.sha256;
+    api.tryonControl.replies.push({ code: 'FILTERED', status: 422 });
+    await page.locator('#tryon-open').click();
+    await expect(failureTitle(page)).toHaveText(text('tryon.failure.filtered'));
+    await button(page, 'tryon.changePhoto').click();
     await expect(page.locator('#tryon-choose')).toBeFocused();
-    await expect(page.locator('.tryon-photo img')).toHaveCount(0);
-    await expect(page.locator('#tryon-start')).toHaveCount(0);
-    expect(api.tryonControl.photos[owners.a]).toBeUndefined();
-    await page.reload();
-    await expect(page.locator('#tryon-photo-tip')).toBeVisible();
-    await expect(page.locator('#tryon-remove-photo')).toHaveCount(0);
+    await preparePhoto(page, 'en', '#a33b3b');
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator('#tryon-keep-photo')).toHaveCount(0);
+    expect(api.tryonControl.photoCalls.put).toBe(1);
+    expect(api.tryonControl.photos[owners.a]!.sha256).toBe(first);
   });
 
-  test('a failed save says so and the try-on still works from the chosen photo', async ({ page }) => {
+  test('after the saved photo is removed in Settings, Try on asks for a photo again', async ({ page }) => {
+    engineOnly();
+    const { api, outfitId } = await start(page);
+    await savePhotoDuringFirstRun(page, api);
+    await page.goto('/#/settings');
+    await expect(page.locator('#profile-photo-remove')).toBeVisible();
+    await page.locator('#profile-photo-remove').click();
+    await confirmRemoval(page, 'profile-photo-remove-confirm');
+    await expect(profilePhoto(page)).toContainText(text('tryon.photoRemoved'));
+    expect(api.tryonControl.photos[owners.a]).toBeUndefined();
+    await page.goto(`/#/outfits/${outfitId}`);
+    await page.locator('#tryon-open').click();
+    await expect(page.locator('#tryon-photo-tip')).toBeVisible();
+    expect(api.tryonControl.requests).toHaveLength(3);
+  });
+
+  test('a failed save says so and the try-on still goes on with the chosen photo', async ({ page }) => {
     engineOnly();
     const { api } = await start(page);
     api.tryonControl.photoFaults.put.push('fail');
+    const held = gate();
+    api.tryonControl.replies.push({}, { hold: held.hold });
     await openTryOn(page);
     await preparePhoto(page);
-    await page.locator('#tryon-save-photo').click();
+    await page.locator('#tryon-keep-photo').click();
     await expect(page.getByText(text('tryon.photoSaveFailed'), { exact: true })).toBeVisible();
     expect(api.tryonControl.photos[owners.a]).toBeUndefined();
-    await expect(page.locator('#tryon-start')).toBeEnabled();
-    await page.locator('#tryon-start').click();
+    held.release();
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
     checkRequests(api, 3);
   });
 
-  test('a saved photo that is no longer usable is not sent, and can be removed', async ({ page }) => {
+  test('a saved photo that is no longer usable is not sent', async ({ page }) => {
     engineOnly();
     const { api } = await start(page, { route: 'try-on' });
     seedPhoto(api, Buffer.from([0xff, 0xd8, 0xff, 0xd9, 1, 2, 3, 4]));
     await page.reload();
+    await page.locator('#tryon-start').click();
     await expect(page.getByText(text('tryon.photoUnusableSaved'), { exact: true })).toBeVisible();
-    await expect(page.locator('#tryon-start')).toHaveCount(0);
-    await expect(page.locator('#tryon-remove-photo')).toBeVisible();
+    await expect(page.locator('#tryon-choose')).toBeVisible();
     await axe(page);
-    await page.locator('#tryon-remove-photo').click();
-    await confirmRemoval(page);
-    await expect(page.getByText(text('tryon.photoRemoved'), { exact: true })).toBeVisible();
-    expect(api.tryonControl.requests).toHaveLength(0);
-  });
-
-  test('a photo still being fetched is never used once it was removed', async ({ page }) => {
-    engineOnly();
-    const { api } = await start(page, { route: 'try-on' });
-    await expect(page.locator('#tryon-photo-tip')).toBeVisible();
-    await preparePhoto(page);
-    await page.locator('#tryon-save-photo').click();
-    await expect(page.getByText(text('tryon.photoSaved'), { exact: true })).toBeVisible();
-    const held = gate();
-    api.tryonControl.photoHolds.push(held.hold);
-    await page.reload();
-    await expect.poll(() => api.tryonControl.photoCalls.get).toBe(1);
-    await expect(page.locator('#tryon-remove-photo')).toBeVisible();
-    await page.locator('#tryon-remove-photo').click();
-    await confirmRemoval(page);
-    await expect(page.getByText(text('tryon.photoRemoved'), { exact: true })).toBeVisible();
-    held.release();
-    // The late reply carries bytes, but they are dropped: no image, no Start.
-    await expect(page.locator('#tryon-photo-tip')).toBeVisible();
-    await expect(page.locator('.tryon-photo img')).toHaveCount(0);
-    await expect(page.locator('#tryon-start')).toHaveCount(0);
     expect(api.tryonControl.requests).toHaveLength(0);
   });
 
@@ -870,35 +880,27 @@ test.describe('saved reference photo (TRYON-PHOTO1)', () => {
     expect(api.tryonControl.photoDeletes).toBe(1);
   });
 
-  test('Setup: a failed status read with a photo on the server is not treated as none or offered as a new save', async ({ page }) => {
+  test('a failed status read with a photo on the server is not treated as none or offered as a new save', async ({ page }) => {
     engineOnly();
     const { api } = await start(page, { route: 'try-on' });
     seedPhoto(api);
     api.tryonControl.photoStatusDown = true;
     await page.reload();
+    await page.locator('#tryon-start').click();
     await expect(page.getByText(text('tryon.photoStatusFailed'), { exact: true })).toBeVisible();
     await expect(page.locator('#tryon-photo-retry')).toBeVisible();
-    await expect(page.locator('#tryon-remove-photo')).toBeVisible();
-    await expect(page.locator('#tryon-start')).toHaveCount(0);
+    await expect(page.locator('#tryon-choose')).toBeVisible();
     await axe(page);
+    expect(api.tryonControl.requests).toHaveLength(0);
     // A photo chosen now can be tried on, but it is never offered as a (new) save while the server state is unknown.
+    const held = gate();
+    api.tryonControl.replies.push({ hold: held.hold });
     await preparePhoto(page);
-    await expect(page.locator('#tryon-start')).toBeEnabled();
-    await expect(page.locator('#tryon-save-photo')).toHaveCount(0);
-    await expect(page.getByRole('alert')).toHaveText(text('tryon.photoStatusFailed'));
+    await expect.poll(() => api.tryonControl.requests.length).toBe(1);
+    await expect(page.locator('#tryon-keep-photo')).toHaveCount(0);
     expect(api.tryonControl.photoCalls.put).toBe(0);
-    // Once the read works again the same button is a replacement, because a photo exists.
-    api.tryonControl.photoStatusDown = false;
-    await page.locator('#tryon-photo-retry').click();
-    await expect(page.locator('#tryon-save-photo')).toHaveText(text('tryon.replacePhoto'));
-    await expect(page.getByRole('alert')).toHaveCount(0);
-    api.tryonControl.photoStatusDown = true;
-    await page.reload();
-    await expect(page.locator('#tryon-remove-photo')).toBeVisible();
-    await page.locator('#tryon-remove-photo').click();
-    await confirmRemoval(page);
-    await expect(page.getByText(text('tryon.photoRemoved'), { exact: true })).toBeVisible();
-    expect(api.tryonControl.photos[owners.a]).toBeUndefined();
+    held.release();
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
   });
 
   test('Settings: Profile offers Add when no photo is saved, and Turn off removes a saved one', async ({ page }) => {
@@ -939,13 +941,16 @@ test.describe('saved reference photo (TRYON-PHOTO1)', () => {
   test('a save is refused by the server without consent to the current notice, and nothing is kept', async ({ page }) => {
     engineOnly();
     const { api } = await start(page);
+    const held = gate();
+    api.tryonControl.replies.push({ hold: held.hold });
     await openTryOn(page);
     await preparePhoto(page);
     // Consent given to another revision after the screen opened: the server refuses and the app shows the failure.
     api.tryonControl.consent[owners.a] = TRYON_NOTICE_REVISION - 1;
-    await page.locator('#tryon-save-photo').click();
+    await page.locator('#tryon-keep-photo').click();
     await expect(page.getByText(text('tryon.photoSaveFailed'), { exact: true })).toBeVisible();
     expect(api.tryonControl.photos[owners.a]).toBeUndefined();
+    held.release();
   });
 });
 
@@ -1292,9 +1297,6 @@ test.describe('try-on layout', () => {
     await noOverflow(page);
     await axe(page);
     await button(page, 'photo.applyCrop').click();
-    await expect(page.locator('#tryon-start')).toBeFocused({ timeout: 20_000 });
-    await noOverflow(page);
-    await page.locator('#tryon-start').click();
     await expect.poll(() => api.tryonControl.requests.length).toBe(2);
     await noOverflow(page);
     await axe(page);
@@ -1339,9 +1341,8 @@ test.describe('bounded VTO-2 visual evidence', () => {
         if (selected.zoom) await page.addStyleTag({ content: zoom });
         await openTryOn(page, language);
         await preparePhoto(page, language);
-        await page.locator('#tryon-start').click();
         if (selected.scene === 'progress') {
-          await expect(status(page)).toHaveText(text('tryon.progress', language, { step: 2, total: 3, slot: text('tryon.slot.bottom', language) }));
+          await expect(status(page)).toHaveText(text('tryon.adding', language, { name: 'Navy trousers', step: 2, total: 3 }));
         } else if (selected.scene === 'failure') {
           await expect(failureTitle(page)).toHaveText(text('tryon.failure.filtered', language));
         } else {
@@ -1371,13 +1372,13 @@ test.describe('bounded VTO-2 visual evidence', () => {
   }
 });
 
-// TRYON-IDEA1 and TRYON-PHOTO1 visual evidence for the try-on setup screen: two bounded viewport captures (never full page),
+// TRYON-IDEA1, TRYON-PHOTO1 and TRYON-FLOW1 visual evidence for the photo choice and the photo offer: two bounded viewport captures (never full page),
 // written by their selected project only; every project keeps the functional and axe assertions. Synthetic figure, ignored buffers.
 test.describe('bounded TRYON setup visual evidence', () => {
   test.describe.configure({ retries: 0 });
   const scenes = [
-    { scene: 'setup-subset', project: 'chromium', language: 'en', width: 1280, suffix: 'en-desktop' },
-    { scene: 'setup-saved-photo', project: 'mobile', language: 'fi', width: 390, suffix: 'fi-mobile' },
+    { scene: 'photo-choice', project: 'chromium', language: 'en', width: 1280, suffix: 'en-desktop' },
+    { scene: 'photo-offer', project: 'mobile', language: 'fi', width: 390, suffix: 'fi-mobile' },
   ] as const;
   for (const selected of scenes) {
     test(`${selected.scene} ${selected.suffix} retains functional assertions in every project`, async ({ page }, testInfo: TestInfo) => {
@@ -1389,21 +1390,18 @@ test.describe('bounded TRYON setup visual evidence', () => {
         const info = await lstat(directory); expect(info.isDirectory() && !info.isSymbolicLink()).toBe(true);
       }
       await page.setViewportSize({ width: selected.width, height: 900 });
-      const { api } = await start(page, { language, outfit: selected.scene === 'setup-subset' ? 'long' : 'full' });
+      const { api } = await start(page, { language, outfit: selected.scene === 'photo-choice' ? 'long' : 'full' });
+      const held = gate();
+      if (selected.scene === 'photo-offer') api.tryonControl.replies.push({}, { hold: held.hold });
       await openTryOn(page, language);
-      if (selected.scene === 'setup-subset') {
-        await expect(page.locator('#tryon-subset')).toHaveText(text('tryon.subset', language));
+      if (selected.scene === 'photo-choice') {
+        await expect(page.locator('#tryon-photo-tip')).toHaveText(text('tryon.photoTip', language));
         await expect(page.getByText(text('tryon.notIncluded', language, { names: 'Brown belt' }), { exact: true })).toBeVisible();
       } else {
         await preparePhoto(page, language);
-        await expect(page.locator('#tryon-save-photo')).toHaveText(text('tryon.savePhoto', language));
-        await page.locator('#tryon-save-photo').click();
+        await expect(page.locator('#tryon-keep-photo')).toHaveText(text('tryon.keepPhoto', language));
+        await page.locator('#tryon-keep-photo').click();
         await expect(page.getByText(text('tryon.photoSaved', language), { exact: true })).toBeVisible();
-        await page.reload();
-        await expect(page.locator('.tryon-photo img')).toBeVisible({ timeout: 20_000 });
-        await expect(page.locator('.tryon-photo img')).toHaveJSProperty('complete', true);
-        await expect(page.locator('.tryon-photo img')).toHaveAttribute('alt', text('tryon.savedPhoto', language));
-        await expect(page.locator('#tryon-remove-photo')).toHaveText(text('tryon.removePhoto', language));
         expect(api.tryonControl.photos[owners.a]).toBeDefined();
       }
       await page.evaluate(() => scrollTo(0, 0));
