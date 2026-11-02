@@ -132,16 +132,16 @@ export function createManifestEligibility(sql, { dates = MANIFEST_DATES, log = c
       value = await fn();
     } catch (error) { failed = true; failure = error; }
     try {
-      mark(phase, 'restore');
+      if (!failed) mark(phase, 'restore');
       // After a failed advance nothing moved (the transaction is atomic), so the restore is a no-op count of what moved.
       const current = await snapshot();
       const moved = presentIn(current).filter((id) => Date.parse(current.find((row) => row.id === id).review_expires_at) === Date.parse(ELIGIBLE_UNTIL));
       if (moved.length > 0) await move('restore', ids.length);
       const after = await snapshot();
-      mark(phase, 'compare');
+      if (!failed) mark(phase, 'compare');
       requireEvidence(isDeepStrictEqual(after, before));
       exactDates(after, (id) => dates[id]);
-      mark(phase, 'refusal-after');
+      if (!failed) mark(phase, 'refusal-after');
       await refusal('refusal-after');
     } catch {
       broken = true; active = false;
