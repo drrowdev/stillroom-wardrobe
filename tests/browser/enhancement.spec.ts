@@ -44,8 +44,12 @@ async function openFlow(page: Page, api: Fixture, flow: Flow, language: Language
   await expect(page.locator('.image-change .background-note')).toBeVisible();
   return saved;
 }
+// The replace flow ignores a photo chosen while it is still reading pending changes (its inputs are disabled until then), so
+// the file is only set once the input is enabled.
 async function choose(page: Page, flow: Flow, bytes: Buffer) {
-  await page.locator(`${flows[flow].scope} input[type=file]`.trim()).first().setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: bytes });
+  const input = page.locator(`${flows[flow].scope} input[type=file]`.trim()).first();
+  await expect(input).toBeEnabled();
+  await input.setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: bytes });
 }
 // The pre-upload review (BG2c R1): the crop editor with the review hint, before anything is sent.
 const reviewHint = (page: Page) => page.locator('#crop-review-hint');
