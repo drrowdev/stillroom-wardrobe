@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { switchControlsSql, SWITCH_PROFILES } from '../../scripts/budget2-controls-switch.mjs';
+import { switchControlsSql, SWITCH_PROFILES, CURRENT_PERIOD_SQL } from '../../scripts/budget2-controls-switch.mjs';
 
 const OWNER = '00000000-0000-4000-8000-000000000001';
 const strip = (sql: string) => sql.replace(/\s+/g, ' ');
@@ -40,7 +40,32 @@ describe('BUDGET2 guarded owner-controls switch', () => {
       'a request of this account is still alive', 'reserved or held charge exists', 'the controls are not the expected current row'])
       expect(sql).toContain(`raise exception 'BLOCKED: ${message}`);
     expect(sql).toContain("a.manifest_id is not null and s.state='reserved'");
-    expect(sql).toContain('from private.ai_requests where owner_id=p.owner_id and expires_at>clock_timestamp()');
+    expect(sql).toContain('from private.ai_requests where owner_id=p.owner_id and expires_at>v_now');
+  });
+  it('ignores only the closed Azure v2 anomaly hold of an earlier month and nothing else', () => {
+    for (const direction of ['forward', 'rollback'] as const) {
+      const sql = strip(switchControlsSql(OWNER, direction));
+      const start = sql.indexOf('if exists(select 1 from private.ai_usage u');
+      const guard = sql.slice(start, sql.indexOf('raise exception', start));
+      // Every part of the exemption is required: one unmet part keeps the row blocking.
+      for (const part of ["u.charge_state in ('reserved','held')", "not (u.charge_state='held' and u.purpose='analysis'",
+        `u.period<${CURRENT_PERIOD_SQL}`, 'u.closed_reason is not null',
+        'and not exists(select 1 from private.ai_requests r where r.owner_id=u.owner_id and r.request_id=u.request_id)',
+        `and exists(select 1 from private.ai_usage_evidence e where e.owner_id=u.owner_id and e.request_id=u.request_id and e.manifest_id='${SWITCH_PROFILES.v2.manifest}' and e.anomaly and e.normalized_usage is null)`])
+        expect(guard, part).toContain(part);
+      expect(guard.match(/ or /g) ?? []).toEqual([]);
+    }
+  });
+  it('derives the period and the liveness cutoff from one timestamp taken after both locks, in UTC', () => {
+    const sql = switchControlsSql(OWNER, 'forward');
+    expect(CURRENT_PERIOD_SQL).toBe("to_char(v_now at time zone 'UTC','YYYY-MM')");
+    expect(sql.match(/v_now := clock_timestamp\(\);/g)).toHaveLength(1);
+    expect(sql.indexOf('v_now := clock_timestamp()')).toBeGreaterThan(sql.indexOf('from private.ai_controls where owner_id=p.owner_id for update'));
+    expect(sql.indexOf('v_now := clock_timestamp()')).toBeLessThan(sql.indexOf('item_save_attempts'));
+    expect(sql.match(/expires_at>v_now/g)).toHaveLength(2);
+    // The only other clock read is the written updated_at.
+    expect(sql.match(/clock_timestamp\(\)/g)).toHaveLength(2);
+    expect(sql).not.toMatch(/current_date|now\(\)|local ?time|current_timestamp/i);
   });
   it('forward needs the exact v2 row and restores nothing else', () => {
     const sql = strip(switchControlsSql(OWNER, 'forward'));

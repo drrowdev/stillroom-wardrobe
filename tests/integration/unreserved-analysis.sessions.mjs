@@ -6,7 +6,7 @@ import { equal, analysisFacts, analysisHash } from './ai-analysis.sessions.mjs';
 import { analyzedHarness, analyzedIntent } from './analyzed-save.sessions.mjs';
 import { imageChangeHarness } from './image-replacement.sessions.mjs';
 import { jpegHeaderFixture } from '../fixtures/jpeg-helpers.ts';
-import { switchControlsSql } from '../../scripts/budget2-controls-switch.mjs';
+import { switchControlsSql, CURRENT_PERIOD_SQL } from '../../scripts/budget2-controls-switch.mjs';
 
 // BUDGET2: catalog and behaviour proof after 20261101090000. A populated budget2-prior state (everything through AVAIL1,
 // whose own proofs already ran there, unchanged) is checkpointed, only this migration is applied, and the checkpoint is
@@ -131,15 +131,17 @@ const ESTIMATE = Math.ceil((1000 * 440 + 200 * 1980) / 100);
 
 // Runs the operator's switch text and reports its outcome instead of throwing: 'OK' (it committed) or the exact message it
 // raised, so a refusal is told apart from any other failure. The DO block runs unchanged inside an EXECUTE.
-async function attemptSwitch(sql, ownerId, direction) {
+async function attemptSwitch(sql, ownerId, direction, zone = 'UTC') {
   const text = switchControlsSql(ownerId, direction);
   const block = text.slice(text.indexOf('do $switch$'), text.lastIndexOf('commit;')).trim();
   const out = await sql(`create temp table if not exists budget2_attempt(message text);
     truncate budget2_attempt;
+    set time zone ${literal(zone)};
     do $outer$ begin
       begin execute $inner$${block}$inner$; insert into budget2_attempt values('OK');
       exception when others then insert into budget2_attempt values(sqlerrm); end;
     end $outer$;
+    reset time zone;
     select message from budget2_attempt;`);
   return out.trim();
 }
@@ -152,7 +154,7 @@ export async function budget2BehaviourProbes(snapshot, rawSql, markStage) {
   const sql = async (text) => {
     try { return await rawSql(text); } catch (error) { markStage(`${current}-sql-failed-${brief(text.replace(/\s+/g, ' ').slice(0, 60))}`); throw error; }
   };
-  const attempt = (owner, direction) => attemptSwitch(sql, owner.uid, direction);
+  const attempt = (owner, direction, zone) => attemptSwitch(sql, owner.uid, direction, zone);
   const equal = (actual, expected) => {
     const ok = isDeepStrictEqual(actual, expected);
     if (!ok) markStage(`${current}-got-${brief(actual)}-want-${brief(expected)}`);
@@ -385,7 +387,7 @@ export async function budget2BehaviourProbes(snapshot, rawSql, markStage) {
     row: 'BLOCKED: the controls are not the expected current row',
     alive: 'BLOCKED: a request of this account is still alive',
     ready: 'BLOCKED: an unsaved ready analysis is still alive',
-    held: 'BLOCKED: reserved or held charge exists (an expired dispatched request keeps its held charge)',
+    held: 'BLOCKED: reserved or held charge exists (an expired dispatched request keeps its held charge; only a closed Azure v2 anomaly hold of an earlier month, with no request, is ignored)',
   };
   await reconcile(s);
   // Earlier frozen stages left unexpired ready results for this owner; they are fixture residue, cleared so each guard is seen alone.
@@ -430,6 +432,184 @@ export async function budget2BehaviourProbes(snapshot, rawSql, markStage) {
   // The switch writes no activation, consent, notice, prompt or allowance.
   const consent = (await client.rows(s, 'profiles'))[0];
   need(consent.ai_enabled === true && consent.ai_notice_revision === 2);
+
+  mark('switch-period');
+  // The period is the UTC month of the one timestamp, whatever the session time zone: the exact expression the switch embeds is
+  // evaluated at the instants around each UTC month end (the database clock itself cannot be moved).
+  const instants = ['2026-10-31T23:59:59.999999Z', '2026-11-01T00:00:00Z', '2026-11-01T00:00:00.000001Z', '2026-12-31T23:59:59Z', '2027-01-01T00:00:00Z'];
+  for (const zone of ['UTC', 'Pacific/Kiritimati', 'Pacific/Pago_Pago', 'America/Los_Angeles']) {
+    equal(await one(`set time zone ${literal(zone)}; select jsonb_agg(${CURRENT_PERIOD_SQL.replaceAll('v_now', 'x')} order by x)
+      from unnest(array[${instants.map(literal).join(',')}]::timestamptz[]) x; reset time zone;`), ['2026-10', '2026-11', '2026-11', '2026-12', '2027-01']);
+  }
+
+  mark('switch-debris');
+  // Only the exact debris the old anomaly kill switch left may be ignored: analysis, held, an earlier UTC month, closed, no
+  // request row, and Azure v2 evidence with anomaly=true and no normalized usage. The debris is made by the REAL claim and
+  // finish (a v2 reply with a contradictory control reading); only its month is moved by a fixture update. Any other
+  // reserved/held row blocks, and a refusal changes nothing (controls, usage, evidence, requests, budget).
+  const owner = literal(s.uid);
+  const PAST = "to_char((clock_timestamp() at time zone 'UTC')-interval '1 month','YYYY-MM')";
+  const FUTURE = "to_char((clock_timestamp() at time zone 'UTC')+interval '1 month','YYYY-MM')";
+  const RESERVATIONS = { [V2]: V2_RESERVATION, [V3]: V3_RESERVATION };
+  const onRow = (id) => `owner_id=${owner} and request_id=${literal(id)}`;
+  const place = (id, period) => sql(`update private.ai_usage set period=${period} where ${onRow(id)};`);
+  const stateOf = () => one(`select jsonb_build_object(
+    'controls',(select to_jsonb(c) from private.ai_controls c where c.owner_id=${owner}),
+    'usage',(select coalesce(jsonb_agg(to_jsonb(u) order by u.request_id),'[]'::jsonb) from private.ai_usage u where u.owner_id=${owner}),
+    'evidence',(select coalesce(jsonb_agg(to_jsonb(e) order by e.request_id),'[]'::jsonb) from private.ai_usage_evidence e where e.owner_id=${owner}),
+    'requests',(select coalesce(jsonb_agg(to_jsonb(r)-'facts' order by r.request_id),'[]'::jsonb) from private.ai_requests r where r.owner_id=${owner}),
+    'used',private.ai_budget_used(${owner},statement_timestamp())::text);`);
+  const asControls = async (manifest, work) => {
+    const keep = await controlsRow(s);
+    await setControls(s, manifest, RESERVATIONS[manifest], keep.monthly_allowance_micro);
+    try { return await work(); } finally { await setControls(s, keep.execution_manifest_id, keep.max_request_micro, keep.monthly_allowance_micro); }
+  };
+  let made = [];
+  const track = (id) => { made.push(id); return id; };
+  const cleanup = async () => {
+    if (made.length > 0) await sql(`delete from private.ai_usage where owner_id=${owner} and request_id in (${made.map(literal).join(',')});`);
+    made = [];
+  };
+  const evidenceShape = (id) => one(`select to_jsonb(x) from (select e.manifest_id,e.anomaly,e.normalized_usage is null as no_usage,
+    (select count(*) from private.ai_requests r where r.owner_id=e.owner_id and r.request_id=e.request_id) as requests
+    from private.ai_usage_evidence e where e.owner_id=${owner} and e.request_id=${literal(id)}) x;`);
+  // Held 4,097,351 and closed UNAVAILABLE by the real finish; evidence anomaly=true, no usage, no request row.
+  const anomalyHold = (manifest = V2) => asControls(manifest, async () => {
+    const id = track(randomUUID());
+    need((await claim(s, id, manifest)).claimed === true);
+    equal((await finish(s, id, facts({ colours: ['navy'] }), manifest, { ...USAGE, controlObservation: 'contradictory' })).code, 'USAGE_ANOMALY');
+    equal(await usageRow(s, id), { reserved_micro: String(RESERVATIONS[manifest]), accounted_micro: String(RESERVATIONS[manifest]),
+      charge_state: 'held', closed_reason: 'UNAVAILABLE' });
+    equal(await evidenceShape(id), { manifest_id: manifest, anomaly: true, no_usage: true, requests: 0 });
+    return id;
+  });
+  // An ordinary expired v2 hold: closed EXPIRED, held, evidence not anomalous; a late finish could still settle it.
+  const ordinaryHold = () => asControls(V2, async () => {
+    const id = track(randomUUID());
+    need((await claim(s, id, V2)).claimed === true);
+    await expire(s, id);
+    equal(await usageRow(s, id), { reserved_micro: String(V2_RESERVATION), accounted_micro: String(V2_RESERVATION), charge_state: 'held', closed_reason: 'EXPIRED' });
+    return id;
+  });
+  const refuses = async (direction, message, zone) => {
+    const unchanged = await stateOf();
+    equal(await attempt(s, direction, zone), message);
+    equal(await stateOf(), unchanged);
+  };
+  const lateFinish = async (id, usage) => {
+    const unchanged = await stateOf();
+    const late = await finish(s, id, facts({ colours: ['navy'] }), V2, usage);
+    equal([late.code, late.stored], ['USAGE_CONFLICT', false]);
+    equal(await stateOf(), unchanged);
+  };
+  const withoutControlWrites = (state) => ({ ...state, controls: { ...state.controls, execution_manifest_id: null, max_request_micro: null, updated_at: null } });
+  equal(await scalar(`select count(*) from private.ai_usage where owner_id=${owner} and charge_state in ('reserved','held');`), '0');
+  await sql(`delete from private.ai_requests where owner_id=${owner};`);
+
+  // Each of these keeps blocking the controls at v3 (rollback), in a non-UTC session time zone.
+  const ZONE = 'Pacific/Kiritimati';
+  let id = await anomalyHold();
+  await refuses('rollback', REFUSALS.held, ZONE); // the current UTC month
+  await place(id, FUTURE);
+  await refuses('rollback', REFUSALS.held, ZONE); // a future month
+  await place(id, PAST);
+  await sql(`update private.ai_usage set closed_reason=null,closed_at=null where ${onRow(id)};`);
+  await refuses('rollback', REFUSALS.held, ZONE); // unclosed
+  await cleanup();
+
+  await asControls(V2, async () => {
+    const present = track(randomUUID());
+    need((await claim(s, present, V2)).claimed === true);
+    await sql(`update private.ai_usage_evidence set anomaly=true where ${onRow(present)};
+      update private.ai_usage set period=${PAST},closed_reason='EXPIRED',closed_at=clock_timestamp() where ${onRow(present)};
+      update private.ai_requests set created_at=clock_timestamp()-interval '2 hours',expires_at=clock_timestamp()-interval '1 hour' where ${onRow(present)};`);
+    equal(await evidenceShape(present), { manifest_id: V2, anomaly: true, no_usage: true, requests: 1 });
+    return present;
+  });
+  await refuses('rollback', REFUSALS.held); // closed and anomalous, but the request row is still present
+  await cleanup();
+
+  id = await ordinaryHold();
+  await place(id, PAST);
+  await refuses('rollback', REFUSALS.held); // an ordinary expired hold of an earlier month
+  const heldTotal = await used(s);
+  // A late finish settles such a hold into a lower estimate: it is not inert, which is why it must keep blocking.
+  const settled = await finish(s, id, facts({ colours: ['navy'] }), V2);
+  equal(settled.code, 'TERMINAL');
+  equal(await usageRow(s, id), { reserved_micro: String(V2_RESERVATION), accounted_micro: String(ESTIMATE), charge_state: 'estimated', closed_reason: 'EXPIRED' });
+  need((await used(s)) < heldTotal);
+  await cleanup();
+
+  id = await anomalyHold(V3);
+  await place(id, PAST);
+  await refuses('rollback', REFUSALS.held); // v3 evidence is not the Azure v2 shape
+  await cleanup();
+
+  id = await anomalyHold();
+  await place(id, PAST);
+  await sql(`update private.ai_usage set purpose='stylist' where ${onRow(id)};`);
+  await refuses('rollback', REFUSALS.held); // another purpose
+  await cleanup();
+
+  id = await anomalyHold();
+  await place(id, PAST);
+  await sql(`update private.ai_usage_evidence set normalized_usage='{"input":1}'::jsonb,estimated_micro=1 where ${onRow(id)};`);
+  await refuses('rollback', REFUSALS.held); // evidence with recorded usage
+  await cleanup();
+
+  id = await anomalyHold();
+  await place(id, PAST);
+  await sql(`delete from private.ai_usage_evidence where ${onRow(id)};`);
+  await refuses('rollback', REFUSALS.held); // no evidence at all
+  await cleanup();
+
+  id = track(randomUUID());
+  await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,closed_reason,closed_at)
+    values(${owner},${literal(id)},${PAST},clock_timestamp()-interval '40 days',1,1,'reserved','EXPIRED',clock_timestamp());`);
+  await refuses('rollback', REFUSALS.held); // a reserved row is never ignored
+  await cleanup();
+
+  id = await anomalyHold();
+  await place(id, PAST);
+  const ordinary = await ordinaryHold();
+  await place(ordinary, PAST);
+  await refuses('rollback', REFUSALS.held); // one ineligible hold blocks all of them
+  await cleanup();
+
+  id = track(randomUUID());
+  need((await claim(s, id, V3)).claimed === true);
+  await place(id, PAST);
+  await refuses('rollback', REFUSALS.alive); // a live request still refuses first
+  await cleanup();
+
+  // The eligible debris alone is ignored, in both directions, and the row is left as it was.
+  id = await anomalyHold();
+  await place(id, PAST);
+  let preSwitch = await stateOf();
+  equal(await attempt(s, 'rollback', ZONE), 'OK');
+  let postSwitch = await stateOf();
+  equal(withoutControlWrites(postSwitch), withoutControlWrites(preSwitch));
+  equal([postSwitch.controls.execution_manifest_id, postSwitch.controls.max_request_micro], [V2, V2_RESERVATION]);
+  equal(postSwitch.used, preSwitch.used);
+  // A late finish of that old row, even an anomalous one, stops at USAGE_CONFLICT and changes and switches off nothing.
+  await lateFinish(id, { ...USAGE, controlObservation: 'contradictory' });
+  await lateFinish(id, USAGE);
+  equal((await controlsRow(s)).activated, true);
+
+  // Forward (controls now v2): the same mixed refusal, then the hosted-shaped row alone.
+  const extra = await ordinaryHold();
+  await place(extra, PAST);
+  await refuses('forward', REFUSALS.held, 'Pacific/Pago_Pago');
+  await sql(`delete from private.ai_usage where ${onRow(extra)};`);
+  preSwitch = await stateOf();
+  equal(await attempt(s, 'forward', 'Pacific/Pago_Pago'), 'OK');
+  postSwitch = await stateOf();
+  equal(withoutControlWrites(postSwitch), withoutControlWrites(preSwitch));
+  equal([postSwitch.controls.execution_manifest_id, postSwitch.controls.max_request_micro, postSwitch.controls.activated], [V3, V3_RESERVATION, true]);
+  equal(postSwitch.used, preSwitch.used);
+  await lateFinish(id, { ...USAGE, controlObservation: 'contradictory' });
+  await cleanup();
+  equal(await controlsRow(s), { ...bBefore, execution_manifest_id: V3, max_request_micro: V3_RESERVATION });
 
   mark('ceiling');
   // Earlier stages may have left an admin row (the admin is a singleton); it is fixture state and is replaced for this check.

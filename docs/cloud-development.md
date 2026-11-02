@@ -1586,11 +1586,35 @@ apply, both deploys and the controls switch are separate owner/coordinator gates
   too, in both directions: the switch never erases an unknown charge to pass the guard, and reconciling one is a separately
   authorised step. Rollback restores the controls before Edge and Pages are downgraded; activation and consent are never
   written.
+
+  *BLOCKED explanation, one exemption (BUDGET3-GUARD).* The owner's hosted account has exactly one dead hold of 4,097,351
+  micro-USD from 8 October 2026 (analysis, held, closed `UNAVAILABLE` by the old anomaly kill switch, no request row). It would
+  block the switch forever, so the guard ignores a held row only when **all** of these hold: purpose `analysis`; state `held`;
+  a period earlier than the current UTC month; closed (`closed_reason` set); no `private.ai_requests` row; and Azure v2
+  evidence with `anomaly = true` and no `normalized_usage` (the shape of that kill switch; a late `ai_finish_analysis` for it
+  stops at `USAGE_CONFLICT` before any change, so it can neither re-account the hold nor switch the account's current controls
+  off afterwards). Everything else still blocks, and one ineligible row blocks the whole switch: an ordinary expired hold (a
+  late finish can still settle it to a different amount), the current or a future month, an unclosed row, a request row still
+  present, v3 or other evidence, another purpose, any `reserved` row. The period and the request-liveness cutoff both come
+  from one `clock_timestamp()` taken after the profile and controls locks, the period as its UTC month whatever the session
+  time zone. The row is not written, closed or cleaned: it is not proven immutable, and an explicit billing reconciliation
+  stays possible later.
+  **It stays counted.** `private.ai_budget_used` adds every reserved or held row of any month to the current month, so that
+  4,097,351 micro-USD (about USD 4.10) keeps reducing the shared admission budget and the current-use displays every month,
+  and the admin history keeps showing it as reserved under October. Ignoring it for the switch does not clean it; settling
+  it is a separate, separately authorised hosted step.
+  **Operator runbook.** Immediately before running the switch on hosted, re-enumerate every reserved/held row of the account
+  (`private.ai_usage` with its evidence and any request row) and confirm only the known row exists; any additional
+  non-qualifying row must still BLOCK, and nothing is ever cleaned automatically to get past it.
 - **Tests.** Unit: `unreserved-analysis-schema`, `budget2-controls-switch`, the endpoint, client, card and consent tests. CI:
   the preservation rehearsal now runs the AVAIL1 proofs unchanged at `budget2-prior` (exactly `20261101080000`), then applies
   BUDGET2 alone and proves its diff and the real v3 claim, finish, status, analysed Save, attribution and image replacement,
-  burst and concurrent claims, expired-held rows, the anomaly, the ready-draft reverse cutover, the guarded switch and the
-  ceiling. Fixtures that pin v2 and 4,097,351 stay as intentional compatibility coverage.
+  burst and concurrent claims, expired-held rows, the anomaly, the ready-draft reverse cutover, the guarded switch (including
+  the BUDGET3-GUARD cases: the real v2 anomaly hold of an earlier month is ignored in both directions, every other held or
+  reserved shape and an unclosed, present-request, current-month or future row still blocks, refusals change nothing, a late
+  finish of the ignored row stops at `USAGE_CONFLICT`, in non-UTC session time zones) and the
+  ceiling. The SQL and those scenarios run only in the CI rehearsal; no local Postgres/Docker was available to the builder.
+  Fixtures that pin v2 and 4,097,351 stay as intentional compatibility coverage.
 
 ### COL1 garment colours and Azure v2 manifest - 24 September 2026
 
