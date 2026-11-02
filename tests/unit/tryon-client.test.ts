@@ -7,7 +7,7 @@ import {
 } from '../../src/data/tryon';
 import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, type TryOnStep } from '../../src/domain/tryon';
 import {
-  RECONCILE_EVERY_MS, RECONCILE_FOR_MS, RUN_LIFETIME_MS, TryOnRun, failureAction, ideaSelection, type RunEnvironment, type TryOnApi,
+  BUSY_RETRY_EVERY_MS, BUSY_RETRY_FOR_MS, RECONCILE_EVERY_MS, RECONCILE_FOR_MS, RUN_LIFETIME_MS, TryOnRun, failureAction, ideaSelection, type RunEnvironment, type TryOnApi,
 } from '../../src/features/outfits/use-try-on';
 import type { OutfitComponent } from '../../src/domain/outfits';
 import { readTryOnStatus, TryOnStore, tryOnViewOf } from '../../src/features/settings/tryon-store';
@@ -156,6 +156,11 @@ class Harness {
 }
 const flush = async () => { for (let index = 0; index < 20; index += 1) await Promise.resolve(); };
 const picture = (size: number): StepResponse => ({ kind: 'intermediate', body: new Uint8Array(new ArrayBuffer(size)), sha256: `hash-${size}` });
+const busy = (count: number): StepResponse[] => Array.from({ length: count }, () => ({ kind: 'code', code: 'BUSY' }) as StepResponse);
+/** Lets the automatic BUSY retries run out, one interval at a time. */
+async function exhaustBusy(h: Harness, run: TryOnRun) {
+  for (let turn = 0; turn < 20 && run.get().kind === 'running'; turn += 1) await h.advance(BUSY_RETRY_EVERY_MS);
+}
 const plan: TryOnStep[] = [{ slot: 'top', itemId: ID(1) }, { slot: 'bottom', itemId: ID(2) }, { slot: 'footwear', itemId: ID(3) }];
 const chain = (over: Partial<Extract<ChainStatus, { kind: 'chain' }>>): ChainStatus => ({ kind: 'chain', state: 'running', nextStep: 1,
   steps: plan, activeAttempt: false, resultId: null, expiresAtMs: 0, ...over });
@@ -268,10 +273,11 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
   });
   it('holds no picture after the chain lifetime, after a retryable failure or while offline', async () => {
     const h = new Harness();
-    h.stepReplies = [{ kind: 'code', code: 'BUSY' }];
+    h.stepReplies = Array.from({ length: 30 }, () => ({ kind: 'code', code: 'BUSY' }) as StepResponse);
     const run = h.run();
     run.start();
     await flush();
+    await exhaustBusy(h, run);
     expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'busy' });
     expect(run.holdsPicture()).toBe(true);
     await h.advance(RUN_LIFETIME_MS + 60_000);
@@ -279,7 +285,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
     expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
     run.start();
     await flush();
-    expect(h.steps).toHaveLength(1);
+    expect(h.steps).toHaveLength(13);
     const offline = new Harness();
     offline.stepReplies = [new TryOnError('UNAVAILABLE')];
     offline.isOnline = false;
@@ -317,7 +323,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
   });
   it('maps each closed code to what the owner can do next', async () => {
     const cases: [string, number, string][] = [['FILTERED', 0, 'filtered'], ['FILTERED', 1, 'filtered'],
-      ['BUSY', 0, 'busy'], ['ALLOWANCE', 0, 'allowance'], ['CHAIN_MISMATCH', 1, 'mismatch'], ['WITHDRAWN', 0, 'turnedOff'],
+      ['ALLOWANCE', 0, 'allowance'], ['CHAIN_MISMATCH', 1, 'mismatch'], ['WITHDRAWN', 0, 'turnedOff'],
       ['RESULTS_FULL', 2, 'resultsFull'], ['INACTIVE', 0, 'unavailable']];
     for (const [code, index, failure] of cases) {
       const h = new Harness();
@@ -331,17 +337,79 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
   });
   it('Try again sends exactly one more request for the failed step, with the same picture', async () => {
     const h = new Harness();
-    h.stepReplies = [picture(20), { kind: 'code', code: 'BUSY' }, picture(30), { kind: 'result', resultId: ID(9) }];
+    h.stepReplies = [picture(20), ...busy(13), picture(30), { kind: 'result', resultId: ID(9) }];
     const run = h.run();
     run.start();
     await flush();
+    await exhaustBusy(h, run);
     expect(run.get()).toEqual({ kind: 'failed', index: 1, failure: 'busy' });
+    expect(h.recorded).toEqual(['ok', 'other']);
     run.start();
     run.start();
     await flush();
-    expect(h.steps.map((step) => [step.step, step.person.length])).toEqual([[1, 10], [2, 20], [2, 20], [3, 30]]);
-    expect(h.steps[1]!.requestId).not.toBe(h.steps[2]!.requestId);
+    expect(h.steps.map((step) => [step.step, step.person.length])).toEqual([[1, 10], ...Array.from({ length: 13 }, () => [2, 20]), [2, 20], [3, 30]]);
+    expect(new Set(h.steps.map((step) => step.requestId)).size).toBe(h.steps.length);
     expect(run.get().kind).toBe('result');
+  });
+  it('waits and claims the refused step again by itself: one more request per retry, no action from the owner', async () => {
+    const h = new Harness();
+    h.stepReplies = [picture(20), picture(30), picture(40), ...busy(2), { kind: 'result', resultId: ID(9) }];
+    const four: TryOnStep[] = [...plan, { slot: 'outerwear', itemId: ID(4) }];
+    const run = h.run(four);
+    run.start();
+    await flush();
+    expect(run.get()).toEqual({ kind: 'running', index: 3, waiting: true });
+    expect(h.steps.map((step) => step.step)).toEqual([1, 2, 3, 4]);
+    await h.advance(BUSY_RETRY_EVERY_MS - 1);
+    expect(h.steps).toHaveLength(4);
+    await h.advance(1);
+    expect(h.steps.map((step) => step.step)).toEqual([1, 2, 3, 4, 4]);
+    expect(run.get()).toEqual({ kind: 'running', index: 3, waiting: true });
+    await h.advance(BUSY_RETRY_EVERY_MS);
+    expect(h.steps.map((step) => step.step)).toEqual([1, 2, 3, 4, 4, 4]);
+    expect(run.get()).toMatchObject({ kind: 'result', resultId: ID(9) });
+    expect(new Set(h.steps.map((step) => step.requestId)).size).toBe(6);
+    expect(h.steps.every((step) => step.chainId === run.id)).toBe(true);
+    expect(h.recorded).toEqual(['ok', 'ok', 'ok', 'ok']);
+    expect(h.chainReads).toBe(0);
+    expect(h.timers.filter((timer) => timer.live)).toHaveLength(0);
+  });
+  it('each step gets its own wait budget, and only BUSY waits', async () => {
+    const h = new Harness();
+    h.stepReplies = [...busy(5), picture(20), ...busy(5), { kind: 'code', code: 'ALLOWANCE' }];
+    const run = h.run();
+    run.start();
+    await flush();
+    for (let turn = 0; turn < 12; turn += 1) await h.advance(BUSY_RETRY_EVERY_MS);
+    expect(run.get()).toEqual({ kind: 'failed', index: 1, failure: 'allowance' });
+    expect(h.steps.map((step) => step.step)).toEqual([1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2]);
+    expect(h.recorded).toEqual(['ok', 'other']);
+  });
+  it('stops waiting at Stop: no further claim, and the chain is cancelled', async () => {
+    const h = new Harness();
+    h.stepReplies = [picture(20), ...busy(5)];
+    const run = h.run();
+    run.start();
+    await flush();
+    expect(run.get()).toEqual({ kind: 'running', index: 1, waiting: true });
+    await run.stop();
+    await flush();
+    expect(run.get()).toEqual({ kind: 'stopped' });
+    expect(h.cancels).toEqual([run.id]);
+    await h.advance(BUSY_RETRY_FOR_MS);
+    expect(h.steps).toHaveLength(2);
+    expect(run.holdsPicture()).toBe(false);
+  });
+  it('leaving the screen while waiting sends nothing more', async () => {
+    const h = new Harness();
+    h.stepReplies = [...busy(5)];
+    const run = h.run();
+    run.start();
+    await flush();
+    run.abandon();
+    await h.advance(BUSY_RETRY_FOR_MS);
+    expect(h.steps).toHaveLength(1);
+    expect(h.timers.filter((timer) => timer.live)).toHaveLength(0);
   });
   it('never resends a step after a lost reply: it checks every 10 s and recovers the result', async () => {
     const h = new Harness();

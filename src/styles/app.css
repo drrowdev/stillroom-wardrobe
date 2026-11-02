@@ -759,17 +759,27 @@ button.item-select[aria-pressed="true"] .select-mark { background: var(--ink); c
 .profile-photo .notice-error { margin: 12px 0 0; }
 .profile-photo .settings-actions { margin-top: 12px; }
 .profile-photo-preview { display: block; width: min(100%, 220px); height: auto; aspect-ratio: 4 / 5; object-fit: contain; background: var(--well); border-radius: 12px; margin-top: 12px; }
-.tryon-result { margin: 0; min-width: 0; }
-.tryon-result img { display: block; width: 100%; height: auto; max-height: 640px; object-fit: contain; background: var(--surface); border-radius: 12px; }
+.tryon-result { margin: 0 auto; min-width: 0; width: 100%; max-width: 30rem; }
+.tryon-result img { display: block; width: 100%; height: auto; aspect-ratio: 4 / 5; object-fit: cover; background: var(--well); border-radius: 12px; }
+.tryon-zoom { display: block; width: 100%; padding: 0; border: 0; background: none; border-radius: 12px; cursor: zoom-in; }
+.viewer { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; padding: 0; border: 0; background: #24332Eee; color: #fff; overflow: hidden; }
+.viewer[open] { display: flex; flex-direction: column; }
+.viewer::backdrop { background: #24332E; }
+.viewer-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; display: grid; place-items: center; padding: 12px; touch-action: pan-x pan-y pinch-zoom; }
+.viewer-scroll img { display: block; max-width: 100%; max-height: calc(100dvh - 110px); width: auto; height: auto; border-radius: 12px; cursor: zoom-in; }
+.viewer-scroll[data-zoomed] { place-items: start; }
+.viewer-scroll[data-zoomed] img { max-width: none; max-height: none; width: 1024px; height: 1280px; cursor: zoom-out; }
+.viewer-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; padding: 12px; }
+.viewer-actions .button { min-height: 44px; }
 .tryon-garments, .tryon-saved-list { margin: 0; padding-inline-start: 1.25rem; min-width: 0; overflow-wrap: anywhere; }
-.tryon-progress { display: grid; gap: 14px; min-width: 0; }
-.tryon-frame { position: relative; overflow: hidden; width: 100%; aspect-ratio: 4 / 5; max-height: 640px; border-radius: 12px; background: var(--surface); }
-.tryon-frame::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / .6) 50%, transparent 70%); transform: translateX(-100%); animation: tryon-sweep 1.8s ease-in-out infinite; }
+.tryon-progress { display: grid; gap: 14px; min-width: 0; width: 100%; max-width: 30rem; margin-inline: auto; }
+.tryon-frame { position: relative; overflow: hidden; width: 100%; aspect-ratio: 4 / 5; border-radius: 12px; background: var(--well); }
+.tryon-frame img { display: block; width: 100%; height: 100%; object-fit: cover; filter: blur(6px) brightness(.8); transform: scale(1.04); }
+.tryon-frame::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 25%, rgb(53 93 78 / .28) 50%, transparent 75%); transform: translateX(-100%); animation: tryon-sweep 1.8s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .tryon-frame::after { transform: none; background: rgb(53 93 78 / .14); } }
 .tryon-bar { display: flex; gap: 6px; }
 .tryon-bar span { flex: 1 1 0; height: 6px; border-radius: 3px; background: var(--border); }
 .tryon-bar span[data-state="done"], .tryon-bar span[data-state="now"] { background: var(--primary); }
 .tryon-bar span[data-state="now"] { animation: breathe 1.4s ease-in-out infinite; }
 @keyframes tryon-sweep { to { transform: translateX(100%); } }
-@media (max-width: 720px) { .tryon-frame { max-height: 420px; } }
 .tryon-page .button, .tryon-page .text-button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
-@media (max-width: 720px) { .tryon-result img { max-height: 420px; } }
