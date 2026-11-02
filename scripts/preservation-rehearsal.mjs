@@ -16,6 +16,7 @@ import {
   SOURCE_HASHES, MAX_SNAPSHOT_BYTES, requireEvidence, assertSnapshotAbsent, cleanupSnapshot,
   captureSixPreservation, readSixPreservation, probeSixPreservation,
 } from '../tests/integration/preservation.sessions.mjs';
+import { createManifestEligibility, realRefusalProbes } from '../tests/integration/manifest-eligibility.sessions.mjs';
 import { captureAzurePreservation, verifyAzurePreservation,
   captureImageChangePreservation, verifyImageChangePreservation,
   captureColourPreservation, verifyColourStage, verifyStylistV2Stage, colourProbes } from '../tests/integration/azure-preservation.sessions.mjs';
@@ -1157,6 +1158,9 @@ async function main() {
     await requireDocker();
     await requireLocalContainer();
     await assertMigrationInventory();
+    // Behavioural phases that replay frozen Stylist, clean-up, try-on and Google bodies run inside a bounded manifest-eligibility
+    // window (their review dates moved and restored exactly; see tests/integration/manifest-eligibility.sessions.mjs).
+    const eligible = createManifestEligibility(privilegedLocalSql, { mark: (phase, label) => { stage = label === 'done' ? phase : `${phase}-eligibility-${label}`; } });
     stage = 'capabilities';
     const help = [];
     for (const args of [['db', 'reset', '--help'], ['migration', 'up', '--help'], ['migration', 'list', '--help']]) {
@@ -1224,14 +1228,16 @@ async function main() {
     const finalizer = await startAnalysisServer();
     try {
       finalizer.assertRunning();
-      const priorMain = await captureAzurePreservation(azureEnv, privilegedLocalSql);
+      // The real legacy Google gate on rows that are rolled back, then the capture inside a manifest-eligibility window.
+      await realRefusalProbes(privilegedLocalSql, (await privilegedLocalSql('select user_id from private.approved_accounts where admission_no=1;')).trim(), ['google']);
+      const priorMain = await eligible.run('AZ1-prior-main-capture', () => captureAzurePreservation(azureEnv, privilegedLocalSql, (label) => { stage = `AZ1-capture-${label}`; }));
       await assertMigrationInventory(); await history('prior-main');
       stage = 'AZ1-upgrade';
       await migrateToAzureTarget(run, 'prior-main');
       await history('azure-target');
       await verifyCiStorageGuard();
       stage = 'AZ1-preservation';
-      await verifyAzurePreservation(priorMain, privilegedLocalSql, true);
+      await eligible.run('AZ1-preservation', () => verifyAzurePreservation(priorMain, privilegedLocalSql, true));
       console.log('PASS: populated prior-main9/azure-target10 historical preservation; Google proof retained for next upgrade');
       stage = 'I10b-ten-capture';
       const ten = await captureImageChangePreservation(priorMain, privilegedLocalSql);
@@ -1321,13 +1327,13 @@ async function main() {
       await history('tryon-stop'); await verifyCiStorageGuard();
       stage = 'FILT1-upgrade-seed';
       const { refusalUpgradeSeed, refusalUpgradeVerify } = await import('../tests/integration/tryon.sessions.mjs');
-      const refusalSeed = await refusalUpgradeSeed(colourSnapshot, privilegedLocalSql);
+      const refusalSeed = await eligible.run('FILT1-upgrade-seed', () => refusalUpgradeSeed(colourSnapshot, privilegedLocalSql));
       stage = 'FILT1-tryon-stop-to-save1-prior';
       await migrateToStage(run, 'tryon-stop', 'save1-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
       await history('save1-prior'); await verifyCiStorageGuard();
       stage = 'FILT1-upgrade-verify';
-      await refusalUpgradeVerify(refusalSeed, privilegedLocalSql);
+      await eligible.run('FILT1-upgrade-verify', () => refusalUpgradeVerify(refusalSeed, privilegedLocalSql));
       // The colour comparison pins the photo-analysis finisher body, which SAVE1 replaces; it runs before that migration.
       stage = 'COL1-A5-prior-compare';
       await verifyColourStage(colourSnapshot, privilegedLocalSql, 'target');
@@ -1337,16 +1343,17 @@ async function main() {
       await syntheticNote('SAVE1-seed');
       stage = 'RAIN1-seed';
       // Real v1 stylist claims are made at the prior inventory, before the forward v2 manifest migration is applied.
-      const { stylistUpgradeSeed, stylistUpgradeVerify } = await import('../tests/integration/stylist-ledger.sessions.mjs');
-      const rainSeed = await stylistUpgradeSeed(colourSnapshot, privilegedLocalSql);
+      const { stylistUpgradeSeed, stylistUpgradeVerify, stylistUpgradeManifestRows } = await import('../tests/integration/stylist-ledger.sessions.mjs');
+      const rainSeed = await eligible.run('RAIN1-seed', () => stylistUpgradeSeed(colourSnapshot, privilegedLocalSql));
       stage = 'SAVE1-prior-to-budget1-prior';
       await migrateToStage(run, 'save1-prior', 'budget1-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
       await history('budget1-prior'); await verifyCiStorageGuard();
       stage = 'RAIN1-manifest-verify';
       await verifyStylistV2Stage(colourSnapshot, privilegedLocalSql);
+      await stylistUpgradeManifestRows(privilegedLocalSql);
       stage = 'RAIN1-verify';
-      await stylistUpgradeVerify(rainSeed, colourSnapshot, privilegedLocalSql, (label) => { stage = `RAIN1-${label}`; });
+      await eligible.run('RAIN1-verify', () => stylistUpgradeVerify(rainSeed, colourSnapshot, privilegedLocalSql, (label) => { stage = `RAIN1-${label}`; }));
       stage = 'SAVE1-verify';
       await analysisModelVerify(modelSeed, privilegedLocalSql, (label) => { stage = `SAVE1-${label}`; });
       await syntheticNote('SAVE1-verify');
@@ -1361,23 +1368,23 @@ async function main() {
       colourFinalizer.assertRunning();
       stage = 'ST1a-stylist-ledger';
       const { stylistLedgerProbes } = await import('../tests/integration/stylist-ledger.sessions.mjs');
-      await stylistLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `ST1a-stylist-${label}`; });
+      await eligible.run('ST1a-stylist-ledger', () => stylistLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `ST1a-stylist-${label}`; }));
       await syntheticNote('ST1a-stylist-ledger');
       colourFinalizer.assertRunning();
       stage = 'BG2b-enhancement-ledger';
       const { enhancementLedgerProbes } = await import('../tests/integration/enhancement-ledger.sessions.mjs');
       // FILT1: the old-Edge compatibility checks call the local PostgREST RPC with the disposable stack's service key.
       const localService = await localStatus();
-      await enhancementLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BG2b-enhancement-${label}`; }, localService);
+      await eligible.run('BG2b-enhancement-ledger', () => enhancementLedgerProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BG2b-enhancement-${label}`; }, localService));
       await syntheticNote('BG2b-enhancement-ledger');
       colourFinalizer.assertRunning();
       stage = 'AD1-admin-limits';
       const { adminLimitsProbes } = await import('../tests/integration/admin-limits.sessions.mjs');
-      await adminLimitsProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `AD1-admin-${label}`; });
+      await eligible.run('AD1-admin-limits', () => adminLimitsProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `AD1-admin-${label}`; }));
       colourFinalizer.assertRunning();
       stage = 'VTO1-tryon-ledger';
       const { tryonProbes } = await import('../tests/integration/tryon.sessions.mjs');
-      await tryonProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `VTO1-tryon-${label}`; }, localService);
+      await eligible.run('VTO1-tryon-ledger', () => tryonProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `VTO1-tryon-${label}`; }, localService));
       colourFinalizer.assertRunning();
       // BUDGET1: every frozen historical check above ran at the exact prior inventory; the budget migration is applied now.
       stage = 'BUDGET1-prior-to-idea-prior';
@@ -1386,36 +1393,40 @@ async function main() {
       await history('idea-prior'); await verifyCiStorageGuard();
       stage = 'BUDGET1-shared-budget';
       const { sharedBudgetProbes } = await import('../tests/integration/shared-ai-budget.sessions.mjs');
-      await sharedBudgetProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BUDGET1-${label}`; }, localService);
+      await eligible.run('BUDGET1-shared-budget', () => sharedBudgetProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `BUDGET1-${label}`; }, localService));
       colourFinalizer.assertRunning();
       // TRYON-IDEA1: the BUDGET1 checks ran at their own exact inventory. Real outfit chains, a result and their ledger rows are
       // written by the old shapes first; the idea migration is applied; then they are proven unchanged and the new contract probed.
       stage = 'IDEA1-seed';
       const { ideaUpgradeSeed, ideaUpgradeVerify, tryonIdeaProbes } = await import('../tests/integration/tryon-idea.sessions.mjs');
-      const ideaSeed = await ideaUpgradeSeed(colourSnapshot, privilegedLocalSql);
+      const ideaSeed = await eligible.run('IDEA1-seed', () => ideaUpgradeSeed(colourSnapshot, privilegedLocalSql));
       stage = 'IDEA1-prior-to-photo-prior';
       await migrateToStage(run, 'idea-prior', 'photo-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
       await history('photo-prior'); await verifyCiStorageGuard();
       stage = 'IDEA1-upgrade-verify';
-      await ideaUpgradeVerify(ideaSeed, (label) => { stage = `IDEA1-upgrade-${label}`; });
+      await eligible.run('IDEA1-upgrade-verify', () => ideaUpgradeVerify(ideaSeed, (label) => { stage = `IDEA1-upgrade-${label}`; }));
       stage = 'IDEA1-tryon-idea';
-      await tryonIdeaProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `IDEA1-${label}`; }, localService);
+      await eligible.run('IDEA1-tryon-idea', () => tryonIdeaProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `IDEA1-${label}`; }, localService));
       colourFinalizer.assertRunning();
       // TRYON-PHOTO1: the IDEA1 checks ran at their own exact inventory. Both owners are configured at notice revision 1 and have
       // consented at revision 1 first; the photo migration is applied; then the configured notice is proven moved to 2 with the
       // consent untouched, a revision-1 consent is refused a photo, and the new contract is probed.
       stage = 'PHOTO1-seed';
       const { photoUpgradeSeed, photoUpgradeVerify, tryonPhotoProbes } = await import('../tests/integration/tryon-photo.sessions.mjs');
-      const photoSeed = await photoUpgradeSeed(colourSnapshot, privilegedLocalSql);
+      const photoSeed = await eligible.run('PHOTO1-seed', () => photoUpgradeSeed(colourSnapshot, privilegedLocalSql));
       stage = 'PHOTO1-prior-to-target';
       await migrateToStage(run, 'photo-prior', 'avail-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
       await history('avail-prior'); await verifyCiStorageGuard();
       stage = 'PHOTO1-upgrade-verify';
-      await photoUpgradeVerify(photoSeed, (label) => { stage = `PHOTO1-upgrade-${label}`; });
+      await eligible.run('PHOTO1-upgrade-verify', () => photoUpgradeVerify(photoSeed, (label) => { stage = `PHOTO1-upgrade-${label}`; }));
       stage = 'PHOTO1-tryon-photo';
-      await tryonPhotoProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `PHOTO1-${label}`; });
+      await eligible.run('PHOTO1-tryon-photo', () => tryonPhotoProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `PHOTO1-${label}`; }));
+      // The real historical gates, with the original dates, on rows that are rolled back (see manifest-eligibility.sessions.mjs).
+      stage = 'REVIEW-DATE-real-gates';
+      await realRefusalProbes(privilegedLocalSql, (await privilegedLocalSql('select user_id from private.approved_accounts where admission_no=1;')).trim(),
+        ['stylist', 'enhance', 'tryon']);
       colourFinalizer.assertRunning();
       // AVAIL1: every frozen historical check above ran at its exact inventory; the availability migration is applied to a
       // populated checkpoint and its own proofs run at budget2-prior (exactly 20261101080000), unchanged, before BUDGET2.

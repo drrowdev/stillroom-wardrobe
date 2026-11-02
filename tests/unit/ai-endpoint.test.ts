@@ -392,7 +392,12 @@ describe('Google usage estimates are not confirmed billing', () => {
         new TextEncoder().encode(assertion.slice(0, 2).join('.')))).toBe(true);
       return Response.json({ access_token: 'fictional-opaque', token_type: 'Bearer', expires_in: 3600 });
     });
-    expect(await googleToken(google, AbortSignal.timeout(5000), transport)).toBe('fictional-opaque');
+    // The legacy adapter still refuses from its own review date (2027-01-01); pin the clock so the exchange stays testable.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-01T00:00:00Z'));
+    try {
+      expect(await googleToken(google, AbortSignal.timeout(5000), transport)).toBe('fictional-opaque');
+    } finally { vi.useRealTimers(); }
     expect(transport).toHaveBeenCalledTimes(1);
   });
   it.each(['STOP', 'MAX_TOKENS', 'SAFETY'])('accounts independently of %s content rejection', async (finishReason) => {

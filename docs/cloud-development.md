@@ -1398,6 +1398,23 @@ scheduled purge) are unchanged; try-on results are kept until the owner deletes 
 try-on (1 January 2027) review dates are metadata in the same way. Legacy Google stays
 read-and-finish only.
 
+The CI-only preservation rehearsal replays the frozen historical migrations, whose function bodies still refuse after
+those review dates. After the Azure analysis date (21 October 2026) the analysis claim, finish, Save and replacement
+fixtures are written as labelled `SYNTHETIC historical fixture` sequences after the real function has refused
+(`tests/integration/synthetic-analysis.sessions.mjs`). For the Stylist, photo clean-up, try-on and legacy Google phases,
+`tests/integration/manifest-eligibility.sessions.mjs` moves the `review_expires_at` of exactly those named manifests into the
+future for the duration of one behavioural phase and restores the exact original dates before the phase ends, in the
+disposable rehearsal database only. The move is a single privileged UPDATE that runs with `session_replication_role = replica`
+set only around it; the manifest immutability trigger stays installed and enabled, and the ordinary update and delete refusal
+is asserted before, during and after each phase. The complete manifest rows are compared with the snapshot taken before the
+move, and the exact dates with the migrations. Within a phase every call is unchanged: the real historical functions and RPCs
+over the normal transports. The phases are labelled `synthetic manifest eligibility; real historical functions/RPCs`; no phase
+spans a migration or a manifest comparison, and AVAIL1 and later run on the current schema with no override. This is a
+privileged fixture step, not an immutable one. A failed restoration aborts the rehearsal with `ELIGIBILITY_RESTORE_FAILED`.
+Once the real clock is past a family's date, a rolled-back probe also checks that the real historical function answers exactly
+`UNCONFIGURED` for valid configured input; before that date it checks that the same input passes the gate. A unit test lists
+every function that reads a review date, so a new gate fails there until the harness handles it.
+
 The six explicit input/output/total/reasoning/cache-read/cache-write counters
 have no missing-to-zero defaults. Input/output rates are respectively
 USD 4.40/19.80 per million tokens; their combined estimate is rounded up once

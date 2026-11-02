@@ -1763,12 +1763,12 @@ describe('import safety and frozen integration boundary', () => {
     expect(prior).toContain("'--version', PRIOR_MAIN_VERSION");
     expect(source).not.toContain('MIGRATIONS.slice(0, 9)');
     expect(source).not.toContain('MIGRATIONS[9]');
-    expect(prior.indexOf("await history('prior-main');")).toBeLessThan(prior.indexOf('await captureAzurePreservation('));
-    expect(prior.indexOf('await captureAzurePreservation(')).toBeLessThan(prior.indexOf("await migrateToStage(run, 'azure-target', 'image-change')"));
-    expect(prior.indexOf("await history('azure-target');")).toBeLessThan(prior.indexOf('await verifyAzurePreservation('));
-    const nineToTen = prior.slice(prior.indexOf("await migrateToAzureTarget(run, 'prior-main')"), prior.indexOf('await verifyAzurePreservation('));
+    expect(prior.indexOf("await history('prior-main');")).toBeLessThan(prior.indexOf('captureAzurePreservation('));
+    expect(prior.indexOf('captureAzurePreservation(')).toBeLessThan(prior.indexOf("await migrateToStage(run, 'azure-target', 'image-change')"));
+    expect(prior.indexOf("await history('azure-target');")).toBeLessThan(prior.indexOf('verifyAzurePreservation('));
+    const nineToTen = prior.slice(prior.indexOf("await migrateToAzureTarget(run, 'prior-main')"), prior.indexOf('verifyAzurePreservation('));
     expect(nineToTen).toContain("await history('azure-target');\n      await verifyCiStorageGuard();");
-    expect(prior.indexOf('await verifyAzurePreservation(')).toBeLessThan(prior.indexOf('await captureImageChangePreservation('));
+    expect(prior.indexOf('verifyAzurePreservation(')).toBeLessThan(prior.indexOf('await captureImageChangePreservation('));
     expect(prior.indexOf('await captureImageChangePreservation(')).toBeLessThan(prior.indexOf("await migrateToStage(run, 'azure-target', 'image-change')"));
     expect(prior.indexOf("await history('image-change');")).toBeLessThan(prior.indexOf('await verifyImageChangePreservation('));
     expect(main).not.toMatch(/await cli\(\['migration', 'up'/);
@@ -1802,16 +1802,16 @@ describe('COL1 strict preservation pass and twelve-only probes (source order, no
     for (const step of ["await history('image-change')", 'await captureColourPreservation(', "await history('image-change')",
       "await migrateToStage(run, 'image-change', 'colours')", "await history('colours'); await verifyCiStorageGuard();",
       "await verifyColourStage(colourSnapshot, privilegedLocalSql, 'colours')", "await migrateToStage(run, 'colours', 'tryon-stop')",
-      "await history('tryon-stop'); await verifyCiStorageGuard();", 'await refusalUpgradeSeed(colourSnapshot, privilegedLocalSql)',
+      "await history('tryon-stop'); await verifyCiStorageGuard();", 'refusalUpgradeSeed(colourSnapshot, privilegedLocalSql)',
       "await migrateToStage(run, 'tryon-stop', 'save1-prior')", "await history('save1-prior'); await verifyCiStorageGuard();",
-      'await refusalUpgradeVerify(refusalSeed, privilegedLocalSql)', "await verifyColourStage(colourSnapshot, privilegedLocalSql, 'target')",
+      'refusalUpgradeVerify(refusalSeed, privilegedLocalSql)', "await verifyColourStage(colourSnapshot, privilegedLocalSql, 'target')",
       'await analysisModelSeed(colourSnapshot, privilegedLocalSql)', "await migrateToStage(run, 'save1-prior', 'budget1-prior')",
       "await history('budget1-prior'); await verifyCiStorageGuard();", 'await analysisModelVerify(modelSeed, privilegedLocalSql',
       "await colourProbes(sixEnv, privilegedLocalSql, 'target')", "await migrateToStage(run, 'budget1-prior', 'idea-prior')",
-      "await history('idea-prior'); await verifyCiStorageGuard();", 'await sharedBudgetProbes(', 'await ideaUpgradeSeed(',
+      "await history('idea-prior'); await verifyCiStorageGuard();", 'sharedBudgetProbes(', 'ideaUpgradeSeed(',
       "await migrateToStage(run, 'idea-prior', 'photo-prior')", "await history('photo-prior'); await verifyCiStorageGuard();",
-      'await ideaUpgradeVerify(', 'await tryonIdeaProbes(', 'await photoUpgradeSeed(',       "await migrateToStage(run, 'photo-prior', 'avail-prior')", "await history('avail-prior'); await verifyCiStorageGuard();",
-            'await photoUpgradeVerify(', 'await tryonPhotoProbes(', 'await availabilityCheckpoint(', "await migrateToStage(run, 'avail-prior', 'budget2-prior')",
+      'ideaUpgradeVerify(', 'tryonIdeaProbes(', 'photoUpgradeSeed(',       "await migrateToStage(run, 'photo-prior', 'avail-prior')", "await history('avail-prior'); await verifyCiStorageGuard();",
+            'photoUpgradeVerify(', 'tryonPhotoProbes(', 'await availabilityCheckpoint(', "await migrateToStage(run, 'avail-prior', 'budget2-prior')",
                         "await history('budget2-prior'); await verifyCiStorageGuard();", 'await availabilityCompare(', 'await availabilityCatalogProbe(',
                         'await availabilityBehaviourProbes(', 'await budget2Checkpoint(', "await migrateToStage(run, 'budget2-prior', 'limits-prior')",
                         "await history('limits-prior'); await verifyCiStorageGuard();", 'await budget2Compare(', 'await budget2CatalogProbe(',
@@ -1837,9 +1837,9 @@ describe('RAIN1 stage order (source order, not executed backend proof)', () => {
     const source = (await readFile(path.join(root, 'scripts/preservation-rehearsal.mjs'), 'utf8')).replaceAll('\r\n', '\n');
     let offset = 0;
     for (const step of ["stage = 'COL1-A5-prior-compare';", "await verifyColourStage(colourSnapshot, privilegedLocalSql, 'target');",
-      "stage = 'RAIN1-seed';", 'await stylistUpgradeSeed(colourSnapshot, privilegedLocalSql)', "await migrateToStage(run, 'save1-prior', 'budget1-prior')",
+      "stage = 'RAIN1-seed';", 'stylistUpgradeSeed(colourSnapshot, privilegedLocalSql)', "await migrateToStage(run, 'save1-prior', 'budget1-prior')",
       "stage = 'RAIN1-manifest-verify';", 'await verifyStylistV2Stage(colourSnapshot, privilegedLocalSql)', "stage = 'RAIN1-verify';",
-      'await stylistUpgradeVerify(rainSeed, colourSnapshot, privilegedLocalSql']) {
+      'stylistUpgradeVerify(rainSeed, colourSnapshot, privilegedLocalSql']) {
       const next = source.indexOf(step, offset); expect(next, step).toBeGreaterThanOrEqual(offset); offset = next + step.length;
     }
     // The v2 verifier is never reached before the migration that installs v2.
