@@ -117,7 +117,6 @@ test.describe('try on an unsaved Today idea', () => {
     expect(api.tryonControl.chains[0]!.outfitId).toBeNull();
     expect(api.tryonControl.results.map((row) => row.outfitId)).toEqual([null]);
     noWrites(api);
-    await button(page, 'tryon.save').click();
     await page.locator('#tryon-done').click();
     await expect(page).toHaveURL(/#\/today$/);
     await expect(page.locator('#today-title')).toBeVisible();

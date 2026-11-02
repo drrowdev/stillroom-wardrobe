@@ -71,8 +71,6 @@
   "tryon.ideaOpen": {"en":"Show on me","fi":"Näytä päälläni","sv":"Visa på mig"},
   "tryon.adding": {"en":"Adding {name} ({step} of {total})…","fi":"Lisätään {name} ({step}/{total})…","sv":"Lägger till {name} ({step} av {total})…"},
   "tryon.addingOne": {"en":"Adding {name}…","fi":"Lisätään {name}…","sv":"Lägger till {name}…"},
-  "tryon.save": {"en":"Save","fi":"Tallenna","sv":"Spara"},
-  "tryon.savedToList": {"en":"Saved to Try-ons.","fi":"Tallennettu sovituksiin.","sv":"Sparad under Provningar."},
   "tryon.tryAgain": {"en":"Try again","fi":"Sovita uudelleen","sv":"Prova igen"},
   "tryon.keepPhoto": {"en":"Save this photo for next time","fi":"Tallenna kuva seuraavaa kertaa varten","sv":"Spara bilden till nästa gång"},
   "tryon.offlineStart": {"en":"You're offline. Try again when you're back online.","fi":"Olet offline-tilassa. Yritä uudelleen, kun yhteys palaa.","sv":"Du är offline. Försök igen när du är online igen."},

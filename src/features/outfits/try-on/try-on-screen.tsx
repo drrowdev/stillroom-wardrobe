@@ -234,31 +234,21 @@ function RunView({ run, store, components, online, t, offer, onOffer, onAgain, o
 }) {
   const phase: RunPhase = useSyncExternalStore(run.subscribe, run.get);
   const [confirming, setConfirming] = useState(false);
-  const [kept, setKept] = useState(false);
-  const keptRef = useRef(false);
   const stopButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (phase.kind === 'failed') focus('tryon-failure-title');
     else if (phase.kind === 'result' || phase.kind === 'stopped') focus('tryon-title');
   }, [phase.kind]);
-  // Nothing outlives the screen unless the owner pressed Save: the picture the server stored is deleted when the owner tries again
-  // or leaves. If that fails, it stays listed under Try-ons, where it can be deleted.
-  useEffect(() => () => {
-    const last = run.get();
-    if (last.kind === 'result' && !keptRef.current) void store.api.deleteResult(last.resultId).catch(() => undefined);
-  }, [run, store]);
   // The photo offered for saving is dropped as soon as the run is over.
   useEffect(() => { if (offer?.photo && phase.kind !== 'running' && phase.kind !== 'checking' && phase.kind !== 'stopping') onOffer(null); }, [phase.kind, offer, onOffer]);
   const steps = run.steps, total = steps.length;
+  // The finished picture is already kept under Try-ons until the owner deletes it.
   if (phase.kind === 'result') return <div className="stack">
     {phase.alreadyFinished && <p role="status">{t('tryon.alreadyFinished')}</p>}
-    <TryOnPicture api={store.api} result={{ id: phase.resultId }} t={t} online={online} idPrefix="tryon-result" hideDelete={!kept}>
-      {kept
-        ? <button id="tryon-done" type="button" className="button button-primary" onClick={onBack}>{t('tryon.done')}</button>
-        : <button id="tryon-save" type="button" className="button button-primary" onClick={() => { keptRef.current = true; setKept(true); }}>{t('tryon.save')}</button>}
+    <TryOnPicture api={store.api} result={{ id: phase.resultId }} t={t} online={online} idPrefix="tryon-result">
       <button id="tryon-again" type="button" className="button button-secondary" onClick={() => onAgain('same')}>{t('tryon.tryAgain')}</button>
+      <button id="tryon-done" type="button" className="button button-primary" onClick={onBack}>{t('tryon.done')}</button>
     </TryOnPicture>
-    {kept && <p role="status">{t('tryon.savedToList')}</p>}
   </div>;
   if (phase.kind === 'stopped') return <div className="stack">
     <p role="status">{t('tryon.stopped')}</p>

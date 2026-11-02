@@ -133,12 +133,10 @@ test.describe('try-on happy paths', () => {
     expect(api.tryonControl.results).toHaveLength(1);
     expect(api.tryonControl.results[0]!.outfitId).toBe(outfitId);
     expect(api.tryonControl.cancels).toEqual([]);
-    // Until Save, only Save and Try again are offered; Save keeps the picture, and nothing is deleted.
-    await expect(button(page, 'tryon.save')).toBeVisible();
+    // The picture is kept automatically; the owner can try again, delete it or finish.
     await expect(button(page, 'tryon.tryAgain')).toBeVisible();
-    await expect(page.locator('#tryon-result-delete')).toHaveCount(0);
-    await button(page, 'tryon.save').click();
-    await expect(page.getByText(text('tryon.savedToList'), { exact: true })).toBeVisible();
+    await expect(page.locator('#tryon-result-delete')).toBeVisible();
+    await expect(button(page, 'tryon.done')).toBeVisible();
     await page.locator('#tryon-done').click();
     await expect(page.locator('#outfit-detail-title')).toBeVisible();
     // The saved try-on is listed on the outfit until it is deleted.
@@ -472,16 +470,15 @@ test.describe('Stop and Delete', () => {
     await page.locator('#tryon-stop-confirm-confirm').click();
     await expect(page.getByText(text('tryon.alreadyFinished'), { exact: true })).toBeVisible();
     await expect(page.locator('.tryon-result img')).toBeVisible();
-    await expect(button(page, 'tryon.save')).toBeVisible();
+    await expect(page.locator('#tryon-result-delete')).toBeVisible();
     held.release();
   });
-  test('Delete asks first and removes a saved try-on', async ({ page }) => {
+  test('Delete asks first and removes the try-on with one call', async ({ page }) => {
     engineOnly();
     const { api } = await start(page);
     await openTryOn(page);
     await preparePhoto(page);
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
-    await button(page, 'tryon.save').click();
     await page.locator('#tryon-result-delete').click();
     const dialog = page.getByRole('dialog', { name: text('tryon.deleteTitle') });
     await expect(dialog).toBeVisible();
@@ -495,36 +492,26 @@ test.describe('Stop and Delete', () => {
     expect(api.tryonControl.deletes).toEqual([api.tryonControl.chains[0]!.resultId]);
     expect(api.tryonControl.results).toHaveLength(0);
   });
-  test('Try again and leaving delete a picture that was not saved; a saved one is kept', async ({ page }) => {
+  test('Try again and leaving keep every finished picture and delete nothing', async ({ page }) => {
     engineOnly();
     const { api, outfitId } = await start(page);
     await openTryOn(page);
     await preparePhoto(page);
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
-    const first = api.tryonControl.chains[0]!.resultId;
-    // Try again drops the unsaved picture and, the photo not being saved, asks for a photo again.
+    // Try again keeps the picture and, the photo not being saved, asks for a photo again.
     await button(page, 'tryon.tryAgain').click();
-    await expect.poll(() => api.tryonControl.deletes).toEqual([first]);
     await expect(page.locator('#tryon-choose')).toBeFocused();
     await preparePhoto(page);
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
-    expect(api.tryonControl.results).toHaveLength(1);
-    // Back without Save deletes it as well.
+    expect(api.tryonControl.results).toHaveLength(2);
+    // Back leaves it in place as well.
     await button(page, 'outfits.back').click();
     await expect(page.locator('#outfit-detail-title')).toBeVisible();
-    await expect.poll(() => api.tryonControl.deletes.length).toBe(2);
-    expect(api.tryonControl.results).toHaveLength(0);
-    // A saved picture stays.
-    await page.locator('#tryon-open').click();
-    await preparePhoto(page);
-    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
-    await button(page, 'tryon.save').click();
-    await button(page, 'outfits.back').click();
-    await expect(page.locator('#outfit-detail-title')).toBeVisible();
-    await expect(page.locator('.tryon-saved-list img')).toBeVisible();
-    expect(api.tryonControl.deletes).toHaveLength(2);
-    expect(api.tryonControl.results).toHaveLength(1);
-    expect(api.tryonControl.results[0]!.outfitId).toBe(outfitId);
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(2);
+    await page.waitForTimeout(300);
+    expect(api.tryonControl.deletes).toEqual([]);
+    expect(api.tryonControl.results).toHaveLength(2);
+    expect(api.tryonControl.results.every((row) => row.outfitId === outfitId)).toBe(true);
   });
   test('a saved try-on stays on the outfit, without a date, until it is deleted', async ({ page }) => {
     engineOnly();
@@ -708,8 +695,8 @@ const confirmRemoval = async (page: Page, id = 'tryon-remove-photo-confirm') => 
   await page.locator(`#${id}-confirm`).click();
 };
 
-// The first run of a try-on without a saved photo, kept until the owner's photo is saved through the offer; then the picture is
-// saved too and the page is left, so the next Try on starts from the saved photo.
+// The first run of a try-on without a saved photo, kept until the owner's photo is saved through the offer; the page is then left
+// with Done, so the next Try on starts from the saved photo.
 async function savePhotoDuringFirstRun(page: Page, api: Api) {
   const held = gate();
   api.tryonControl.replies.push({}, { hold: held.hold });
@@ -722,7 +709,6 @@ async function savePhotoDuringFirstRun(page: Page, api: Api) {
   await expect(page.locator('#tryon-keep-photo')).toHaveCount(0);
   held.release();
   await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
-  await button(page, 'tryon.save').click();
   await page.locator('#tryon-done').click();
   await expect(page.locator('#outfit-detail-title')).toBeVisible();
 }

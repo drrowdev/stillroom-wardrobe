@@ -1085,11 +1085,11 @@ merge note.
 **TRYON-FLOW1 try-on starts at once (app only; no schema, Edge or notice change).** Owner request of 1 November 2026. Show on me
 (Today) and Try on (outfit) open straight into generation: with a saved reference photo the chain starts by itself; without one the
 same page asks for a photo once and starts when it is cropped, and offers to save that photo while the picture is made. Progress names
-the garment being added (1 to 6 steps); Stop leaves nothing. The finished picture replaces the progress in place with Save and Try
-again. The server stores the picture when the chain completes, so "unsaved until Save" is kept in the app: Try again, Back or leaving
-the page deletes an unsaved picture through the existing delete call (best effort: if the tab is killed or the delete fails, it stays
-under Try-ons, where it can be deleted). Only the Try on button starts a chain by itself; a reload or pasted link to the outfit's try-on
-route shows a Try on button instead, so nothing is spent unasked. The saved photo is added, replaced or removed under Settings > Profile.
+the garment being added (1 to 6 steps); Stop leaves nothing. The finished picture replaces the progress in place and is kept under
+Try-ons automatically, as the server stores it when the chain completes (owner decision of 2 November 2026: no Save button and no
+automatic deletion); the buttons are Try again, Delete (one delete call per press) and Done. Only the Try on button starts a chain by
+itself; a reload or pasted link to the outfit's try-on route shows a Try on button instead, so nothing is spent unasked. The saved
+photo is added, replaced or removed under Settings > Profile.
 
 Platform restore: after any database restore and before access reopens, run
 `select public.tryon_discard_transient();` as the database owner and record its
