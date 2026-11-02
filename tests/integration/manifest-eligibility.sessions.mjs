@@ -97,7 +97,13 @@ export function createManifestEligibility(sql, { dates = MANIFEST_DATES, log = c
       requireEvidence(Date.parse(rows.find((row) => row.id === id).review_expires_at) === Date.parse(expected(id)));
     }
   };
-  const refusal = async () => requireEvidence(line(await sql(IMMUTABLE_SQL), 'REFUSAL:') === 'REFUSAL:Not available|Not available');
+  let currentPhase = '';
+  // A mismatch names the actual reply in the stage label (the rehearsal prints nothing else).
+  const refusal = async (step = 'refusal') => {
+    const reply = line(await sql(IMMUTABLE_SQL), 'REFUSAL:');
+    if (reply !== 'REFUSAL:Not available|Not available') mark(currentPhase, `${step}-got-${String(reply).replace(/[^A-Za-z0-9_.:|,-]+/g, '').slice(0, 100)}`);
+    requireEvidence(reply === 'REFUSAL:Not available|Not available');
+  };
   const move = async (direction, count) => {
     requireEvidence(line(await sql(moveSql(direction, dates)), 'MOVED:') === `MOVED:${count}`);
   };
@@ -106,13 +112,14 @@ export function createManifestEligibility(sql, { dates = MANIFEST_DATES, log = c
   async function run(phase, fn) {
     requireEvidence(!broken && !active);
     active = true;
+    currentPhase = phase;
     mark(phase, 'snapshot');
     const before = await snapshot();
     const ids = presentIn(before);
     mark(phase, 'original-dates');
     exactDates(before, (id) => dates[id]);
     mark(phase, 'refusal-before');
-    await refusal();
+    await refusal('refusal-before');
     let value, failure, failed = false;
     try {
       mark(phase, 'advance');
@@ -120,7 +127,7 @@ export function createManifestEligibility(sql, { dates = MANIFEST_DATES, log = c
       mark(phase, 'advanced-dates');
       exactDates(await snapshot(), () => ELIGIBLE_UNTIL);
       mark(phase, 'refusal-during');
-      await refusal();
+      await refusal('refusal-during');
       mark(phase, 'phase');
       value = await fn();
     } catch (error) { failed = true; failure = error; }
@@ -135,7 +142,7 @@ export function createManifestEligibility(sql, { dates = MANIFEST_DATES, log = c
       requireEvidence(isDeepStrictEqual(after, before));
       exactDates(after, (id) => dates[id]);
       mark(phase, 'refusal-after');
-      await refusal();
+      await refusal('refusal-after');
     } catch {
       broken = true; active = false;
       throw new Error('ELIGIBILITY_RESTORE_FAILED');
