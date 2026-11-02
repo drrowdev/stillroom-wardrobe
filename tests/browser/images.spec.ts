@@ -222,11 +222,36 @@ async function openExact(page: Page) {
   await expect(page.locator('#crop-width')).toBeVisible();
 }
 
-async function dragHandle(page: Page, corner: 'nw' | 'ne' | 'sw' | 'se', x: number, y: number) {
-  const box = (await page.locator(`.crop-handle[data-corner="${corner}"]`).boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+// Presses the handle and drags it to a point given as a fraction of the stage. The stage and handle are read in one frame, only
+// once two consecutive frames agree on their layout and the handle is what a press at its centre would hit (a Rotate re-lays
+// the stage out, and a press that lands elsewhere would silently do nothing).
+async function dragHandle(page: Page, corner: 'nw' | 'ne' | 'sw' | 'se', fractionX: number, fractionY: number) {
+  await expect(page.locator(`.crop-handle[data-corner="${corner}"]`)).toBeVisible();
+  await page.locator('.crop-stage').scrollIntoViewIfNeeded();
+  type Snapshot = { grab: { x: number; y: number }; to: { x: number; y: number } };
+  const settled = (): Promise<Snapshot | null> => page.evaluate(({ corner: name, fx, fy }) => new Promise<Snapshot | null>((resolve) => {
+    const read = () => {
+      const stage = document.querySelector('.crop-stage')?.getBoundingClientRect();
+      const handle = document.querySelector(`.crop-handle[data-corner="${name}"]`);
+      const box = handle?.getBoundingClientRect();
+      return stage && handle && box ? { stage, handle, box } : null;
+    };
+    const first = read();
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const second = read();
+      if (!first || !second) { resolve(null); return; }
+      const same = (a: DOMRect, b: DOMRect) => a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+      const grab = { x: second.box.x + second.box.width / 2, y: second.box.y + second.box.height / 2 };
+      const hit = document.elementFromPoint(grab.x, grab.y);
+      if (!same(first.stage, second.stage) || !same(first.box, second.box) || !hit || !second.handle.contains(hit)) { resolve(null); return; }
+      resolve({ grab, to: { x: second.stage.x + second.stage.width * fx, y: second.stage.y + second.stage.height * fy } });
+    }));
+  }), { corner, fx: fractionX, fy: fractionY });
+  let snapshot: Snapshot | null = null;
+  await expect.poll(async () => (snapshot = await settled()) !== null, { timeout: 10_000 }).toBe(true);
+  await page.mouse.move(snapshot!.grab.x, snapshot!.grab.y);
   await page.mouse.down();
-  await page.mouse.move(x, y, { steps: 5 });
+  await page.mouse.move(snapshot!.to.x, snapshot!.to.y, { steps: 5 });
   await page.mouse.up();
 }
 
@@ -277,9 +302,7 @@ for (const size of [{ width: 3200, height: 1214 }, { width: 1600, height: 530 }]
     }
     await openPhotoMenu(page); await page.locator('#edit-photo').click();
     await page.getByRole('button', { name: messages['photo.rotate'].en, exact: true }).click();
-    await page.locator('.crop-stage').scrollIntoViewIfNeeded();
-    const stage = (await page.locator('.crop-stage').boundingBox())!;
-    await dragHandle(page, 'se', stage.x + stage.width * 0.6137, stage.y + stage.height * 0.7291);
+    await dragHandle(page, 'se', 0.6137, 0.7291);
     await openExact(page);
     const values = await page.locator('.crop-fields input').evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value));
     expect(values.every((value) => /^\d+(?:\.\d+)?$/.test(value))).toBe(true);

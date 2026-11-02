@@ -516,7 +516,8 @@ const itemUrl = 'http://127.0.0.1:54321/rest/v1/items*';
 const descriptionUrl = 'http://127.0.0.1:54321/rest/v1/rpc/update_image_description';
 const save = (page: Page, language: Language = 'en') => page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true });
 async function openMore(page: Page) {
-  await expect(page.locator('#detail-title').or(page.locator('#detail-edit'))).toBeVisible();
+  // Also used right after a reload: the app boots, restores the session and reads the item first, which can exceed the 5 s default on a loaded runner.
+  await expect(page.locator('#detail-title').or(page.locator('#detail-edit'))).toBeVisible({ timeout: 20_000 });
   if (await page.locator('#detail-edit').isVisible()) await editItem(page);
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
 }

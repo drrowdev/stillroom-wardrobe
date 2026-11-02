@@ -200,7 +200,10 @@ async function syntheticPhoto(page: Page, kind: 'split' | 'shirt' = 'split'): Pr
   }, kind));
 }
 async function choose(page: Page, bytes: Buffer, scope = '') {
-  await page.locator(`${scope} input[type=file]`.trim()).first().setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: bytes });
+  // A replace flow ignores a photo chosen while its inputs are still disabled (reading pending changes).
+  const input = page.locator(`${scope} input[type=file]`.trim()).first();
+  await expect(input).toBeEnabled();
+  await input.setInputFiles({ name: 'synthetic.png', mimeType: 'image/png', buffer: bytes });
 }
 async function openAdd(page: Page, language: Language = 'en') {
   await page.getByRole('button', { name: text('wardrobe.add', language), exact: true }).first().click();
