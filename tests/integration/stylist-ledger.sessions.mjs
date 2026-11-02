@@ -423,6 +423,13 @@ export async function stylistUpgradeSeed(snapshot, sql) {
   return { seeded, stored, baseline, baselineRows, functions, controls: await controls() };
 }
 
+// The complete recorded v1 and v2 manifest rows. Run with the original review dates, never inside a manifest-eligibility phase.
+export async function stylistUpgradeManifestRows(sql) {
+  equal(JSON.parse(await sql(`select jsonb_build_array((select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(MANIFEST)}),
+    (select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(MANIFEST_V2)}));`)),
+  [STYLIST_MANIFEST_ROW, STYLIST_V2_MANIFEST_ROW]);
+}
+
 export async function stylistUpgradeVerify(seed, snapshot, sql, mark) {
   const { client, a, b, one, claim, finish, ledger, controls, rows, select } = upgradeTools(snapshot, sql);
   const { seeded, stored, baseline, baselineRows, functions } = seed;
@@ -438,9 +445,7 @@ export async function stylistUpgradeVerify(seed, snapshot, sql, mark) {
     equal(after[name].slice(0, 5), functions[name].slice(0, 5));
     requireEvidence((after[name][5] === functions[name][5]) === (name !== 'stylist_claim'));
   }
-  equal(await one(`select jsonb_build_array((select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(MANIFEST)}),
-    (select to_jsonb(m) from private.ai_execution_manifests m where m.id=${literal(MANIFEST_V2)}));`),
-  [STYLIST_MANIFEST_ROW, STYLIST_V2_MANIFEST_ROW]);
+  // The recorded manifest rows are compared apart from this behavioural phase (stylistUpgradeManifestRows), with the original dates.
   // The migration touches no controls, usage or evidence, and the owner's controls still select v1.
   equal(await controls(), seed.controls);
   for (const name of Object.keys(stored)) equal(await ledger(seeded[name]), stored[name]);
