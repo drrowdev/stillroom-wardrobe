@@ -1116,7 +1116,10 @@ unfastened by default when they have a front opening, so the clothing underneath
   for the manifest literal. `tests/integration/tryon-prompt.sessions.mjs` runs the migration in the hosted-style `execute` wrapper
   (rolled back): a running chain and a held charge each refuse it with nothing changed, an executing v2 bootstrap finishes first and is
   moved to v3, and a v2 claim during the migration's locks gets BUSY. A function call that *begins* inside the lock window runs the
-  old body; that matters only for `tryon_bootstrap`, an operator-only call that is not made during the apply window (the drain step).
+  old body (PostgreSQL does not see uncommitted function changes); that matters only for `tryon_bootstrap`, an operator-only call used
+  for new accounts. **No bootstrap may run during the apply window**, and the cutover is done with the app and the operator tools
+  idle. The residual is accepted without a constraint or trigger (no new permanent schema surface); the after-install check in the
+  rollout below detects it.
 - **Wire contract.** Unchanged (`tryon_status` keys, results, step replies). Only the manifest id the Edge function and the app require
   moved to v3.
 
@@ -1136,7 +1139,11 @@ the database policy shows a different manifest (or notice). Neither claims or ch
 Rollout, each its own owner-authorised receipt: **drain first** (`tryon_purge_health()` shows `heldUsage: 0` and no running chain; the
 migration refuses otherwise, so a step never settles across the cutover and a chain never mixes v2 and v3 prompts; a chain still
 marked running after its 30 minutes is ended by `tryon_expire_due`, which the scheduled job runs), apply the
-migration, deploy the `try-on` Edge function, then Pages, back to back. Reload the app (or close and reopen the installed one) to
+migration, deploy the `try-on` Edge function, then Pages, back to back. **After the install, a read-only check:**
+`select count(*) from private.ai_controls where tryon_manifest_id is not null and tryon_manifest_id <> 'azure-global-image25-sunburst-tryon-v3';`
+must return 0. A non-zero count means a bootstrap ran inside the apply window and left an account on the v2 manifest: do not fix it
+silently; record it and repair it with a separately authorised, guarded update of that account's `tryon_manifest_id` to v3 (the
+account's notice revision, consent and saved photo stay as they are). Reload the app (or close and reopen the installed one) to
 leave the cached version; no data is lost. There is no database rollback; if the Edge deploy or Pages is delayed the feature stays
 unavailable (fail closed) and the fix is to finish the deploys. Generated types are unchanged. Release-gates ledger rows follow the
 coordinator's merge note.
