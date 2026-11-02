@@ -1573,6 +1573,74 @@ test('Today shows the ideas that exist when fewer than three can be made', async
   await expect(page.locator('#today-no-more')).toHaveText(text('today.noMore'));
 });
 
+test('Don\'t pair these removes only its card when other ideas share the pair, and the pair keeps them off the next page', async ({ page }) => {
+  const { api } = await start(page, 'en', api => {
+    for (const [title, colour] of [['White shirt', 'white'], ['Pink tee', 'pink'], ['Green polo', 'green']] as const) add(api, title, { colours: [colour] });
+    add(api, 'Navy trousers', { category: 'bottom', colours: ['navy'] });
+    add(api, 'Black boots', { category: 'footwear', colours: ['black'] });
+  }, { clothes: false });
+  await expect(cards(page)).toHaveCount(3);
+  const before = await pageIdeas(page);
+  const avoid = async () => {
+    await fromMenu(page, 'today.dontPair');
+    const chooser = featured(page).getByRole('group', { name: text('today.pickPair'), exact: true });
+    await chooser.getByRole('checkbox').nth(1).check();
+    await chooser.getByRole('checkbox').nth(2).check();
+    await chooser.getByRole('button', { name: text('today.pairConfirm'), exact: true }).click();
+    await expect(undoPair(page)).toBeVisible();
+  };
+  await avoid();
+  // All three ideas hold the pair, but only the card it was chosen on goes.
+  await expect(cards(page)).toHaveCount(2);
+  expect(await pageIdeas(page)).toEqual(before.slice(1));
+  expect(api.combinationRules).toHaveLength(1);
+  await undoPair(page).click();
+  await expect(undoPair(page)).toHaveCount(0);
+  await expect(cards(page)).toHaveCount(3);
+  expect(await pageIdeas(page)).toEqual(before);
+  await avoid();
+  await expect(cards(page)).toHaveCount(2);
+  // The stored pair applies from the next page on: no idea is left.
+  await button(page, 'today.more').click();
+  await expect(page.locator('#today-no-more')).toHaveText(text('today.noMore'));
+});
+
+test('A refresh that drops the card holding focus hands focus to the nearest card left, and never takes it from elsewhere', async ({ page }) => {
+  const { api } = await start(page, 'en', api => {
+    for (const [title, colour] of [['White shirt', 'white'], ['Pink tee', 'pink'], ['Green polo', 'green']] as const) add(api, title, { colours: [colour] });
+    add(api, 'Navy trousers', { category: 'bottom', colours: ['navy'] });
+    add(api, 'Black boots', { category: 'footwear', colours: ['black'] });
+  }, { clothes: false });
+  await expect(cards(page)).toHaveCount(3);
+  const before = await pageIdeas(page);
+  const itemReads = () => api.requests.filter(entry => entry.path === '/rest/v1/items' && entry.method === 'GET').length;
+  const refresh = async () => {
+    const reads = itemReads();
+    await page.context().setOffline(true);
+    await expect(page.locator('.notice-offline')).toBeVisible();
+    await page.context().setOffline(false);
+    await expect.poll(itemReads).toBeGreaterThan(reads);
+    await page.waitForTimeout(300);
+  };
+  const top = (index: number) => before[index]!.split(' + ')[0]!;
+  // The middle card's top goes to the laundry while focus is on that card.
+  await idea(page, 1).getByRole('button', { name: text('today.like'), exact: true }).focus();
+  Object.assign(api.items.find(row => row.title === top(1))!, { availability: 'laundry', version: 2 });
+  await refresh();
+  await expect(cards(page)).toHaveCount(2);
+  expect(await pageIdeas(page)).toEqual([before[0], before[2]]);
+  await expect(idea(page, 1).locator('.today-idea-title')).toBeFocused();
+
+  // With focus elsewhere, a dropped card does not move it.
+  const occasion = page.getByRole('combobox', { name: text('outfits.occasion'), exact: true });
+  await idea(page, 1).getByRole('button', { name: text('today.like'), exact: true }).focus();
+  await occasion.focus();
+  Object.assign(api.items.find(row => row.title === top(2))!, { availability: 'laundry', version: 2 });
+  await refresh();
+  await expect(cards(page)).toHaveCount(1);
+  await expect(occasion).toBeFocused();
+});
+
 test('Save as outfit and Wear today act on the idea of the card they are on', async ({ page }) => {
   const { api } = await start(page);
   const wear = await wearRoutes(page);

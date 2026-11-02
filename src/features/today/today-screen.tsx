@@ -159,6 +159,36 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
     if (shownKeys.length === 0 && status === 'ideas' && document.activeElement === document.body) focusById('today-gone');
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only the emptiness of the set matters
   }, [shownKeys.length === 0, status]);
+  // The card keyboard focus was last on. A refresh that drops that card while others stay hands focus to the nearest one left,
+  // but only when focus was lost with it, never when it is somewhere else.
+  const focusedCard = useRef<string | null>(null);
+  const shownBefore = useRef<readonly string[]>([]);
+  useEffect(() => {
+    const track = (event: FocusEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      focusedCard.current = target?.closest('[data-idea]')?.getAttribute('data-idea') ?? null;
+    };
+    // Pressing outside every card ends it; Tabbing elsewhere does through focusin. A card that was disabled or removed keeps it.
+    const press = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target?.closest('[data-idea]')) focusedCard.current = null;
+    };
+    document.addEventListener('focusin', track);
+    document.addEventListener('pointerdown', press);
+    return () => { document.removeEventListener('focusin', track); document.removeEventListener('pointerdown', press); };
+  }, []);
+  useEffect(() => {
+    const before = shownBefore.current;
+    shownBefore.current = shownKeys;
+    const key = focusedCard.current;
+    if (key === null || shownKeys.includes(key) || !before.includes(key)) return;
+    focusedCard.current = null;
+    if (!shownKeys.length || !lostFocus(document.activeElement)) return;
+    const slot = before.indexOf(key);
+    const next = before.slice(slot + 1).find(entry => shownKeys.includes(entry)) ?? before.slice(0, slot).reverse().find(entry => shownKeys.includes(entry));
+    if (next) focusById(titleOf(next));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only a change of the shown ideas matters
+  }, [shownSet]);
   // A new set starts at its first card, and the screen-reader status follows once it has rendered.
   useEffect(() => {
     if (row.current) row.current.scrollLeft = 0;
@@ -329,12 +359,12 @@ function Idea({ suggestion, number, total, byId, images, t, list, online, vote, 
   const mine = pending?.key === suggestion.key;
   const heading = <h2 id={titleOf(suggestion.key)} className="today-idea-title" tabIndex={-1}>{t('today.ideaOf', { number, total })}</h2>;
   // Until it is settled the pair may already be avoided, so the card offers nothing but its Try again.
-  if (unsettled) return <article ref={card} className="today-card today-featured today-card-hidden" aria-labelledby={titleOf(suggestion.key)}>
+  if (unsettled) return <article ref={card} data-idea={suggestion.key} className="today-card today-featured today-card-hidden" aria-labelledby={titleOf(suggestion.key)}>
     {heading}
     <Pieces ids={suggestion.itemIds.filter(id => unsettled.split('|').includes(id))} byId={byId} images={images} t={t} />
     {problem}
   </article>;
-  if (hidden) return <article ref={card} className="today-card today-featured today-card-hidden" aria-labelledby={titleOf(suggestion.key)}>
+  if (hidden) return <article ref={card} data-idea={suggestion.key} className="today-card today-featured today-card-hidden" aria-labelledby={titleOf(suggestion.key)}>
     {heading}
     <p role="status">{t('today.hidden')}</p>
     {problem}
@@ -345,7 +375,7 @@ function Idea({ suggestion, number, total, byId, images, t, list, online, vote, 
   // Saving and wearing wait while any pair choice (on this card, or the Undo below) is being written or is unsettled.
   const pairing = pairBusy;
   const wearDisabled = !online || pairing || wearBlocked || locked;
-  return <article ref={card} className="today-card today-featured" aria-labelledby={titleOf(suggestion.key)}>
+  return <article ref={card} data-idea={suggestion.key} className="today-card today-featured" aria-labelledby={titleOf(suggestion.key)}>
     {heading}
     <Pieces ids={suggestion.itemIds} byId={byId} images={images} t={t} />
     {suggestion.reasons.length > 0 && <ul className="today-reasons">{suggestion.reasons.map(reason => <li key={reason.key}><Icon name="check" />{t(reasonKeys[reason.key])}</li>)}</ul>}
