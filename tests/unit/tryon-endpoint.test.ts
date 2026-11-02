@@ -134,6 +134,32 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     expect(names(calls)).toEqual(['user', 'tryon_status', 'tryon_claim', 'storage', 'tryon_dispatch', 'tryon_finish']);
   });
 
+  it('sends each slot its own fixed prompt, with the person first and the garment second, including the open-coat wording', async () => {
+    for (const slot of ['one_piece', 'top', 'bottom', 'layer', 'outerwear', 'footwear', 'accessory'] as const) {
+      const claim = { code: 'OK', claimed: true, manifestId: TRYON_MANIFEST, chainId: CHAIN, step: 2, steps: 3, last: false, slot,
+        garment: { path: PATH, mainSha256: sha(GARMENT), bytes: GARMENT.length }, dispatchBeforeMs: Date.now() + 15_000,
+        requestSeconds: 85, reservationMicro: TRYON_RESERVATION_MICRO };
+      backend({ claim });
+      const { transport, sent } = provider(() => Response.json(imageBody()));
+      const response = await createTryOnHandler(config, register, transport)(post(form(2), { Origin: 'http://127.0.0.1:5173' }));
+      expect(response.status, slot).toBe(200);
+      expect(sent, slot).toHaveLength(1);
+      const body = sent[0]!;
+      expect(body.get('prompt'), slot).toBe(tryOnPrompt(slot));
+      const images = body.getAll('image[]') as File[];
+      expect(images, slot).toHaveLength(2);
+      expect(new Uint8Array(await images[0]!.arrayBuffer()), slot).toEqual(PERSON);
+      expect(new Uint8Array(await images[1]!.arrayBuffer()), slot).toEqual(GARMENT);
+      if (slot === 'layer' || slot === 'outerwear') {
+        for (const text of ['If this garment has an existing front opening, wear it fully unfastened with its front panels naturally parted',
+          'keeping existing underlying clothing visible through the opening',
+          'Do not invent a top or other clothing, or reveal clothing hidden by another closed layer',
+          'If it has no front opening, wear it naturally without creating one']) expect(String(body.get('prompt')), slot).toContain(text);
+      }
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('runs one intermediate step and releases its bytes only after finish returned OK', async () => {
     const calls = backend();
     const { transport, sent } = provider(() => Response.json(imageBody()));
@@ -254,6 +280,8 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
       [post(form(1, { outfitId: null })), 400], [post(form(2, { outfitId: OUTFIT })), 400], [post(form(7)), 400], [post(form(0)), 400],
       [post(form(2, { chainId: 'not-a-uuid' })), 400], [post(form(2, { extra: 'x' })), 400],
       [post(form(2, { manifestId: 'other' })), 503],
+      // A cached app still naming the v2 manifest meets the v3 Edge function: CONFIG_CHANGED at ingress, before auth and status.
+      [post(form(2, { manifestId: 'azure-global-image25-sunburst-tryon-v2' })), 503],
       [post(form(2, {}, flatJpeg({ width: 800, height: 1000 }))), 400],
       [post(form(2, {}, flatJpeg({ width: 1024, height: 1280, mode: 'progressive' }))), 400],
       [post(form(2, {}, new Uint8Array(600_001))), 413],
@@ -270,10 +298,11 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
       [{ consent: { enabled: false, noticeRevision: null } }, 'CONSENT_REQUIRED', register],
       [{ policy: { ...status.policy, providerAvailable: false } }, 'UNAVAILABLE', register],
       [{ policy: { ...status.policy, maxRequestMicro: '1000' } }, 'UNCONFIGURED', register],
-      // The handler keeps its exact equality check with the shared notice revision (3), never a range, and with manifest v2: a database
-      // that still shows the previous notice or the v1 manifest is refused before any claim (TRYON-LIMITS1 mixed versions).
+      // The handler keeps its exact equality check with the shared notice revision (3), never a range, and with manifest v3: a database
+      // that still shows the previous notice or the v1 or v2 manifest is refused before any claim (mixed versions).
       [{ policy: { ...status.policy, noticeRevision: TRYON_NOTICE_REVISION - 1 }, consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION - 1 } }, 'UNCONFIGURED', register],
       [{ policy: { ...status.policy, manifestId: 'azure-global-image25-sunburst-tryon-v1' } }, 'UNCONFIGURED', register],
+      [{ policy: { ...status.policy, manifestId: 'azure-global-image25-sunburst-tryon-v2' } }, 'UNCONFIGURED', register],
       [{ policy: { ...status.policy, noticeRevision: TRYON_NOTICE_REVISION + 1 }, consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION + 1 } }, 'UNCONFIGURED', register],
       // Consent at another revision than the configured one never passes, whatever the configured revision is.
       [{ consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION - 1 } }, 'CONSENT_REQUIRED', register],
