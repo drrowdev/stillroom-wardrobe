@@ -99,7 +99,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
       if (url.endsWith('/rpc/tryon_finish')) {
         init.signal?.throwIfAborted();
         return Response.json(options.finish ?? (parsed!.p_output
-          ? { code: 'OK', last: true, accounting, resultId: RESULT, deleted: false, expiresAtMs: 1_900_000_000_000 }
+          ? { code: 'OK', last: true, accounting, resultId: RESULT, deleted: false }
           : { code: 'OK', last: false, accounting }));
       }
       throw new Error(`unexpected fetch ${url}`);
@@ -167,10 +167,25 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     const { transport } = provider(() => Response.json(imageBody()));
     const response = await createTryOnHandler(config, register, transport)(post(form(1)));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ code: 'OK', resultId: RESULT, expiresAtMs: 1_900_000_000_000 });
+    expect(await response.json()).toEqual({ code: 'OK', resultId: RESULT });
     expect(rpcBody(calls, 'tryon_claim')).toMatchObject({ p_step: 1, p_outfit_id: OUTFIT, p_person_sha256: null });
     expect(rpcBody(calls, 'tryon_finish')).toMatchObject({ p_code: 'OK', p_output_sha256: sha(OUTPUT),
       p_output: `\\x${Buffer.from(OUTPUT).toString('hex')}` });
+  });
+
+  it('runs the sixth step of a six-step chain, and refuses a claim that names more steps than the app allows', async () => {
+    const calls = backend({ steps: 6 });
+    const { transport } = provider(() => Response.json(imageBody()));
+    const response = await createTryOnHandler(config, register, transport)(post(form(6)));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ code: 'OK', resultId: RESULT });
+    expect(rpcBody(calls, 'tryon_claim')).toMatchObject({ p_step: 6 });
+    const tooLong = backend({ steps: 7 });
+    const refused = provider(() => Response.json(imageBody()));
+    const reply = await createTryOnHandler(config, register, refused.transport)(post(form(6)));
+    expect(reply.status).not.toBe(200);
+    expect(refused.transport).not.toHaveBeenCalled();
+    expect(rpcBody(tooLong, 'tryon_finish')).toBeUndefined();
   });
 
   it('starts an idea chain from the item ids alone: no outfit, one claim argument more, nothing else changed', async () => {
@@ -236,7 +251,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     const calls = backend();
     const { transport } = provider(() => Response.json(imageBody()));
     const bad: Array<[Request, number]> = [
-      [post(form(1, { outfitId: null })), 400], [post(form(2, { outfitId: OUTFIT })), 400], [post(form(4)), 400],
+      [post(form(1, { outfitId: null })), 400], [post(form(2, { outfitId: OUTFIT })), 400], [post(form(7)), 400], [post(form(0)), 400],
       [post(form(2, { chainId: 'not-a-uuid' })), 400], [post(form(2, { extra: 'x' })), 400],
       [post(form(2, { manifestId: 'other' })), 503],
       [post(form(2, {}, flatJpeg({ width: 800, height: 1000 }))), 400],
@@ -255,8 +270,10 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
       [{ consent: { enabled: false, noticeRevision: null } }, 'CONSENT_REQUIRED', register],
       [{ policy: { ...status.policy, providerAvailable: false } }, 'UNAVAILABLE', register],
       [{ policy: { ...status.policy, maxRequestMicro: '1000' } }, 'UNCONFIGURED', register],
-      // TRYON-PHOTO1: the handler keeps its exact equality check with the shared notice revision (2), never a range.
+      // The handler keeps its exact equality check with the shared notice revision (3), never a range, and with manifest v2: a database
+      // that still shows the previous notice or the v1 manifest is refused before any claim (TRYON-LIMITS1 mixed versions).
       [{ policy: { ...status.policy, noticeRevision: TRYON_NOTICE_REVISION - 1 }, consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION - 1 } }, 'UNCONFIGURED', register],
+      [{ policy: { ...status.policy, manifestId: 'azure-global-image25-sunburst-tryon-v1' } }, 'UNCONFIGURED', register],
       [{ policy: { ...status.policy, noticeRevision: TRYON_NOTICE_REVISION + 1 }, consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION + 1 } }, 'UNCONFIGURED', register],
       // Consent at another revision than the configured one never passes, whatever the configured revision is.
       [{ consent: { enabled: true, noticeRevision: TRYON_NOTICE_REVISION - 1 } }, 'CONSENT_REQUIRED', register],
@@ -482,7 +499,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
   });
 
   it('reports a result that was deleted before a replayed last finish, and never recreates it', async () => {
-    backend({ steps: 2, finish: { code: 'OK', replayed: true, last: true, accounting, resultId: null, deleted: true, expiresAtMs: null } });
+    backend({ steps: 2, finish: { code: 'OK', replayed: true, last: true, accounting, resultId: null, deleted: true } });
     const { transport } = provider(() => Response.json(imageBody()));
     const response = await createTryOnHandler(config, register, transport)(post(form(2)));
     expect(await response.json()).toEqual({ code: 'NOT_FOUND' });

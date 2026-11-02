@@ -221,7 +221,7 @@ function Setup({ store, selection, components, online, language, t, onStart }: S
 
 const failureKey = (failure: FailureKind): MessageKey => `tryon.failure.${failure}` as MessageKey;
 
-function RunView({ run, store, components, language, online, t, onRestart, onClose }: Common & {
+function RunView({ run, store, components, online, t, onRestart, onClose }: Common & {
   run: TryOnRun; store: TryOnStore; components: ReadonlyMap<string, OutfitComponent>;
   onRestart: () => void; onClose: () => void;
 }) {
@@ -235,7 +235,7 @@ function RunView({ run, store, components, language, online, t, onRestart, onClo
   const total = run.steps.length;
   if (phase.kind === 'result') return <div className="stack">
     {phase.alreadyFinished && <p role="status">{t('tryon.alreadyFinished')}</p>}
-    <TryOnPicture api={store.api} result={{ id: phase.resultId, expiresAtMs: phase.expiresAtMs }} language={language} t={t} online={online} idPrefix="tryon-result">
+    <TryOnPicture api={store.api} result={{ id: phase.resultId }} t={t} online={online} idPrefix="tryon-result">
       <button id="tryon-done" type="button" className="button button-primary" onClick={onClose}>{t('tryon.done')}</button>
     </TryOnPicture>
   </div>;

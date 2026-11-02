@@ -397,7 +397,7 @@ async function exercise(ctx) {
   // attempt as its active request, a reserved result slot, a completed chain with its ready picture and a
   // try-on probe authorisation, plus (VTO-3a) one Stop marker and (TRYON-PHOTO1) one saved reference photo. C's go with the account; D's stay.
   step = 'fixture-tryon';
-  const tryonManifest = "'azure-global-image25-sunburst-tryon-v1'";
+  const tryonManifest = "'azure-global-image25-sunburst-tryon-v2'";
   for (const [label, uid] of [['C', c], ['D', d]]) {
     const slot = randomUUID(), request = randomUUID(), chain = randomUUID(), result = randomUUID();
     const done = randomUUID(), picture = randomUUID();
@@ -412,9 +412,9 @@ async function exercise(ctx) {
   insert into private.tryon_chains(owner_id,chain_id,outfit_id,steps,state,next_step,result_id,created_at,expires_at,ended_at,end_reason)
     select ${literal(uid)},${literal(done)},id,'[{"slot":"top","itemId":"00000000-0000-4000-8000-000000000001"}]'::jsonb,'complete',2,
       ${literal(picture)},now(),now()+interval '30 minutes',now(),'COMPLETE' from public.outfits where owner_id=${literal(uid)} order by id limit 1;
-  insert into private.tryon_results(owner_id,result_id,chain_id,outfit_id,state,item_ids,jpeg,created_at,completed_at,expires_at)
+  insert into private.tryon_results(owner_id,result_id,chain_id,outfit_id,state,item_ids,jpeg,created_at,completed_at)
     select owner_id,result_id,chain_id,outfit_id,'ready',array['00000000-0000-4000-8000-000000000001'::uuid],'\\xffd8ffd9'::bytea,
-      now(),now(),now()+interval '7 days' from private.tryon_chains where owner_id=${literal(uid)} and chain_id=${literal(done)};
+      now(),now() from private.tryon_chains where owner_id=${literal(uid)} and chain_id=${literal(done)};
   insert into private.tryon_results(owner_id,result_id,chain_id,outfit_id,state,item_ids,created_at)
     select owner_id,result_id,chain_id,outfit_id,'reserved',array['00000000-0000-4000-8000-000000000001'::uuid],now()
     from private.tryon_chains where owner_id=${literal(uid)} and chain_id=${literal(chain)};

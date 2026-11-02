@@ -211,7 +211,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
             </div>}
         </div>
       </>}
-    <SavedTryOns client={client} scope={scope} outfitId={null} online={online} language={language} t={t} />
+    <SavedTryOns client={client} scope={scope} outfitId={null} online={online} t={t} />
     {ideas.undoKey && <UndoPair t={t} online={online} locked={browseLocked} pending={ideas.pending?.key === ideas.undoKey}
       failed={ideas.failed === ideas.undoKey} unresolved={ideas.unresolved === ideas.undoKey} onUndo={ideas.allow} onRetry={ideas.retry} />}
     {stylistEntry && <div className="today-more"><button type="button" className="button button-secondary" onClick={onStylist}>{t('stylist.open')}</button></div>}

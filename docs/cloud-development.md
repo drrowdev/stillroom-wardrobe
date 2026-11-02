@@ -1032,6 +1032,56 @@ Save photo; nothing is added to the database, the Edge function or the notice. T
 chooses Show photo, so opening Settings makes no new request. Add and Replace need try-on to be on (the server still decides);
 otherwise the block offers a way to turn try-on on, and Remove stays available. The Try-on card keeps only a pointer to the block.
 
+**TRYON-LIMITS1 six garments and kept results (source only; hosted apply, Edge and Pages deploys owner-gated).**
+Owner direction of 1 November 2026 ("Keep the photos until I remove them using the app UI."). Adds
+`20261101200000_tryon_limits.sql` after `20261101080000`, in one transaction.
+- **Garments.** A try-on has up to six steps, one garment per call: top (or a one-piece), bottoms, layer, outerwear, shoes,
+  one accessory, in that order (shoes stay last for outfits without the new kinds). A second layer, outerwear piece or accessory
+  is listed as not included. The new manifest `azure-global-image25-sunburst-tryon-v2` (prompt version 2) adds the layer,
+  outerwear and accessory prompts and states six steps; the four existing prompts, the parameters, the rates, the 360,000
+  micro reservation, the deployment key and the 30-minute chain lifetime are unchanged, and the v1 row stays installed.
+  A full chain takes about 4 to 5 minutes (one provider call of roughly 40 seconds per step, sequential, so the 2 requests
+  per minute of the shared deployment is not the limit). The new-chain check requires the whole chain to fit the account's
+  one monthly budget at the configured `tryon_max_request_micro` per step; each step then holds one reservation at a time.
+  The quality of the three new prompts and of six chained edits is not verified by any test: it needs the owner's own try-on or
+  an approved probe. `tryon_probe_authorise` and its table now allow up to six calls (they allowed five), so one probe can cover
+  a full chain; `scripts/tryon-probe.mjs` is the archived G8 five-call probe against v1 and is not updated.
+- **Results.** A saved picture stays until the owner deletes it in the app and never expires. `tryon_results.expires_at`
+  is dropped; the maintenance job (`tryon_expire_due`) no longer deletes by age and still ends expired chains, settles stranded
+  accounting and deletes reserved slots whose chain is gone; the new-chain safeguard looks only at stranded accounting. The cap is
+  200 stored or reserved results per account (it was 20). **The migration deletes no result**: every ready result, including one
+  already past its old 7-day mark that the purge had not removed yet, is kept. Withdrawal still ends running chains and leaves
+  results; account deletion and an outfit's permanent deletion cascade as before (results are database rows, there are no Storage
+  objects to clean). A result of a trashed outfit is hidden and still counts toward the cap until the outfit is restored or purged.
+  200 pictures of at most 512,000 bytes are at most about 100 MB of database space plus backups; typical pictures are far smaller.
+- **Notice revision 3.** The consent notice no longer says "7 days" for the picture; revisions 1 and 2 stay frozen in
+  `tests/unit/tryon-notice.test.ts` and revision 3 is pinned there. The migration moves configured accounts to the v2 manifest and
+  notice 3 and never writes consent, so the owner turns try-on on again. **The saved reference photo is cleared at the notice
+  change**: the existing guard deletes it whenever consent no longer equals the configured notice, so the owner saves it again after
+  consenting to revision 3 (`tryon_person_photo_put_v1` accepts a notice at revision 2 or later with consent equal to it). There is
+  no carve-out.
+- **Wire contract.** `tryon_status` reports `maxSteps: 6`, `maxResults: 200` and no `resultDays`; the result list and the final
+  step reply carry no `expiresAtMs` (a chain's own 30-minute `expiresAtMs` stays). The result-list reader's bounded response
+  allowance is raised to 131,072 bytes (200 results of six items measure about 80 KB).
+
+| Database | Edge `try-on` | Pages app | Result |
+| --- | --- | --- | --- |
+| old | old | old | today's behaviour |
+| new | old | any | the old Edge answers `UNCONFIGURED` (it pins notice 2 and manifest v1); nothing is claimed or charged |
+| old | new | any | the new Edge answers `UNCONFIGURED` (policy shows notice 2); nothing is claimed or charged |
+| new | new | old | the old app cannot parse the status, so try-on shows as unavailable and Turn on is hidden; a tab opened before the deploy shows the same until it is reloaded |
+| old | any | new | the new app cannot parse the status (the retired `resultDays` key), so try-on shows as unavailable |
+| new | new | new | the full feature, after the owner consents to revision 3 |
+
+Cached-client recovery: reload the app (or close and reopen the installed one) to get the new version; no data is lost and nothing
+is charged while the status cannot be read. Rollout, each its own owner-authorised receipt: **drain first** (no running chain:
+`tryon_purge_health()` shows `heldUsage: 0` and no running chain exists; a step already on its way settles by its own evidence, but
+its next step is refused after the cutover and the owner starts again), apply the migration, deploy the `try-on` Edge function,
+then Pages, back to back; the owner then turns try-on on (consent 3) and saves the reference photo again. There is no database
+rollback; if the Edge deploy or Pages is delayed the feature stays unavailable (fail closed), and the fix is to finish the deploys.
+Generated types are unchanged (no public function name or signature changed). Release-gates ledger rows follow the coordinator's
+merge note.
+
 Platform restore: after any database restore and before access reopens, run
 `select public.tryon_discard_transient();` as the database owner and record its
 counts in the restore receipt. It deletes every try-on result, chain and attempt
@@ -1334,8 +1384,8 @@ and database), so these stay available until the owner switches them off. It tak
 effect in a hosted project only after the separately authorised migration and Edge deploy. Consent and
 notice revisions, activation and provider-availability switches, exact manifest/model/prompt
 checks, the monthly allowance, reservations, rate limits and every operational TTL
-(analysis request/result, try-on result, provisional settlement, probe authorisation,
-scheduled purge) are unchanged. The Stylist (1 December 2026) and photo clean-up and
+(analysis request/result, provisional settlement, probe authorisation,
+scheduled purge) are unchanged; try-on results are kept until the owner deletes them (TRYON-LIMITS1). The Stylist (1 December 2026) and photo clean-up and
 try-on (1 January 2027) review dates are metadata in the same way. Legacy Google stays
 read-and-finish only.
 

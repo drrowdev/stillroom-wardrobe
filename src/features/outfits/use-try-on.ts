@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import type { CancelResult, ChainStatus, StepInput, StepResponse, TryOnClient, TryOnCode, TryOnResult, TryOnStatus } from '../../data/tryon';
 import { sha256Hex, TryOnError } from '../../data/tryon';
-import { selectTryOnSteps, TRYON_LIMITS, type TryOnCandidate, type TryOnSelection, type TryOnStep } from '../../domain/tryon';
+import { selectTryOnSteps, TRYON_LIMITS, TRYON_MAX_STEPS, type TryOnCandidate, type TryOnSelection, type TryOnStep } from '../../domain/tryon';
 import type { OutfitComponent, OutfitRecord } from '../../domain/outfits';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import { readTryOnStatus, type TryOnState, type TryOnStore } from '../settings/tryon-store';
@@ -74,7 +74,7 @@ export type RunPhase =
   | { kind: 'checking'; index: number; offline: boolean }
   | { kind: 'stopping'; index: number }
   | { kind: 'failed'; index: number; failure: FailureKind }
-  | { kind: 'result'; resultId: string; expiresAtMs: number | null; alreadyFinished: boolean }
+  | { kind: 'result'; resultId: string; alreadyFinished: boolean }
   | { kind: 'stopped' };
 
 export const RECONCILE_EVERY_MS = 10_000;
@@ -119,7 +119,7 @@ export class TryOnRun {
 
   constructor(private readonly api: TryOnApi, private readonly session: SessionStop, private readonly env: RunEnvironment,
     subject: string | TryOnIdea, readonly steps: readonly TryOnStep[], photo: Uint8Array<ArrayBuffer>) {
-    if (steps.length < 1 || steps.length > 3) throw new TryOnError('INVALID_INPUT');
+    if (steps.length < 1 || steps.length > TRYON_MAX_STEPS) throw new TryOnError('INVALID_INPUT');
     this.named = typeof subject === 'string' ? { outfitId: subject } : { itemIds: [...subject.itemIds] };
     this.chainId = env.uuid();
     this.person = photo;
@@ -210,7 +210,7 @@ export class TryOnRun {
     if (reply.kind === 'result') {
       if (!last) { this.reconcile(index, generation); return; }
       this.session.recordStep('ok');
-      this.finish(reply.resultId, reply.expiresAtMs, false);
+      this.finish(reply.resultId, false);
       return;
     }
     if (reply.kind === 'intermediate') {
@@ -232,12 +232,12 @@ export class TryOnRun {
     if (failureAction[failure] !== 'retry') this.drop();
     this.set({ kind: 'failed', index, failure });
   }
-  private finish(resultId: string | null, expiresAtMs: number | null, alreadyFinished: boolean) {
+  private finish(resultId: string | null, alreadyFinished: boolean) {
     this.drop();
     this.clearTimers();
     this.endLifetime();
     if (resultId === null) { this.set({ kind: 'failed', index: this.steps.length - 1, failure: 'unavailable' }); return; }
-    this.set({ kind: 'result', resultId, expiresAtMs, alreadyFinished });
+    this.set({ kind: 'result', resultId, alreadyFinished });
   }
 
   /** §3.2: the outcome of a sent step is unknown. Check every 10 s while online, for up to 4 minutes. */
@@ -275,7 +275,7 @@ export class TryOnRun {
       && status.steps.every((step, at) => step.slot === this.steps[at]!.slot && step.itemId === this.steps[at]!.itemId);
     if (!samePlan && (status.state === 'running' || status.state === 'complete')) { this.fail(index, 'mismatch'); return true; }
     switch (status.state) {
-      case 'complete': this.session.recordStep('ok'); this.finish(status.resultId, null, false); return true;
+      case 'complete': this.session.recordStep('ok'); this.finish(status.resultId, false); return true;
       case 'withdrawn': this.fail(index, 'turnedOff'); return true;
       case 'stale': this.fail(index, 'mismatch'); return true;
       case 'cancelled': case 'expired': this.fail(index, 'unavailable'); return true;
@@ -303,7 +303,7 @@ export class TryOnRun {
     this.set({ kind: 'stopping', index });
     const reply: CancelResult | null = await this.api.cancel(this.chainId).catch(() => null);
     if (!this.live(generation)) return;
-    if (reply?.code === 'COMPLETED') { this.finish(reply.resultId, null, true); return; }
+    if (reply?.code === 'COMPLETED') { this.finish(reply.resultId, true); return; }
     // NOT_FOUND is not a stop: without the server's marker, a step already on its way could still finish.
     if (reply?.code === 'CANCELLED' || reply?.code === 'EXPIRED') { this.set({ kind: 'stopped' }); return; }
     this.set({ kind: 'failed', index, failure: reply?.code === 'WITHDRAWN' ? 'turnedOff' : 'unavailable' });
@@ -370,7 +370,7 @@ export function useTryOnStatus(store: TryOnStore | null): TryOnStatus | null {
 
 /** Saved try-ons of one outfit. `missing`: this backend has no try-on; `failed`: the list couldn't be read. */
 export type SavedTryOnsState = { kind: 'idle' | 'loading' | 'missing' | 'failed' } | { kind: 'ready'; results: TryOnResult[] };
-/** Saved try-ons of one outfit, or (`null`) of unsaved ideas, newest first; each stays until it expires or is deleted. `retry` reads the list again. */
+/** Saved try-ons of one outfit, or (`null`) of unsaved ideas, newest first; each stays until it is deleted. `retry` reads the list again. */
 export function useOutfitTryOns(api: TryOnClient | null, outfitId: string | null, enabled: boolean): { state: SavedTryOnsState; retry: () => void } {
   const [state, setState] = useState<SavedTryOnsState>({ kind: 'idle' });
   const [attempt, setAttempt] = useState(0);
@@ -381,8 +381,7 @@ export function useOutfitTryOns(api: TryOnClient | null, outfitId: string | null
     api.results(controller.signal).then(list => {
       if (controller.signal.aborted) return;
       if (list === 'missing') { setState({ kind: 'missing' }); return; }
-      const now = Date.now();
-      setState({ kind: 'ready', results: list.filter(entry => entry.outfitId === outfitId && entry.expiresAtMs > now)
+      setState({ kind: 'ready', results: list.filter(entry => entry.outfitId === outfitId)
         .sort((a, b) => b.completedAtMs - a.completedAtMs) });
     }, () => { if (!controller.signal.aborted) setState({ kind: 'failed' }); });
     return () => controller.abort();

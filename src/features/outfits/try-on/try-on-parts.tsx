@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { TryOnClient } from '../../../data/tryon';
-import type { Language, Translate } from '../../../i18n';
+import type { Translate } from '../../../i18n';
 import '../../../i18n/tryon';
-import { deletionDate } from '../use-try-on';
 
 /** A modal confirm: the browser traps focus; the caller returns focus to the control that opened it. */
 export function ConfirmDialog({ id, title, text, confirm, cancel, danger, onConfirm, onCancel }: {
@@ -28,15 +27,14 @@ export function ConfirmDialog({ id, title, text, confirm, cancel, danger, onConf
 type Picture = { kind: 'loading' } | { kind: 'shown'; url: string } | { kind: 'failed' } | { kind: 'deleted' };
 
 /**
- * One saved try-on: the picture (a Blob URL revoked on replace and unmount), its label and Delete with a confirm. It
- * leaves the view at its expiry time or when the server no longer has it.
+ * One saved try-on: the picture (a Blob URL revoked on replace and unmount), its label and Delete with a confirm. It stays until
+ * the owner deletes it; it leaves the view when the server no longer has it.
  */
-export function TryOnPicture({ api, result, language, t, online, idPrefix, children, onDeleted }: {
-  api: TryOnClient; result: { id: string; expiresAtMs: number | null }; language: Language; t: Translate; online: boolean;
+export function TryOnPicture({ api, result, t, online, idPrefix, children, onDeleted }: {
+  api: TryOnClient; result: { id: string }; t: Translate; online: boolean;
   idPrefix: string; children?: ReactNode; onDeleted?: () => void;
 }) {
   const [picture, setPicture] = useState<Picture>({ kind: 'loading' });
-  const [expires, setExpires] = useState<number | null>(result.expiresAtMs);
   const [attempt, setAttempt] = useState(0);
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -49,15 +47,6 @@ export function TryOnPicture({ api, result, language, t, online, idPrefix, child
     let url: string | null = null;
     setPicture({ kind: 'loading' });
     (async () => {
-      let expiry = result.expiresAtMs;
-      if (expiry === null) {
-        const list = await api.results(controller.signal);
-        if (controller.signal.aborted) return;
-        const found = list === 'missing' ? undefined : list.find(entry => entry.id === result.id);
-        if (!found) { setPicture({ kind: 'deleted' }); return; }
-        expiry = found.expiresAtMs;
-      }
-      setExpires(expiry);
       const image = await api.resultImage(result.id, controller.signal);
       if (controller.signal.aborted) return;
       if (image.kind === 'code') { setPicture(image.code === 'NOT_FOUND' ? { kind: 'deleted' } : { kind: 'failed' }); return; }
@@ -65,14 +54,7 @@ export function TryOnPicture({ api, result, language, t, online, idPrefix, child
       setPicture({ kind: 'shown', url });
     })().catch(() => { if (!controller.signal.aborted) setPicture({ kind: 'failed' }); });
     return () => { controller.abort(); if (url) URL.revokeObjectURL(url); };
-  }, [api, result.id, result.expiresAtMs, attempt, gone]);
-  useEffect(() => {
-    if (expires === null || gone) return;
-    const remaining = expires - Date.now();
-    if (remaining <= 0) { setPicture({ kind: 'deleted' }); return; }
-    const timer = setTimeout(() => setPicture({ kind: 'deleted' }), Math.min(remaining, 2_147_483_647));
-    return () => clearTimeout(timer);
-  }, [expires, gone]);
+  }, [api, result.id, attempt, gone]);
   // The latest callback, so a parent re-render with a new closure doesn't report the same removal again.
   const deleted = useRef(onDeleted);
   deleted.current = onDeleted;
@@ -90,7 +72,7 @@ export function TryOnPicture({ api, result, language, t, online, idPrefix, child
       : picture.kind === 'failed' ? <div className="notice notice-error" role="alert"><span>{t('tryon.resultFailed')}</span>
         <button type="button" className="text-button" disabled={!online} onClick={() => setAttempt(value => value + 1)}>{t('common.retry')}</button></div>
       : <p role="status">{t('tryon.loadingResult')}</p>}
-    {expires !== null && <figcaption>{t('tryon.madeWith', { date: deletionDate(expires, language) })}</figcaption>}
+    <figcaption>{t('tryon.madeWith')}</figcaption>
     {deleteFailed && <div className="notice notice-error" role="alert"><span>{t('tryon.deleteFailed')}</span></div>}
     <div className="outfit-actions">
       <button ref={deleteButton} id={`${idPrefix}-delete`} type="button" className="button button-secondary" disabled={!online || deleting}

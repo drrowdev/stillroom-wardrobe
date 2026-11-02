@@ -96,7 +96,7 @@ export function OutfitDetail(props: Shared & { id: string | null; timeZone: stri
         <button type="button" className="button button-secondary" disabled={!online || blocked || view.loading || !!view.error}
           onClick={event => { event.currentTarget.focus(); setConfirmation(structuredClone(record)); }}>{t('wardrobe.moveSelected')}</button>
       </OutfitSummary>}
-    {!editView && record && !trashed && <SavedTryOns client={client} scope={scope} outfitId={record.id} online={online} language={props.language} t={t} />}
+    {!editView && record && !trashed && <SavedTryOns client={client} scope={scope} outfitId={record.id} online={online} t={t} />}
     {confirmation && <OutfitLifecycleDialog title={t('outfitTrash.confirmName', { name: confirmation.title })} body={t('outfitTrash.preserve')}
       action={t('wardrobe.moveSelected')} lifecycle={props.lifecycle} online={online} t={t} onCancel={() => setConfirmation(null)}
       onConfirm={() => { void props.lifecycle.execute([confirmation], 'trash').then(result => {

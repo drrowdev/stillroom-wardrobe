@@ -412,7 +412,7 @@ async function main() {
     // (whose final anomaly closes the shared image capacity). A three-step chain for A and a one-step chain for B, then
     // foreign-ID, no-dispatch negatives and one filtered step. The body photo goes only to the double.
     {
-      const MANIFEST = 'azure-global-image25-sunburst-tryon-v1';
+      const MANIFEST = 'azure-global-image25-sunburst-tryon-v2';
       const hex = (bytes) => createHash('sha256').update(bytes).digest('hex');
       const id = (owner, n) => gateId(owner.label, n, '9');
       const person = (height = 1280, colour = undefined) => flatBaselineJpeg(1024, height, colour);
@@ -440,7 +440,7 @@ async function main() {
       const released = (r) => r.status === 200 && r.jpeg && r.noStore && Buffer.from(r.bytes).equals(expected) && r.sha === hex(expected);
       const refused = (r, status, code) => r.status === status && !r.jpeg && isDeepStrictEqual(r.data, { code }) && r.bytes.length < 256;
       const completed = (r) => r.status === 200 && !r.jpeg && r.noStore && r.data?.code === 'OK' && typeof r.data.resultId === 'string'
-        && Number.isSafeInteger(r.data.expiresAtMs);
+        && isDeepStrictEqual(Object.keys(r.data).sort(), ['code', 'resultId']);
       const tryonStatus = (owner) => client.rpc(owner, 'tryon_status', {});
       for (const owner of [A, B]) {
         const status = await tryonStatus(owner);
@@ -534,7 +534,7 @@ async function main() {
       check(PROVIDER, 'tryon-frozen-same-token', refused(frozenTryOn, 403, 'UNAVAILABLE'), summary(frozenTryOn));
       const revoked = await client.rpc(B, 'tryon_set_consent', { p_enabled: false, p_notice_revision: null });
       const noConsent = await tryOn(B.token, fields(id(B, 33), 1, id(B, 4), outfitB), person());
-      const reconsented = await client.rpc(B, 'tryon_set_consent', { p_enabled: true, p_notice_revision: 2 });
+      const reconsented = await client.rpc(B, 'tryon_set_consent', { p_enabled: true, p_notice_revision: 3 });
       check(PROVIDER, 'tryon-consent-required', revoked?.code === 'CONSENT_REQUIRED' && refused(noConsent, 403, 'CONSENT_REQUIRED')
         && reconsented?.code === 'OK', { revoked: revoked?.code, call: summary(noConsent) });
       counted = await count();

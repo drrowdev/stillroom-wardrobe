@@ -9,6 +9,8 @@ import messages from '../../src/i18n/tryon.json';
 // The owner-approved try-on notice (G5a, #84), revision 1, with the backup retention settled at G3 (7 days, Supabase
 // daily backups; no PITR). Revision 1 is frozen: literal revision, literal four keys, never edited. Revision 2 (TRYON-PHOTO1)
 // states the one saved reference photo and has its own five keys and pin below.
+const REVISION_2_KEYS = ['tryonC.notice2Sent', 'tryonC.notice2Saved', 'tryonC.notice2Result', 'tryonC.notice2Processing', 'tryonC.notice2Charges'] as const;
+// Revision 3 (TRYON-LIMITS1) is the notice the app asks consent for: a saved picture stays until the owner deletes it.
 const REVISION_1_KEYS = ['tryonC.noticeSent', 'tryonC.noticeResult', 'tryonC.noticeProcessing', 'tryonC.noticeCharges'] as const;
 const text = (key: keyof typeof messages) => messages[key];
 const languages = ['en', 'fi', 'sv'] as const;
@@ -54,14 +56,12 @@ describe('try-on notice (revision 1, frozen)', () => {
   });
 });
 
-describe('try-on notice (revision 2, TRYON-PHOTO1)', () => {
-  it('is the notice the app asks consent for, in the order sent, saved photo, result, processing, charges', () => {
-    expect(TRYON_NOTICE_REVISION).toBe(2);
-    expect(TRYON_NOTICE_KEYS).toEqual(['tryonC.notice2Sent', 'tryonC.notice2Saved', 'tryonC.notice2Result', 'tryonC.notice2Processing', 'tryonC.notice2Charges']);
-    for (const key of TRYON_NOTICE_KEYS) for (const language of languages) expect(text(key)[language], `${key} ${language}`).not.toMatch(/\{\w+\}/);
+describe('try-on notice (revision 2, TRYON-PHOTO1, frozen)', () => {
+  it('has five keys in the order sent, saved photo, result, processing, charges, with no placeholder left', () => {
+    for (const key of REVISION_2_KEYS) for (const language of languages) expect(text(key)[language], `${key} ${language}`).not.toMatch(/\{\w+\}/);
   });
   it('pins revision 2 over EN, FI and SV', () => {
-    const notice = JSON.stringify({ noticeRevision: 2, ...Object.fromEntries(TRYON_NOTICE_KEYS.map((key) => [key, messages[key]])) });
+    const notice = JSON.stringify({ noticeRevision: 2, ...Object.fromEntries(REVISION_2_KEYS.map((key) => [key, messages[key]])) });
     expect(createHash('sha256').update(notice).digest('hex')).toBe('34b6999740a19e5089bc8d9969146c8313755b629bc61cf63bf2ad0c3b453baa');
   });
   it('no longer says the photo is never saved, and says exactly what is kept', () => {
@@ -90,13 +90,53 @@ describe('try-on notice (revision 2, TRYON-PHOTO1)', () => {
 });
 
 
+describe('try-on notice (revision 3, TRYON-LIMITS1)', () => {
+  it('is the notice the app asks consent for, in the order sent, saved photo, result, processing, charges', () => {
+    expect(TRYON_NOTICE_REVISION).toBe(3);
+    expect(TRYON_NOTICE_KEYS).toEqual(['tryonC.notice3Sent', 'tryonC.notice3Saved', 'tryonC.notice3Result', 'tryonC.notice3Processing', 'tryonC.notice3Charges']);
+    for (const key of TRYON_NOTICE_KEYS) for (const language of languages) expect(text(key)[language], `${key} ${language}`).not.toMatch(/\{\w+\}/);
+  });
+  it('pins revision 3 over EN, FI and SV', () => {
+    const notice = JSON.stringify({ noticeRevision: 3, ...Object.fromEntries(TRYON_NOTICE_KEYS.map((key) => [key, messages[key]])) });
+    expect(createHash('sha256').update(notice).digest('hex')).toBe('9abc1086ac47b0f1621e5a24c24a17ed97ce64ea0efabcca0b7092e6f7ba87e8');
+  });
+  it('keeps the sent, saved photo, processing and charge statements word for word', () => {
+    for (const language of languages) {
+      for (const [now, before] of [['tryonC.notice3Sent', 'tryonC.notice2Sent'], ['tryonC.notice3Saved', 'tryonC.notice2Saved'],
+        ['tryonC.notice3Processing', 'tryonC.notice2Processing'], ['tryonC.notice3Charges', 'tryonC.notice2Charges']] as const) {
+        expect(text(now)[language], `${now} ${language}`).toBe(text(before)[language]);
+      }
+    }
+  });
+  it('says the picture is kept until you delete it, and no longer names a number of days for it', () => {
+    const result = text('tryonC.notice3Result');
+    expect(result.en).toContain('Of the generated pictures, only the final one is kept');
+    expect(result.en).toContain('saved privately in your account until you delete it');
+    expect(result.en).toContain('for up to 7 days after you delete it');
+    expect(result.fi).toContain('kunnes poistat sen');
+    expect(result.fi).toContain('enintään 7 päivää poistamisen jälkeen');
+    expect(result.sv).toContain('tills du tar bort den');
+    expect(result.sv).toContain('i upp till 7 dagar efter att du har tagit bort den');
+    expect(result.en).toContain('"Made with AI"');
+    expect(result.fi).toContain('"Tehty tekoälyllä"');
+    expect(result.sv).toContain('"Gjord med AI"');
+    for (const language of languages) expect(result[language]).not.toMatch(/for 7 days, unless|7 päiväksi|i 7 dagar, om du/);
+  });
+  it('has the slot labels for the three new garment kinds and a caption without a date', () => {
+    for (const key of ['tryon.slot.layer', 'tryon.slot.outerwear', 'tryon.slot.accessory'] as const) {
+      for (const language of languages) expect(messages[key][language].length, `${key} ${language}`).toBeGreaterThan(2);
+    }
+    for (const language of languages) expect(messages['tryon.madeWith'][language]).not.toMatch(/\{date\}/);
+  });
+});
+
 describe('Turn on (fail closed)', () => {
   const raw = (over: Record<string, unknown> = {}, policy: Record<string, unknown> = {}) => parseTryOnStatus({
     code: 'CONSENT_REQUIRED', period: '2026-10', serverTimeMs: Date.parse('2026-10-05T00:00:00Z'),
     consent: { enabled: false, noticeRevision: null, consentedAt: null },
     policy: { activated: true, noticeRevision: TRYON_NOTICE_REVISION, manifestId: TRYON_MANIFEST, modelId: TRYON_MODEL,
       maxRequestMicro: '400000',
-      maxSteps: 3, maxResults: 20, resultDays: 7, providerAvailable: true, ...policy },
+      maxSteps: 6, maxResults: 200, providerAvailable: true, ...policy },
     results: 0, budget: { monthlyAllowanceMicro: '20000000', usedMicro: '0', remainingMicro: '20000000', warning: false }, ...over });
   const view = (status: ReturnType<typeof raw>, consentOn = false) => {
     const state: TryOnState = { read: { kind: 'ready', status: status! }, known: true, unresolved: false, reading: false, writing: false, settingsError: null };

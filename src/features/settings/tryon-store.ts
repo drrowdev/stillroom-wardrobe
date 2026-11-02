@@ -26,11 +26,12 @@ export type PhotoState = {
 export const initialPhoto: PhotoState = { read: 'unknown', saved: null, busy: null, error: null };
 
 /**
- * The notice (revision 2, TRYON-PHOTO1) states the one reusable saved photo. Revision 1 is kept frozen in
- * tests/unit/tryon-notice.test.ts; its keys stay in the catalogue and are never shown. Pinned in tryon-notice.test.ts.
+ * The notice (revision 3, TRYON-LIMITS1) says a saved picture stays until the owner deletes it; it still states the one reusable
+ * saved photo (revision 2). Revisions 1 and 2 are kept frozen in tests/unit/tryon-notice.test.ts; their keys stay in the catalogue and are
+ * never shown. Pinned in tryon-notice.test.ts.
  */
 export const TRYON_NOTICE_KEYS = [
-  'tryonC.notice2Sent', 'tryonC.notice2Saved', 'tryonC.notice2Result', 'tryonC.notice2Processing', 'tryonC.notice2Charges',
+  'tryonC.notice3Sent', 'tryonC.notice3Saved', 'tryonC.notice3Result', 'tryonC.notice3Processing', 'tryonC.notice3Charges',
 ] as const satisfies readonly MessageKey[];
 
 export class TryOnStore {

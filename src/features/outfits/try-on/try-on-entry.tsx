@@ -3,7 +3,7 @@ import type { OwnerScope } from '../../../auth/session';
 import type { AppClient } from '../../../data/client';
 import { tryOnReady } from '../../../data/tryon';
 import type { OutfitComponent, OutfitRecord } from '../../../domain/outfits';
-import type { Language, Translate } from '../../../i18n';
+import type { Translate } from '../../../i18n';
 import '../../../i18n/tryon';
 import { tryOnStoreFor } from '../../settings/tryon-store';
 import { tryOnSelection, useOutfitTryOns, useTryOnStatus } from '../use-try-on';
@@ -25,14 +25,19 @@ export function TryOnButton({ client, scope, record, components, disabled, t, on
  * when opened. The ideas' metadata list is read whenever the device is online, whatever the try-on status says (the status
  * read may fail, and saved pictures must not vanish with it); a failed read is shown with Retry.
  */
-export function SavedTryOns({ client, scope, outfitId, online, language, t }: {
-  client: AppClient; scope: OwnerScope; outfitId: string | null; online: boolean; language: Language; t: Translate;
+/** Up to 200 pictures can be saved, so they show one page at a time: only this page's pictures are mounted and loaded, and a
+ * picture's Blob URL is revoked when its page is left. */
+export const SAVED_PAGE = 6;
+
+export function SavedTryOns({ client, scope, outfitId, online, t }: {
+  client: AppClient; scope: OwnerScope; outfitId: string | null; online: boolean; t: Translate;
 }) {
   const store = tryOnStoreFor(client, scope);
   const status = useTryOnStatus(store);
   const { state, retry } = useOutfitTryOns(store?.api ?? null, outfitId, outfitId === null ? online : status !== null && status.results > 0);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [open, setOpen] = useState(false);
+  const [page, setPage] = useState(0);
   // Idempotent: reporting the same removal again changes nothing and renders nothing.
   const remove = useCallback((id: string) => setRemoved(current => current.has(id) ? current : new Set(current).add(id)), []);
   if (!store) return null;
@@ -45,14 +50,25 @@ export function SavedTryOns({ client, scope, outfitId, online, language, t }: {
   }
   if (state.kind !== 'ready' || !state.results.length) return null;
   const shown = state.results.filter(result => !removed.has(result.id));
-  const body = <>
+  // The paging buttons are aria-disabled at the ends, not disabled, so the one just pressed keeps keyboard focus.
+  // Deleting the last picture of a page moves back one page; deleting any other refills the page from the next one.
+  const pages = Math.max(1, Math.ceil(shown.length / SAVED_PAGE));
+  const current = Math.min(page, pages - 1);
+  const visible = shown.slice(current * SAVED_PAGE, (current + 1) * SAVED_PAGE);  const body = <>
     {removed.size > 0 && <p role="status">{t('tryon.deleted')}</p>}
     {shown.length > 0 && <ul className="tryon-saved-list">
-      {shown.map(result => <li key={result.id}>
-        <TryOnPicture api={store.api} result={result} language={language} t={t} online={online} idPrefix={`tryon-${result.id}`}
+      {visible.map(result => <li key={result.id}>
+        <TryOnPicture api={store.api} result={result} t={t} online={online} idPrefix={`tryon-${result.id}`}
           onDeleted={() => remove(result.id)} />
       </li>)}
     </ul>}
+    {pages > 1 && <nav className="outfit-actions" aria-label={t('tryon.pages')}>
+      <button id="tryon-saved-prev" type="button" className="button button-secondary" aria-disabled={current === 0 || undefined}
+        onClick={() => { if (current > 0) setPage(current - 1); }}>{t('tryon.prevPage')}</button>
+      <span id="tryon-saved-page" role="status">{t('tryon.pageOf', { page: current + 1, pages })}</span>
+      <button id="tryon-saved-next" type="button" className="button button-secondary" aria-disabled={current === pages - 1 || undefined}
+        onClick={() => { if (current < pages - 1) setPage(current + 1); }}>{t('tryon.nextPage')}</button>
+    </nav>}
   </>;
   if (outfitId === null) {
     if (!shown.length && !removed.size) return null;
