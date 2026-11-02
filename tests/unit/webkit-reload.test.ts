@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Locator, Page } from '@playwright/test';
-import { BLANK_RELOAD_DISCLOSURE, RELOAD_RETRY_DISCLOSURE, isWebKitInternalReloadError, reloadUntilVisible, retryWebKitInternalReload } from '../browser/webkit-reload';
+import type { Page } from '@playwright/test';
+import { RELOAD_RETRY_DISCLOSURE, isWebKitInternalReloadError, retryWebKitInternalReload } from '../browser/webkit-reload';
 
 const internal = 'page.reload: WebKit encountered an internal error';
 const callLog = `${internal}\nCall log:\n  - waiting for navigation until "load"\n`;
@@ -70,65 +70,6 @@ describe('WebKit internal reload error', () => {
       `\x1b[31m${internal}\x1b[39m`,
     ]) expect(isWebKitInternalReloadError(failure(message)), JSON.stringify(message)).toBe(false);
     expect(isWebKitInternalReloadError(failure(dimmed, 'TimeoutError'))).toBe(false);
-  });
-});
-
-describe('reloadUntilVisible', () => {
-  const timeout = () => failure('locator.waitFor: Timeout 8000ms exceeded.', 'TimeoutError');
-  function pageAndLocator(browser: string, waits: (Error | 'ok')[], closed = false) {
-    const { page, calls } = fakePage(browser, ['ok', 'ok', 'ok']);
-    const timeouts: unknown[] = [];
-    const ready = { waitFor: async (options: unknown) => {
-      timeouts.push(options);
-      const next = waits.shift();
-      if (next === undefined) throw new Error('unexpected extra wait');
-      if (next !== 'ok') throw next;
-    } };
-    Object.assign(page, { isClosed: () => closed });
-    return { page, ready: ready as unknown as Locator, calls, timeouts };
-  }
-
-  it('reloads once when the page shows', async () => {
-    const { page, ready, calls } = pageAndLocator('webkit', ['ok']);
-    const disclosures: string[] = [];
-    await reloadUntilVisible(page, ready, (text) => { disclosures.push(text); });
-    expect(calls).toHaveLength(1);
-    expect(disclosures).toEqual([]);
-  });
-
-  it('reloads one more time, with a fixed disclosure, when WebKit shows nothing', async () => {
-    const { page, ready, calls, timeouts } = pageAndLocator('webkit', [timeout()]);
-    const disclosures: string[] = [];
-    await reloadUntilVisible(page, ready, (text) => { disclosures.push(text); }, 5_000);
-    expect(calls).toHaveLength(2);
-    expect(timeouts).toEqual([{ state: 'visible', timeout: 5_000 }]);
-    expect(disclosures).toEqual([BLANK_RELOAD_DISCLOSURE]);
-    for (const leaked of ['http', 'Call log', '\x1b', '\n']) expect(BLANK_RELOAD_DISCLOSURE).not.toContain(leaked);
-  });
-
-  it('never waits after the second reload, so a second blank page is left to the caller\'s assertion', async () => {
-    const { page, ready, timeouts } = pageAndLocator('webkit', [timeout()]);
-    await reloadUntilVisible(page, ready, () => {});
-    expect(timeouts).toHaveLength(1);
-  });
-
-  it('propagates other errors and a closed page without reloading again', async () => {
-    for (const [error, closed] of [[failure('locator.waitFor: strict mode violation'), false], [timeout(), true]] as const) {
-      const { page, ready, calls } = pageAndLocator('webkit', [error], closed);
-      const disclosures: string[] = [];
-      await expect(reloadUntilVisible(page, ready, (text) => { disclosures.push(text); })).rejects.toBe(error);
-      expect(calls).toHaveLength(1);
-      expect(disclosures).toEqual([]);
-    }
-  });
-
-  it('only reloads other engines, without waiting', async () => {
-    for (const browser of ['chromium', 'firefox']) {
-      const { page, ready, calls, timeouts } = pageAndLocator(browser, []);
-      await reloadUntilVisible(page, ready, () => { throw new Error('must not disclose'); });
-      expect(calls).toHaveLength(1);
-      expect(timeouts).toEqual([]);
-    }
   });
 });
 

@@ -1,4 +1,4 @@
-import type { Locator, Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 
 const PRIMARY = 'page.reload: WebKit encountered an internal error';
 const SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
@@ -31,25 +31,6 @@ async function annotate(disclosure: string) {
 // 36473606093 and the CI1 K2 runs). This mitigates the engine error; it does not fix it. Budget: at most one retry
 // per page.reload() call, with the same options. Every retry is disclosed as a test annotation and one stderr line,
 // a second failure propagates, and the test's assertions after the reload run unchanged.
-// Playwright reports this when the page loads but never shows the app (a WebKit page loss after a reload that the
-// "internal error" retry above cannot see). Fixed text only, like the disclosure above.
-export const BLANK_RELOAD_DISCLOSURE = 'page.reload: the page did not show after a WebKit reload; reloaded once more';
-
-// Reloads and waits for `ready` to show. On WebKit only, when it does not show within `window` ms the page is reloaded once
-// more and the retry is disclosed; the caller's own assertion then decides the outcome, so a second blank page still fails.
-export async function reloadUntilVisible(page: Page, ready: Locator, report: ReloadRetryReporter = annotate, window = 8_000) {
-  await page.reload();
-  if (page.context().browser()?.browserType().name() !== 'webkit') return;
-  try {
-    await ready.waitFor({ state: 'visible', timeout: window });
-    return;
-  } catch (error) {
-    if (page.isClosed() || !(error instanceof Error) || error.name !== 'TimeoutError') throw error;
-  }
-  await report(BLANK_RELOAD_DISCLOSURE);
-  await page.reload();
-}
-
 export function retryWebKitInternalReload(page: Page, report: ReloadRetryReporter = annotate) {
   if (wrapped.has(page) || page.context().browser()?.browserType().name() !== 'webkit') return;
   wrapped.add(page);
