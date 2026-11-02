@@ -64,6 +64,9 @@ describe('TRYON-PROMPT1 migration', () => {
       // The header of the function (signature, security definer, empty search_path, lock_timeout) is restated unchanged.
       expect(after.split('\n').slice(0, 2).join('\n')).toBe(before.split('\n').slice(0, 2).join('\n'));
       expect(after).not.toContain(V2);
+      // Exact equality: the body is the previous body byte for byte with only the manifest literal replaced (the SQL postcondition
+      // proves the same on the installed body).
+      expect(after).toBe(before.replaceAll(V2, V3));
     });
   }
 
@@ -115,6 +118,13 @@ describe('TRYON-PROMPT1 migration', () => {
     expect(sql).toContain("exists(select 1 from private.tryon_chains where state='running' and expires_at>clock_timestamp())");
     expect(sql).toContain("exists(select 1 from private.ai_usage where purpose='try_on' and charge_state='held')");
     expect(sql).toContain('a try-on is still running; drain first');
+    // The drain check is atomic with the cutover: the writers' tables are locked before it, inside the same transaction.
+    expect(sql).toContain('lock table private.tryon_chains, private.ai_usage, private.ai_controls in share row exclusive mode;');
+    expect(sql.indexOf('lock table')).toBeLessThan(sql.indexOf("exists(select 1 from private.tryon_chains where state='running'"));
+    expect(sql.indexOf('lock table')).toBeLessThan(sql.indexOf('insert into private.ai_execution_manifests'));
+    expect(sql).toContain("set_config('tryon_prompt1.claim'");
+    expect(sql).toContain("set_config('tryon_prompt1.bootstrap'");
+    expect(sql).toContain('a replaced function differs from the installed body beyond the manifest literal');
     expect(sql.indexOf('TRYON-PROMPT1 postcondition')).toBeGreaterThan(sql.lastIndexOf('create or replace function'));
     expect(sql.trimEnd().endsWith('end;\n$$;\n\ncommit;')).toBe(true);
   });

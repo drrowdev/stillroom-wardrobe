@@ -1099,9 +1099,11 @@ unfastened by default so the clothing underneath stays visible. Adds `2026110209
   v2 -> v3 and replaces only `tryon_claim` and `tryon_bootstrap` (the only latest definitions that name the manifest; the one literal
   changes, proven line by line in `tests/unit/tryon-prompt-schema.test.ts`). Every other try-on function compares with the account's
   configured manifest. Consent, the notice revision, results, chains and the saved reference photo are not written; the photo guard
-  runs only when consent no longer equals the notice, so **the saved reference photo stays**. The migration refuses to run while a
-  try-on is running or a try-on charge is held (drain first), and checks afterwards that v3 is on the shared deployment key, no
-  account is left on v2, no consent changed and the v2 row is unchanged.
+  runs only when consent no longer equals the notice, so **the saved reference photo stays**. The migration locks the tables a claim
+  or finish writes (reads continue) and then refuses to run while a try-on is running or a try-on charge is held (drain first), so
+  nothing can start between the check and the commit. Afterwards it checks that v3 is on the shared deployment key, no
+  account is left on v2, no consent changed, the v2 row is unchanged and both replaced functions equal the installed bodies except
+  for the manifest literal.
 - **Wire contract.** Unchanged (`tryon_status` keys, results, step replies). Only the manifest id the Edge function and the app require
   moved to v3.
 

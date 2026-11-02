@@ -14,12 +14,16 @@
 -- Rollout (docs/cloud-development.md): drain (no running chain, no held try-on charge; this migration refuses otherwise), apply,
 -- deploy the try-on Edge function, then Pages, back to back. A client or Edge function from another version fails closed.
 begin;
+set local lock_timeout = '10s';
 
 -- Preconditions: both replaced functions exist with the reviewed properties, v2 and its deployment are installed on the shared
--- key, v3 is not, and nothing is in flight (a step across the cutover would settle as UNAVAILABLE and strand its chain).
+-- key, v3 is not, and nothing is in flight (a step across the cutover would settle as UNAVAILABLE and strand its chain). The tables
+-- a claim or finish writes are locked first (share row exclusive: reads continue, writers wait), so no try-on can start between the
+-- check and the commit; a claim that already holds a lock finishes first and is then seen by the check.
 do $$
 declare f regprocedure; p pg_catalog.pg_proc;
 begin
+  lock table private.tryon_chains, private.ai_usage, private.ai_controls in share row exclusive mode;
   foreach f in array array['public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[])',
     'public.tryon_bootstrap(uuid,text,integer,bigint,bigint,integer)']::regprocedure[] loop
     select * into p from pg_catalog.pg_proc where oid=f;
@@ -46,6 +50,13 @@ begin
     (select md5(to_jsonb(m)::text) from private.ai_execution_manifests m where id='azure-global-image25-sunburst-tryon-v2'),true);
   perform set_config('tryon_prompt1.consented',
     (select count(*) from private.ai_controls where tryon_consent_revision is not null)::text,true);
+  -- The installed bodies with only the manifest literal changed: the replacement must reproduce exactly these bytes.
+  perform set_config('tryon_prompt1.claim',(select md5(replace(prosrc,'azure-global-image25-sunburst-tryon-v2',
+    'azure-global-image25-sunburst-tryon-v3')) from pg_catalog.pg_proc
+    where oid='public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[])'::regprocedure),true);
+  perform set_config('tryon_prompt1.bootstrap',(select md5(replace(prosrc,'azure-global-image25-sunburst-tryon-v2',
+    'azure-global-image25-sunburst-tryon-v3')) from pg_catalog.pg_proc
+    where oid='public.tryon_bootstrap(uuid,text,integer,bigint,bigint,integer)'::regprocedure),true);
 end;
 $$;
 
@@ -268,7 +279,7 @@ end;
 $$;
 
 -- Postconditions: v3 is installed on the shared deployment key, no configured account is left at v2, no account lost its consent, the
--- v2 row is as it was, and both replaced bodies name v3 and no longer name v2.
+-- v2 row is as it was, and both replaced bodies equal the installed ones except for the manifest literal.
 do $$
 begin
   if (select count(distinct deployment_key) from private.provider_deployments
@@ -287,11 +298,13 @@ begin
       is distinct from current_setting('tryon_prompt1.v2_row') then
     raise exception 'TRYON-PROMPT1 postcondition: the v2 manifest changed';
   end if;
-  if (select count(*) from pg_catalog.pg_proc where oid in (
-        'public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[])'::regprocedure,
-        'public.tryon_bootstrap(uuid,text,integer,bigint,bigint,integer)'::regprocedure)
-      and prosrc like '%azure-global-image25-sunburst-tryon-v3%' and prosrc not like '%azure-global-image25-sunburst-tryon-v2%')<>2 then
-    raise exception 'TRYON-PROMPT1 postcondition: a replaced function does not name v3 alone';
+  if (select md5(prosrc) from pg_catalog.pg_proc
+        where oid='public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[])'::regprocedure)
+      is distinct from current_setting('tryon_prompt1.claim')
+    or (select md5(prosrc) from pg_catalog.pg_proc
+        where oid='public.tryon_bootstrap(uuid,text,integer,bigint,bigint,integer)'::regprocedure)
+      is distinct from current_setting('tryon_prompt1.bootstrap') then
+    raise exception 'TRYON-PROMPT1 postcondition: a replaced function differs from the installed body beyond the manifest literal';
   end if;
 end;
 $$;
