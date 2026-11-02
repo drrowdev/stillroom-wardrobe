@@ -761,6 +761,15 @@ button.item-select[aria-pressed="true"] .select-mark { background: var(--ink); c
 .profile-photo-preview { display: block; width: min(100%, 220px); height: auto; aspect-ratio: 4 / 5; object-fit: contain; background: var(--well); border-radius: 12px; margin-top: 12px; }
 .tryon-result { margin: 0; min-width: 0; }
 .tryon-result img { display: block; width: 100%; height: auto; max-height: 640px; object-fit: contain; background: var(--surface); border-radius: 12px; }
-.tryon-garments, .tryon-steps, .tryon-saved-list { margin: 0; padding-inline-start: 1.25rem; min-width: 0; overflow-wrap: anywhere; }
+.tryon-garments, .tryon-saved-list { margin: 0; padding-inline-start: 1.25rem; min-width: 0; overflow-wrap: anywhere; }
+.tryon-progress { display: grid; gap: 14px; min-width: 0; }
+.tryon-frame { position: relative; overflow: hidden; width: 100%; aspect-ratio: 4 / 5; max-height: 640px; border-radius: 12px; background: var(--surface); }
+.tryon-frame::after { content: ''; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 30%, rgb(255 255 255 / .6) 50%, transparent 70%); transform: translateX(-100%); animation: tryon-sweep 1.8s ease-in-out infinite; }
+.tryon-bar { display: flex; gap: 6px; }
+.tryon-bar span { flex: 1 1 0; height: 6px; border-radius: 3px; background: var(--border); }
+.tryon-bar span[data-state="done"], .tryon-bar span[data-state="now"] { background: var(--primary); }
+.tryon-bar span[data-state="now"] { animation: breathe 1.4s ease-in-out infinite; }
+@keyframes tryon-sweep { to { transform: translateX(100%); } }
+@media (max-width: 720px) { .tryon-frame { max-height: 420px; } }
 .tryon-page .button, .tryon-page .text-button { min-height: 44px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 720px) { .tryon-result img { max-height: 420px; } }

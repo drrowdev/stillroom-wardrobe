@@ -122,6 +122,10 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const [outfitNotice, setOutfitNotice] = useState<string | null>(null);
   const [outfitSeed, setOutfitSeed] = useState<{ itemIds: string[]; occasion: string } | null>(null);
   const [tryOnIdea, setTryOnIdea] = useState<TryOnIdeaSeed | null>(null);
+  // The one try-on route the Try on button just opened. It is bound to that route and used once by the screen it mounts; a typed link,
+  // reload or history step starts nothing by itself.
+  const [tryOnIntent, setTryOnIntent] = useState<string | null>(null);
+  const tryOnUsed = useCallback(() => setTryOnIntent(null), []);
   const [calendarSeed, setCalendarSeed] = useState<{ outfitId: string } | null>(null);
   const invalidateOutfits = useCallback(() => setOutfitsInvalidation(value => value + 1), []);
   useEffect(() => {
@@ -129,6 +133,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     setOutfitNotice(current => current !== null && route !== `outfit:${current}` ? null : current);
     if (route !== 'outfit-new') setOutfitSeed(null);
     if (route !== 'today-try-on') setTryOnIdea(null);
+    setTryOnIntent(current => current === route ? current : null);
     if (route !== 'calendar') setCalendarSeed(null);
   }, [route, onRouteCommitted]);
   const browse = useWardrobeBrowse(client, scope, language, online);
@@ -336,10 +341,10 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
           : route === 'outfits' ? <OutfitsScreen client={client} scope={scope} invalidation={outfitsInvalidation} images={images} online={online} language={language} t={t} lifecycle={outfitLifecycle}
             onCreate={() => changeRoute('outfit-new')} onAddItem={() => changeRoute('add')} />
           : route === 'outfit-new' ? <NewOutfit key={outfitSeed ? outfitSeed.itemIds.join('|') : 'blank'} {...outfitProps} initial={outfitSeed ?? undefined} />
-          : route.startsWith('outfit:') && route.endsWith(TRYON_ROUTE) ? <TryOnScreen key={route} client={client} scope={scope} id={outfitRouteId(route.slice(7, -TRYON_ROUTE.length))}
+          : route.startsWith('outfit:') && route.endsWith(TRYON_ROUTE) ? <TryOnScreen key={route} client={client} scope={scope} id={outfitRouteId(route.slice(7, -TRYON_ROUTE.length))} armed={tryOnIntent === route} onArmUsed={tryOnUsed}
             online={online} language={language} t={t} onBack={() => changeRoute(route.slice(0, -TRYON_ROUTE.length) as WorkspaceRoute)} />
           : route.startsWith('outfit:') ? <OutfitDetail key={route} {...outfitProps} id={outfitRouteId(route.slice(7))} timeZone={profile.timezone} language={language} lifecycle={outfitLifecycle}
-            onTryOn={() => changeRoute(`${route}${TRYON_ROUTE}` as WorkspaceRoute)}
+            onTryOn={() => { setTryOnIntent(`${route}${TRYON_ROUTE}`); changeRoute(`${route}${TRYON_ROUTE}` as WorkspaceRoute); }}
             onPlan={outfitId => { setCalendarSeed({ outfitId }); changeRoute('calendar'); }} onWorn={invalidateHistory} onWriting={onWriting} />
           : route === 'calendar' ? <CalendarScreen client={client} scope={scope} online={online} language={language} t={t} timeZone={profile.timezone}
             invalidation={outfitsInvalidation} seed={calendarSeed} onSeedUsed={calendarSeedUsed} onChanged={invalidateHistory} onWriting={onWriting} />
