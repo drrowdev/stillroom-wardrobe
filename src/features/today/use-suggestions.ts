@@ -94,13 +94,10 @@ export function rankingPairs(fresh: ReadonlySet<string>, ranked: ReadonlySet<str
   for (const pair of changed) if (ranked.has(pair)) result.add(pair); else result.delete(pair);
   return result;
 }
-// Ideas on the page holding a pair avoided since the page was drawn are left out, except the cards in `kept`: a card whose
-// pair choice is still being written or settled.
-export function visibleIdeas(suggestions: readonly Suggestion[], live: ReadonlySet<string>, ranked: ReadonlySet<string>,
-  kept: { has(key: string): boolean }): Suggestion[] {
-  const added = [...live].filter(pair => !ranked.has(pair)).map(pair => pair.split('|'));
-  return suggestions.filter(suggestion => kept.has(suggestion.key)
-    || !added.some(([low, high]) => suggestion.itemIds.includes(low!) && suggestion.itemIds.includes(high!)));
+// The page keeps every idea except the cards whose "Don't suggest these together" was confirmed: only that card goes, even when
+// other ideas on the page hold the same pair. The pair itself keeps those ideas off the next pages and later reads.
+export function visibleIdeas(suggestions: readonly Suggestion[], dismissed: { has(key: string): boolean }): Suggestion[] {
+  return suggestions.filter(suggestion => !dismissed.has(suggestion.key));
 }
 
 export type WeatherContext = Pick<EngineContext, 'setting' | 'temperatureC' | 'rainProbability' | 'windMetresPerSecond'>;
@@ -118,6 +115,8 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   const [votes, setVotes] = useState<Map<string, Vote>>(() => new Map());
   const [run, setRun] = useState<Run>({ feedback: [], excluded: new Set(), skip: new Set(), paged: false });
   const [last, setLast] = useState<LastPair | null>(null);
+  // The cards whose "Don't suggest these together" is confirmed on the page being shown, with the Today context they belong to.
+  const [dismissed, setDismissed] = useState<{ ctx: string; keys: ReadonlySet<string> }>({ ctx: '', keys: new Set() });
   // Counts pairs confirmed as avoided and Undo choices confirmed, so Today can move on or bring the idea back once for each.
   // Each carries the Today context (occasion, season, weather) its write started in; a receipt from an earlier context is never acted on.
   const [avoided, setAvoided] = useState({ count: 0, ctx: '' });
@@ -146,17 +145,26 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
   const changedPairs = useRef(new Set<string>());
   // The core of every idea this page has received, by idea key; a refresh can move an idea shown earlier off the page.
   const knownCores = useRef(new Map<string, string>());
-  const newPage = useCallback(() => { changedOnPage.current = new Set(); changedPairs.current = new Set(); knownCores.current = new Map(); }, []);
+  const newPage = useCallback(() => {
+    changedOnPage.current = new Set(); changedPairs.current = new Set(); knownCores.current = new Map();
+    setDismissed(current => current.keys.size ? { ctx: '', keys: new Set() } : current);
+  }, []);
   const lastRef = useRef<LastPair | null>(null);
   const remember = useCallback((value: LastPair | null) => { lastRef.current = value; setLast(value); }, []);
-  // A pair choice that settles as made: avoided becomes the one Undo offers; allowed again, it is gone and its idea may come back.
+  // A pair choice that settles as made: avoided becomes the one Undo offers and removes its card; allowed again, it is gone and its card is back.
   // A choice found not to have taken effect (a failed Undo, a failed avoid) changes nothing here.
   const settledPair = useCallback((pair: string, stored: boolean, key: string, chosen: boolean, ctx: string) => {
     if (stored !== chosen) return;
-    if (stored) { remember({ pair, key }); setAvoided(current => ({ count: current.count + 1, ctx })); return; }
+    if (stored) {
+      remember({ pair, key });
+      setDismissed(current => ({ ctx, keys: new Set(current.ctx === ctx ? current.keys : []).add(key) }));
+      setAvoided(current => ({ count: current.count + 1, ctx }));
+      return;
+    }
     const was = lastRef.current;
     if (was?.pair !== pair) return;
     remember(null);
+    setDismissed(current => current.ctx === ctx ? { ctx, keys: new Set([...current.keys].filter(entry => entry !== was.key)) } : current);
     setRestored(current => ({ key: was.key, count: (current?.count ?? 0) + 1, ctx }));
   }, [remember]);
   const reload = useCallback(() => setTick(value => value + 1), []);
@@ -222,7 +230,8 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
 
   const more = useCallback((shownKeys: readonly (string | null)[] = []) => {
     if (!result || settling) return;
-    const skip = skipAfterPaging(run.skip, result.suggestions, shownKeys, knownCores.current);
+    // Only the ideas Today actually showed are skipped; an idea of this page that was never shown stays reachable.
+    const skip = skipAfterPaging(run.skip, [], shownKeys, knownCores.current);
     newPage();
     setRun({ feedback: feedbackFrom(votesRef.current), excluded: excludedRef.current, skip, paged: true });
     setFailed(null); setUnresolved(null);
@@ -293,13 +302,9 @@ export function useSuggestions(client: AppClient, scope: OwnerScope, online: boo
     }
   }, [client, scope, online, pending, unresolved, settledPair, contextKey]);
 
-  const ideas = useMemo(() => {
-    if (!result) return [];
-    const kept = new Set<string>();
-    if (pending && (pending.kind === 'avoid' || pending.kind === 'allow')) kept.add(pending.key);
-    if (unresolved && 'pair' in unresolved.choice) kept.add(unresolved.key);
-    return visibleIdeas(result.suggestions, data?.excluded ?? new Set(), run.excluded, kept);
-  }, [result, data, run.excluded, pending, unresolved]);
+  const ideas = useMemo(() => result
+    ? visibleIdeas(result.suggestions, dismissed.ctx === contextKey ? dismissed.keys : new Set<string>())
+    : [], [result, dismissed, contextKey]);
   return {
     data, error, result, votes, pending, failed, unresolved: unresolved?.key ?? null, settling, paged: run.paged, reload, more, startOver,
     ideas, last, avoids: avoided.count, avoidContext: avoided.ctx, restored, contextKey,

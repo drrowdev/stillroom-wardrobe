@@ -1,44 +1,39 @@
 import type { WeatherContext } from './use-suggestions';
 
-// Today shows one idea of the current page at a time. The page itself (its ideas, order and paging) stays with
-// useSuggestions; this only tracks which idea is featured, by key, so a refreshed list never repeats or skips one.
+// Today shows the ideas of the current page together. The page itself (its ideas, order and paging) stays with
+// useSuggestions; this only pins which ideas are showing, by key, so a refreshed list can drop a card but never swaps in
+// or reorders one. When every pinned idea has gone, the ideas of the list not shown before are pinned in their place;
+// otherwise new ideas appear only through Show other ideas. `seen` holds every idea pinned so far, so none is shown twice.
 // `armed` is false for the render in which a context change is still reaching useSuggestions; until then nothing is pinned.
-export type Featured = {
-  readonly token: string; readonly current: string | null; readonly seen: readonly string[]; readonly number: number; readonly armed: boolean;
-};
-export type Shown = { kind: 'idea'; key: string; number: number } | { kind: 'gone' };
+export type Page = { readonly token: string; readonly keys: readonly string[] | null; readonly seen: readonly string[]; readonly armed: boolean };
 
-export const featuredStart = (token: string, number = 1, armed = true): Featured => ({ token, current: null, seen: [], number, armed });
+export const pageStart = (token: string, armed = true): Page => ({ token, keys: null, seen: [], armed });
 
-// The idea to show for a (possibly refreshed) list: the current one wherever it now sits, otherwise the first one not
-// shown yet in the list's current order, which then becomes current. Reconciling never clears what was seen and never pages.
-export function reconcile(keys: readonly string[], state: Featured): { state: Featured; shown: Shown } {
-  if (!state.armed) {
-    const first = keys.find(key => !state.seen.includes(key));
-    return { state, shown: first === undefined ? { kind: 'gone' } : { kind: 'idea', key: first, number: state.number } };
-  }
-  if (state.current !== null && keys.includes(state.current)) return { state, shown: { kind: 'idea', key: state.current, number: state.number } };
-  const following = keys.find(key => key !== state.current && !state.seen.includes(key));
-  if (following === undefined) return { state, shown: { kind: 'gone' } };
-  const seen = state.current === null || state.seen.includes(state.current) ? state.seen : [...state.seen, state.current];
-  return { state: { ...state, current: following, seen }, shown: { kind: 'idea', key: following, number: state.number } };
+// The ideas to show for a (possibly refreshed) list: the pinned ones still in the list, in their pinned order.
+export function pinPage(keys: readonly string[], state: Page): { state: Page; shown: readonly string[] } {
+  if (!state.armed) return { state, shown: keys };
+  const kept = state.keys?.filter(key => keys.includes(key)) ?? [];
+  if (kept.length) return { state, shown: kept };
+  const fresh = keys.filter(key => !state.seen.includes(key));
+  if (!fresh.length) return { state, shown: [] };
+  return { state: { ...state, keys: fresh, seen: [...state.seen, ...fresh] }, shown: fresh };
 }
 
-// Show another: the shown idea counts as seen, and the first unseen one in the current order follows. 'page' means the
-// page has no more, so the caller asks useSuggestions for the next page.
-export function next(keys: readonly string[], state: Featured): Featured | 'page' {
-  const { shown } = reconcile(keys, state);
-  const seen = [...state.seen];
-  for (const key of [state.current, shown.kind === 'idea' ? shown.key : null]) if (key !== null && !seen.includes(key)) seen.push(key);
-  const following = keys.find(key => !seen.includes(key));
-  return following === undefined ? 'page' : { token: state.token, current: following, seen, number: state.number + 1, armed: true };
+// An idea whose avoided pair was undone returns to the pinned page in the slot its place in the current list gives it, even when a
+// refresh has replaced the pinned ideas meanwhile. Nothing else is added or moved.
+export function restorePinned(state: Page, key: string, keys: readonly string[]): Page {
+  if (!state.armed || state.keys === null || state.keys.includes(key) || !keys.includes(key)) return state;
+  const rank = keys.indexOf(key);
+  const slot = state.keys.findIndex(entry => keys.indexOf(entry) > rank);
+  const pinned = slot === -1 ? [...state.keys, key] : [...state.keys.slice(0, slot), key, ...state.keys.slice(slot)];
+  return { ...state, keys: pinned, seen: state.seen.includes(key) ? state.seen : [...state.seen, key] };
 }
 
-// The same fields, in the same order, as useSuggestions' own weather id, so Today starts again from the first idea on the
+// The same fields, in the same order, as useSuggestions' own weather id, so Today starts again from the first ideas on the
 // same render the hook does.
 export const weatherRunId = (weather: WeatherContext) =>
   JSON.stringify([weather.setting ?? null, weather.temperatureC ?? null, weather.rainProbability ?? null, weather.windMetresPerSecond ?? null]);
 
-// What resets the featured idea: an explicit page change or a change of occasion, season or applied weather.
+// What resets the pinned page: an explicit page change or a change of occasion, season or applied weather.
 // A data refresh is not one of them.
 export const transitionToken = (page: number, occasion: string, season: string, weatherId: string) => JSON.stringify([page, occasion, season, weatherId]);

@@ -1174,6 +1174,17 @@ a photo the owner removed (`photosDeleted`; none of these are in the app's expor
 or restore), never usage or evidence, and settles held try-on usage that is
 already due.
 
+**TODAY-IDEAS1 Today shows three ideas (app only; no schema, Edge, provider or engine change).** Owner request of 1 November 2026,
+decisions of 2 November 2026: Today shows the engine's page of up to three ideas together instead of one at a time. Phones and
+small tablets (under 900 px) get a horizontal scroll-snap row with the next card peeking; wider screens show the cards side by side.
+Each card keeps Wear today, Try on (it seeds its own idea), Save as outfit, Like and its More options menu. One Show other ideas
+control replaces the whole set with the next ideas (coordinator default, not yet confirmed by the owner); fewer than three ideas show
+what exists. Today pins the keys it shows (`featured.ts`): a refresh can drop a card but never reorders or swaps one in, and when
+every card has gone the ideas not shown before take their place. Hiding an idea keeps its card in place with Undo; an avoided pair
+removes only its card and its Undo brings it back. Show other ideas now skips only the ideas Today actually showed. Verified with
+unit tests and the Today, Try on idea, weather and stylist browser specs; the swipe feel on a real phone and the look of three-up
+cards need the coordinator's visual review.
+
 **FILT1 provider refusal kind (source only; hosted apply owner-gated as ledger 29).**
 Adds `20261005090000_provider_refusal.sql` after ledger 28, in one transaction:
 two nullable evidence columns (`provider_refusal`, `usage_absent`), the

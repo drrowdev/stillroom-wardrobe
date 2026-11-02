@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { featuredStart, next, reconcile, transitionToken, weatherRunId, type Featured } from '../../src/features/today/featured';
+import { pageStart, pinPage, restorePinned, transitionToken, weatherRunId } from '../../src/features/today/featured';
 import { recommend, type EngineContext, type EngineItem } from '../../src/domain/recommendations';
 import type { Category } from '../../src/domain/wardrobe';
 
@@ -19,90 +19,111 @@ const wardrobe = [
   ...tones.map(tone => item('top', [tone])), ...['navy', 'black', 'beige'].map(tone => item('bottom', [tone])), item('footwear', ['white']), item('footwear', ['black']),
 ];
 const token = transitionToken(0, 'everyday', 'summer', 'null');
-const pin = (keys: readonly string[], state: Featured) => reconcile(keys, state);
 
-// Walks Today the way the screen does: Show another inside a page, then the next page with the whole page's core keys skipped.
+// Walks Today the way the screen does: every idea of a page together, then Show other ideas with the page's core keys skipped.
 function walk(pages: number) {
   const skip = new Set<string>();
-  const shown: string[] = [];
-  let page = 0;
-  let result = recommend({ items: wardrobe, context, skip });
-  let state = pin(result.suggestions.map(s => s.key), featuredStart(token)).state;
-  for (;;) {
-    const keys = result.suggestions.map(s => s.key);
-    const view = reconcile(keys, state);
-    if (view.shown.kind === 'idea') shown.push(view.shown.key);
-    const following = next(keys, view.state);
-    if (following !== 'page') { state = following; continue; }
-    if (++page === pages) break;
-    for (const s of result.suggestions) skip.add(s.coreKey);
-    result = recommend({ items: wardrobe, context, skip: new Set(skip) });
-    if (result.status !== 'ideas') break;
-    state = featuredStart(transitionToken(page, 'everyday', 'summer', 'null'), state.number + 1);
+  const result: string[][] = [];
+  for (let page = 0; page < pages; page++) {
+    const found = recommend({ items: wardrobe, context, skip: new Set(skip) });
+    if (found.status !== 'ideas') break;
+    const keys = found.suggestions.map(s => s.key);
+    result.push(pinPage(keys, pageStart(token)).shown as string[]);
+    for (const s of found.suggestions) skip.add(s.coreKey);
   }
-  return shown;
+  return result;
 }
 
-describe('featured idea on Today', () => {
-  it('walks exactly the engine page order across three pages, deterministically', () => {
-    const expected: string[] = [];
-    const skip = new Set<string>();
-    for (let page = 0; page < 3; page++) {
-      const result = recommend({ items: wardrobe, context, skip: new Set(skip) });
-      expect(result.status).toBe('ideas');
-      expected.push(...result.suggestions.map(s => s.key));
-      for (const s of result.suggestions) skip.add(s.coreKey);
+describe('the ideas shown together on Today', () => {
+  it('shows three ideas a page, none twice across pages, deterministically', () => {
+    const pages = walk(3);
+    expect(pages.map(page => page.length)).toEqual([3, 3, 3]);
+    expect(new Set(pages.flat()).size).toBe(9);
+    expect(walk(3)).toEqual(pages);
+  });
+
+  it('offers three different outfits: no shared garment set, and no two that differ by one garment only on the first page', () => {
+    const found = recommend({ items: wardrobe, context });
+    expect(found.suggestions).toHaveLength(3);
+    const cores = found.suggestions.map(s => s.coreKey);
+    expect(new Set(cores).size).toBe(3);
+    for (const [index, first] of found.suggestions.entries()) {
+      for (const second of found.suggestions.slice(index + 1)) {
+        const apart = first.itemIds.filter(id => !second.itemIds.includes(id)).length;
+        expect(apart).toBeGreaterThanOrEqual(2);
+      }
     }
-    expect(expected).toHaveLength(9);
-    expect(walk(3)).toEqual(expected);
-    expect(walk(3)).toEqual(walk(3));
   });
 
-  it('features nothing before it is armed, then pins the first idea', () => {
-    const idle = featuredStart(token, 1, false);
-    const early = reconcile(['a', 'b'], idle);
+  it('shows what exists when fewer than three ideas can be made', () => {
+    const small = [item('top', ['white']), item('bottom', ['navy']), item('footwear', ['black'])];
+    const found = recommend({ items: small, context });
+    expect(found.suggestions).toHaveLength(1);
+    expect(pinPage(found.suggestions.map(s => s.key), pageStart(token)).shown).toHaveLength(1);
+  });
+});
+
+describe('the pinned page', () => {
+  it('shows what the list holds before it is armed, without pinning', () => {
+    const idle = pageStart(token, false);
+    const early = pinPage(['a', 'b', 'c'], idle);
     expect(early.state).toBe(idle);
-    expect(early.shown).toEqual({ kind: 'idea', key: 'a', number: 1 });
-    const armed = reconcile(['a', 'b'], featuredStart(token));
-    expect(armed.state.current).toBe('a');
-    expect(armed.shown).toEqual({ kind: 'idea', key: 'a', number: 1 });
+    expect(early.shown).toEqual(['a', 'b', 'c']);
   });
 
-  it('keeps the current idea when an earlier one disappears or the order changes', () => {
-    let state = reconcile(['a', 'b', 'c'], featuredStart(token)).state;
-    state = next(['a', 'b', 'c'], state) as Featured;
-    expect(state.current).toBe('b');
-    const dropped = reconcile(['b', 'c'], state);
-    expect(dropped.state).toBe(state);
-    expect(dropped.shown).toEqual({ kind: 'idea', key: 'b', number: 2 });
-    const reordered = reconcile(['c', 'd', 'b'], state);
-    expect(reordered.shown).toEqual({ kind: 'idea', key: 'b', number: 2 });
-    expect(next(['c', 'd', 'b'], state)).toMatchObject({ current: 'c', number: 3, seen: ['a', 'b'] });
+  it('pins the first non-empty list once armed, and nothing while the list is empty', () => {
+    const start = pageStart(token);
+    const empty = pinPage([], start);
+    expect(empty.state).toBe(start);
+    expect(empty.shown).toEqual([]);
+    const pinned = pinPage(['a', 'b', 'c'], start);
+    expect(pinned.state.keys).toEqual(['a', 'b', 'c']);
+    expect(pinned.shown).toEqual(['a', 'b', 'c']);
   });
 
-  it('shows the first unseen idea when the current one disappears, and is gone when none is left', () => {
-    let state = reconcile(['a', 'b', 'c'], featuredStart(token)).state;
-    state = next(['a', 'b', 'c'], state) as Featured;
-    const moved = reconcile(['a', 'c'], state);
-    expect(moved.shown).toEqual({ kind: 'idea', key: 'c', number: 2 });
-    expect(moved.state.seen).toEqual(['a', 'b']);
-    const gone = reconcile(['a'], state);
-    expect(gone.shown).toEqual({ kind: 'gone' });
-    expect(gone.state.seen).toEqual(['a']);
-    expect(next(['a'], state)).toBe('page');
+  it('drops a card that leaves the list but never reorders or adds one while another pinned card stays', () => {
+    const { state } = pinPage(['a', 'b', 'c'], pageStart(token));
+    expect(pinPage(['a', 'c'], state).shown).toEqual(['a', 'c']);
+    expect(pinPage(['c', 'd', 'b', 'a'], state).shown).toEqual(['a', 'b', 'c']);
+    expect(pinPage(['a', 'b', 'c'], state).state).toBe(state);
   });
 
-  it('keeps a hidden idea featured: it stays in the list as a collapsed card', () => {
-    const state = reconcile(['a', 'b'], featuredStart(token)).state;
-    expect(reconcile(['a', 'b'], state).shown).toEqual({ kind: 'idea', key: 'a', number: 1 });
+  it('pins the ideas not shown before once every pinned idea has gone, and is empty when there are none', () => {
+    const { state } = pinPage(['a', 'b', 'c'], pageStart(token));
+    const moved = pinPage(['d', 'e'], pinPage(['d', 'e'], state).state);
+    expect(moved.shown).toEqual(['d', 'e']);
+    const replaced = pinPage(['d', 'e'], state);
+    expect(replaced.shown).toEqual(['d', 'e']);
+    expect(replaced.state.seen).toEqual(['a', 'b', 'c', 'd', 'e']);
+    expect(pinPage(['a', 'b'], replaced.state).shown).toEqual([]);
+    expect(pinPage([], state).shown).toEqual([]);
   });
 
-  it('asks for the next page at the end of a page and starts again on a new token', () => {
-    let state = reconcile(['a', 'b'], featuredStart(token)).state;
-    state = next(['a', 'b'], state) as Featured;
-    expect(next(['a', 'b'], state)).toBe('page');
-    const fresh = featuredStart(transitionToken(1, 'everyday', 'summer', 'null'), state.number + 1);
-    expect(reconcile(['c', 'd'], fresh).shown).toEqual({ kind: 'idea', key: 'c', number: 3 });
+  it('brings a dropped card back in its place when it returns to the list', () => {
+    const { state } = pinPage(['a', 'b', 'c'], pageStart(token));
+    expect(pinPage(['a', 'c'], state).shown).toEqual(['a', 'c']);
+    expect(pinPage(['a', 'b', 'c'], state).shown).toEqual(['a', 'b', 'c']);
+  });
+
+  it('restores an undone idea into a page a refresh has since replaced, in the slot its place in the list gives it', () => {
+    const first = pinPage(['a', 'b', 'c'], pageStart(token)).state;
+    // "a" is dismissed, then a refresh leaves only d and e: they are pinned in place of the page.
+    const replaced = pinPage(['d', 'e'], first);
+    expect(replaced.shown).toEqual(['d', 'e']);
+    // Undo brings "a" back to the list; without restoring it the pinned d and e would keep it off the page.
+    expect(pinPage(['a', 'd', 'e'], replaced.state).shown).toEqual(['d', 'e']);
+    const restored = restorePinned(replaced.state, 'a', ['a', 'd', 'e']);
+    expect(pinPage(['a', 'd', 'e'], restored).shown).toEqual(['a', 'd', 'e']);
+    expect(restorePinned(replaced.state, 'a', ['d', 'a', 'e']).keys).toEqual(['d', 'a', 'e']);
+    expect(restorePinned(replaced.state, 'a', ['d', 'e', 'a']).keys).toEqual(['d', 'e', 'a']);
+  });
+
+  it('restores nothing that is already pinned, not in the list, or on a page not yet pinned', () => {
+    const { state } = pinPage(['a', 'b'], pageStart(token));
+    expect(restorePinned(state, 'a', ['a', 'b'])).toBe(state);
+    expect(restorePinned(state, 'z', ['a', 'b'])).toBe(state);
+    const start = pageStart(token);
+    expect(restorePinned(start, 'a', ['a'])).toBe(start);
   });
 
   it('changes the transition token only for paging, occasion, season or applied weather', () => {

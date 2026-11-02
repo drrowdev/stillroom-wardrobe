@@ -18,7 +18,7 @@ const button = (page: Page, key: MessageKey, language: Language = 'en') => page.
 const zoom = 'html { font-size: 200%; } body { font-size: 32px; }';
 const engineOnly = () => test.skip(test.info().project.name === 'mobile', 'Behaviour is covered by the chromium and webkit-photo projects.');
 async function axe(page: Page) { expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]); }
-const tryOn = (page: Page) => page.locator('#today-tryon');
+const tryOn = (page: Page) => page.locator('.today-card .today-tryon');
 const status = (page: Page) => page.locator('.tryon-page [aria-live=polite]');
 
 type Start = { language?: Language; setup?: Partial<TryOnSetup> | null; consent?: boolean; missing?: boolean;
@@ -194,6 +194,25 @@ test.describe('try on an unsaved Today idea', () => {
     await expect.poll(() => api.tryonControl.cancels.length).toBe(1);
     expect(api.tryonControl.cancels).toEqual([api.tryonControl.requests[0]!.chainId]);
     held.release();
+  });
+
+  test('each idea\'s Try on opens a try-on of that idea\'s own garments', async ({ page }) => {
+    engineOnly();
+    await start(page, { preload: api => {
+      for (const [title, category] of [['Grey tee', 'top'], ['Red skirt', 'bottom'], ['Brown loafers', 'footwear']] as const) {
+        Object.assign(api.seedSavedItem('a', title).item as Row, { category, seasons: ['spring', 'summer', 'autumn', 'winter'], formality: 1 });
+      }
+    } });
+    await expect(page.locator('.today-card')).toHaveCount(3);
+    await expect(tryOn(page)).toHaveCount(3);
+    const card = page.locator('.today-card').nth(1);
+    const garments = await card.locator('.outfit-component-name').allTextContents();
+    await card.locator('.today-tryon').click();
+    await expect(page).toHaveURL(/#\/today\/try-on$/);
+    await expect(page.locator('#tryon-title')).toBeFocused();
+    const lines = await page.locator('.tryon-garments li').allTextContents();
+    expect(lines).toHaveLength(garments.length);
+    for (const [index, name] of garments.entries()) expect(lines[index]).toContain(name);
   });
 
   test('is disabled while offline and sends nothing', async ({ page, context }) => {
