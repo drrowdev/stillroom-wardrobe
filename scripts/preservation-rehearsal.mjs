@@ -1228,14 +1228,16 @@ async function main() {
     const finalizer = await startAnalysisServer();
     try {
       finalizer.assertRunning();
-      const priorMain = await captureAzurePreservation(azureEnv, privilegedLocalSql);
+      // The real legacy Google gate on rows that are rolled back, then the capture inside a manifest-eligibility window.
+      await realRefusalProbes(privilegedLocalSql, (await privilegedLocalSql('select user_id from private.approved_accounts where admission_no=1;')).trim(), ['google']);
+      const priorMain = await eligible.run('AZ1-prior-main-capture', () => captureAzurePreservation(azureEnv, privilegedLocalSql));
       await assertMigrationInventory(); await history('prior-main');
       stage = 'AZ1-upgrade';
       await migrateToAzureTarget(run, 'prior-main');
       await history('azure-target');
       await verifyCiStorageGuard();
       stage = 'AZ1-preservation';
-      await verifyAzurePreservation(priorMain, privilegedLocalSql, true);
+      await eligible.run('AZ1-preservation', () => verifyAzurePreservation(priorMain, privilegedLocalSql, true));
       console.log('PASS: populated prior-main9/azure-target10 historical preservation; Google proof retained for next upgrade');
       stage = 'I10b-ten-capture';
       const ten = await captureImageChangePreservation(priorMain, privilegedLocalSql);

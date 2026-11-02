@@ -243,7 +243,7 @@ describe('rehearsal wiring', () => {
   it('runs every date-gated historical behavioural phase inside a window and nothing else', async () => {
     const rehearsal = await readPath('../../scripts/preservation-rehearsal.mjs');
     const windows = [...rehearsal.matchAll(/eligible\.run\('([^']+)'/g)].map((match) => match[1]);
-    expect(windows).toEqual(['FILT1-upgrade-seed', 'FILT1-upgrade-verify', 'RAIN1-seed', 'RAIN1-verify', 'ST1a-stylist-ledger', 'BG2b-enhancement-ledger',
+    expect(windows).toEqual(['AZ1-prior-main-capture', 'AZ1-preservation', 'FILT1-upgrade-seed', 'FILT1-upgrade-verify', 'RAIN1-seed', 'RAIN1-verify', 'ST1a-stylist-ledger', 'BG2b-enhancement-ledger',
       'AD1-admin-limits', 'VTO1-tryon-ledger', 'BUDGET1-shared-budget', 'IDEA1-seed', 'IDEA1-upgrade-verify', 'IDEA1-tryon-idea', 'PHOTO1-seed',
       'PHOTO1-upgrade-verify', 'PHOTO1-tryon-photo']);
     const lines = rehearsal.split('\n').filter((line) => line.includes('eligible.run('));
@@ -260,6 +260,7 @@ describe('rehearsal wiring', () => {
     expect(rehearsal).not.toMatch(/PRESERVATION_REVIEW_CLOCK|createReviewClock|review-clock/);
     expect(rehearsal).toContain('const eligible = createManifestEligibility(privilegedLocalSql);');
     expect(rehearsal).toContain("['stylist', 'enhance', 'tryon']);");
+    expect(rehearsal).toContain("admission_no=1;')).trim(), ['google']);");
   });
 
   it('keeps the manifest-row comparison out of the Stylist upgrade phase', async () => {

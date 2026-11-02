@@ -1763,12 +1763,12 @@ describe('import safety and frozen integration boundary', () => {
     expect(prior).toContain("'--version', PRIOR_MAIN_VERSION");
     expect(source).not.toContain('MIGRATIONS.slice(0, 9)');
     expect(source).not.toContain('MIGRATIONS[9]');
-    expect(prior.indexOf("await history('prior-main');")).toBeLessThan(prior.indexOf('await captureAzurePreservation('));
-    expect(prior.indexOf('await captureAzurePreservation(')).toBeLessThan(prior.indexOf("await migrateToStage(run, 'azure-target', 'image-change')"));
-    expect(prior.indexOf("await history('azure-target');")).toBeLessThan(prior.indexOf('await verifyAzurePreservation('));
-    const nineToTen = prior.slice(prior.indexOf("await migrateToAzureTarget(run, 'prior-main')"), prior.indexOf('await verifyAzurePreservation('));
+    expect(prior.indexOf("await history('prior-main');")).toBeLessThan(prior.indexOf('captureAzurePreservation('));
+    expect(prior.indexOf('captureAzurePreservation(')).toBeLessThan(prior.indexOf("await migrateToStage(run, 'azure-target', 'image-change')"));
+    expect(prior.indexOf("await history('azure-target');")).toBeLessThan(prior.indexOf('verifyAzurePreservation('));
+    const nineToTen = prior.slice(prior.indexOf("await migrateToAzureTarget(run, 'prior-main')"), prior.indexOf('verifyAzurePreservation('));
     expect(nineToTen).toContain("await history('azure-target');\n      await verifyCiStorageGuard();");
-    expect(prior.indexOf('await verifyAzurePreservation(')).toBeLessThan(prior.indexOf('await captureImageChangePreservation('));
+    expect(prior.indexOf('verifyAzurePreservation(')).toBeLessThan(prior.indexOf('await captureImageChangePreservation('));
     expect(prior.indexOf('await captureImageChangePreservation(')).toBeLessThan(prior.indexOf("await migrateToStage(run, 'azure-target', 'image-change')"));
     expect(prior.indexOf("await history('image-change');")).toBeLessThan(prior.indexOf('await verifyImageChangePreservation('));
     expect(main).not.toMatch(/await cli\(\['migration', 'up'/);
