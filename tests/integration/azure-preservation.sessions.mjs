@@ -20,10 +20,12 @@ const rows = (table) => `coalesce((select jsonb_agg(to_jsonb(t) order by to_json
 const stateSql = `select jsonb_build_object(${tables.map((name) => `${literal(name)},${rows(name)}`).join(',')});`;
 
 // Invoked only by the existing CI-only preservation owner, at exact prior-main.
-export async function captureAzurePreservation(env, sql) {
+export async function captureAzurePreservation(env, sql, mark = () => {}) {
   const db = async (query) => JSON.parse(await sql(query));
+  mark('sign-in');
   const client = normalClient(env), owners = [await client.signIn('A'), await client.signIn('B')];
   requireEvidence(owners[0].uid !== owners[1].uid);
+  mark('empty-tables');
   const old = await db(stateSql);
   requireEvidence(tables.every((name) => old[name].length === 0));
   const profiles = [];
@@ -31,33 +33,43 @@ export async function captureAzurePreservation(env, sql) {
     await sql(`insert into private.ai_controls(owner_id,activated,notice_revision,model_id,prompt_version,max_request_micro,
       monthly_allowance_micro,max_requests_per_hour,result_ttl_seconds,execution_manifest_id)
       values(${literal(owner.uid)},true,1,'gemini-3.8-flash',1,2270823,100000000,200,3600,'google-eu-3.8-v1');`);
+    mark('consent');
     const p = (await client.rows(owner, 'profiles'))[0];
     equal(await client.rpc(owner, 'ai_set_consent', { p_enabled: true, p_notice_revision: 1, p_expected_version: p.version }),
       { code: 'OK', profileVersion: String(p.version + 1) });
     profiles.push((await client.rows(owner, 'profiles'))[0]);
     for (const n of [1, 2, 3, 4, 21, 22]) {
       const id = analysisId(owner.label, n);
+      mark('google-claim');
       const claim = await db(`select public.ai_claim_analysis(${literal(owner.uid)},${literal(id)},${literal(id)},1,
         ${literal(analysisHash)},${jpegHeaderFixture().length},120,80,'google-eu-3.8-v1');`);
       requireEvidence(claim.claimed === true);
       if ([2, 3, 21, 22].includes(n)) {
+        mark('google-finish');
         const finish = await db(`select public.ai_finish_analysis(${literal(owner.uid)},${literal(id)},'google-eu-3.8-v1',
           ${json(googleFacts)},${json(googleUsage)},'SUCCESS');`);
         requireEvidence(finish.stored === true);
       }
       if (n === 3) {
+        mark('google-billing');
         const billed = await db(`select public.ai_settle_request(${literal(owner.uid)},${literal(id)},null,500,'BILLING_ONLY');`);
         requireEvidence(billed.chargeState === 'settled');
       }
     }
     const h = analyzedHarness(client, owner, env), intent = analyzedIntent(owner, 21);
+    mark('save-reserve');
     const row = await h.reserve(intent);
+    mark('save-upload');
     await h.upload(intent);
+    mark('save-preflight');
     requireEvidence((await h.preflight(intent, row)).state === 'reserved');
     const completed = analyzedIntent(owner, 22);
+    mark('save-reserve-completed');
     const completedRow = await h.reserve(completed);
+    mark('save-finalize');
     await h.upload(completed); await h.finalize(completed, completedRow);
   }
+  mark('before-state');
   const before = await db(stateSql), library = [];
   requireEvidence(before.ai_usage.length === 12 && before.ai_item_save_attempts.length === 4
     && before.item_attribution_history.length === 2);

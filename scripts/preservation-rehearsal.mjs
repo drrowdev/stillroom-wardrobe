@@ -1230,7 +1230,7 @@ async function main() {
       finalizer.assertRunning();
       // The real legacy Google gate on rows that are rolled back, then the capture inside a manifest-eligibility window.
       await realRefusalProbes(privilegedLocalSql, (await privilegedLocalSql('select user_id from private.approved_accounts where admission_no=1;')).trim(), ['google']);
-      const priorMain = await eligible.run('AZ1-prior-main-capture', () => captureAzurePreservation(azureEnv, privilegedLocalSql));
+      const priorMain = await eligible.run('AZ1-prior-main-capture', () => captureAzurePreservation(azureEnv, privilegedLocalSql, (label) => { stage = `AZ1-capture-${label}`; }));
       await assertMigrationInventory(); await history('prior-main');
       stage = 'AZ1-upgrade';
       await migrateToAzureTarget(run, 'prior-main');

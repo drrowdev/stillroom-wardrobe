@@ -141,8 +141,8 @@ export function createManifestEligibility(sql, { dates = MANIFEST_DATES, log = c
       throw new Error('ELIGIBILITY_RESTORE_FAILED');
     }
     active = false;
-    mark(phase, 'done');
     if (failed) throw failure;
+    mark(phase, 'done');
     log(`PASS: ${phase}: ${ELIGIBILITY_LABEL}; ${ids.length} manifest date(s) moved and restored exactly; the immutability trigger refused update and delete before, during and after`);
     return value;
   }
