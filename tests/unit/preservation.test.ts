@@ -1824,7 +1824,7 @@ describe('COL1 strict preservation pass and twelve-only probes (source order, no
                         "await history('limits-prior'); await verifyCiStorageGuard();", 'await budget2Compare(', 'await budget2CatalogProbe(',
                         'await budget2BehaviourProbes(', 'await limitsUpgradeSeed(', "await migrateToStage(run, 'limits-prior', 'tryon-v3-prior')",
                         "await history('tryon-v3-prior'); await verifyCiStorageGuard();", 'await limitsUpgradeVerify(', 'await tryonLimitsProbes(',
-                        'await promptUpgradeSeed(', "await migrateToStage(run, 'tryon-v3-prior', 'target')",
+                        'await promptMigrationGuards(', 'await promptUpgradeSeed(', "await migrateToStage(run, 'tryon-v3-prior', 'target')",
                         "await history('target'); await verifyCiStorageGuard();", 'await promptUpgradeVerify(', 'await tryonPromptProbes(',
                         'await colourFinalizer.stop()',
       "'--version', COLOUR_VERSION", "await history('colours'); await verifyCiStorageGuard();", 'provision-test-users.mjs',

@@ -7,8 +7,14 @@
 //     notice 3 with consent at 3, a saved reference photo and results. After the migration alone the v2 row is byte for byte as it was,
 //     the owners moved to v3 and nothing else on their controls changed (notice, consent, activation and limits included), the saved
 //     photo, the results and the owner reads are as seeded, and the v2 manifest is no longer accepted.
+//   promptMigrationGuards: at the prior inventory the migration's own SQL is run inside the hosted-style wrapper (execute in a DO
+//     block, in a transaction that is always rolled back): a running chain and a held charge each refuse it with nothing changed; a v2
+//     bootstrap that is already executing finishes first and is then moved to v3; a v2 claim made while the migration holds its
+//     locks gets BUSY and writes nothing.
 //   tryonPromptProbes: a two-step chain claims, finishes and records v3; v2 is refused by claim and bootstrap.
 import { createHash, randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
 import { requireEvidence } from './preservation.sessions.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { intent, saveHarness } from './item-save.sessions.mjs';
@@ -65,6 +71,8 @@ function helpers(snapshot, sql) {
     ${literal(owner.uid)},${literal(id)},'OK',${json(VALID)},${literal(out.sha)},${out.bytes.length},
     ${send ? `decode(${literal(out.bytes.toString('hex'))},'hex')` : 'null::bytea'},true,true,false);`);
   const controls = (owner) => one(`select to_jsonb(c) from private.ai_controls c where owner_id=${literal(owner.uid)};`);
+  const release = (owner, id) => one(`select public.tryon_finish(${literal(owner.uid)},${literal(id)},'PRE_DISPATCH',null::jsonb,
+    null::text,null::integer,null::bytea,false,null::boolean,false);`);
   const photos = () => one(`select coalesce(jsonb_object_agg(owner_id,encode(sha256(jpeg),'hex')||':'||saved_at::text),'{}'::jsonb)
     from private.tryon_person_photos where owner_id in (${literal(a.uid)},${literal(b.uid)});`);
   const putPhoto = (owner, bytes = PHOTO) => rpc(owner, 'tryon_person_photo_put_v1', { p_jpeg_base64: b64(bytes), p_sha256: sha(bytes) });
@@ -116,13 +124,155 @@ function helpers(snapshot, sql) {
     }
     equal(Number(await scalar(`select count(*) from private.ai_usage where purpose='try_on' and charge_state='held';`)), 0);
   };
-  return { a, b, one, scalar, rpc, rpcWith, claim, dispatch, finish, controls, photos, putPhoto, fresh, garment, configure, restore };
+  return { a, b, one, scalar, rpc, rpcWith, claim, dispatch, finish, release, controls, photos, putPhoto, fresh, garment, configure, restore };
 }
 
 const STORED = (ids) => `select coalesce(jsonb_object_agg(result_id,jsonb_build_object('owner',owner_id,'sha',encode(sha256(jpeg),'hex'),
   'bytes',octet_length(jpeg),'chain',chain_id,'items',item_ids,'state',state,'created',extract(epoch from created_at)::text,
   'completed',extract(epoch from completed_at)::text)),'{}'::jsonb) from private.tryon_results where result_id in (${ids.map(literal).join(',')});`;
 const manifestRow = (h, id) => h.one(`select to_jsonb(m) from private.ai_execution_manifests m where id=${literal(id)};`);
+
+const MIGRATION = new URL('../../supabase/migrations/20261102090000_tryon_prompt_v3.sql', import.meta.url);
+const migrationInner = async () => {
+  const text = await readFile(MIGRATION, 'utf8');
+  requireEvidence(text.startsWith('-- TRYON-PROMPT1') && text.includes('\nbegin;\n') && text.trimEnd().endsWith('commit;')
+    && !text.includes('$mig$') && !text.includes('$w$'));
+  return text.replace('\nbegin;\n', '\n').trimEnd().replace(/commit;$/, '');
+};
+// The hosted install runs the migration's inner SQL with execute inside a DO block; this does the same inside a transaction that is
+// always rolled back, so an attempt (applied or refused) never changes the database or the migration history.
+const wrapped = (inner, tail) => `begin;
+create temp table prompt_guard_result(msg text);
+do $w$ begin
+  begin
+    execute $mig$${inner}$mig$;
+    insert into prompt_guard_result values('APPLIED');
+  exception when others then
+    insert into prompt_guard_result values('REFUSED: '||sqlerrm);
+  end;
+end $w$;
+select 'MSG:'||msg from prompt_guard_result;
+${tail}
+rollback;`;
+const fingerprintExpr = (a, b) => `jsonb_build_object(
+  'v3',(select count(*) from private.ai_execution_manifests where id=${literal(V3)}),
+  'deployments',(select count(*) from private.provider_deployments where manifest_id like 'azure-global-image25-sunburst-tryon-v%'),
+  'claim',(select md5(prosrc) from pg_proc where oid='public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[])'::regprocedure),
+  'bootstrap',(select md5(prosrc) from pg_proc where oid='public.tryon_bootstrap(uuid,text,integer,bigint,bigint,integer)'::regprocedure),
+  'controls',(select jsonb_agg(to_jsonb(c) order by owner_id) from private.ai_controls c where owner_id in (${literal(a.uid)},${literal(b.uid)})),
+  'chains',(select count(*) from private.tryon_chains where state='running'),
+  'held',(select count(*) from private.ai_usage where purpose='try_on' and charge_state in ('reserved','held')))`;
+const lineOf = (out, prefix) => out.split('\n').map((line) => line.trim()).find((line) => line.startsWith(prefix))?.slice(prefix.length);
+
+export async function promptMigrationGuards(snapshot, sql, mark = () => {}) {
+  const h = helpers(snapshot, sql);
+  const { a, b } = h;
+  const inner = await migrationInner();
+  const expr = fingerprintExpr(a, b);
+  const fpNow = async () => JSON.parse(await h.scalar(`select (${expr})::text;`));
+  const attempt = async (tail = '') => {
+    const out = await sql(wrapped(inner, `select 'FP:'||(${expr})::text;\n${tail}`));
+    return { msg: lineOf(out, 'MSG:'), fp: JSON.parse(lineOf(out, 'FP:')), out };
+  };
+  // A background transaction that sleeps holding its locks; returns once the sleep is seen, and `done` is awaited at the release point.
+  const sleeping = async (text, marker) => {
+    let settled = false;
+    const done = sql(text).finally(() => { settled = true; });
+    done.catch(() => {});
+    for (const until = Date.now() + 8000; ;) {
+      requireEvidence(!settled);
+      if (await h.scalar(`select count(*) from pg_stat_activity where wait_event='PgSleep'
+        and query like ${literal(`%${marker}%`)} and pid<>pg_backend_pid();`) === '1') return { done, open: () => !settled };
+      requireEvidence(Date.now() < until);
+      await delay(25);
+    }
+  };
+  const waitingOnMigration = async (ms) => {
+    for (const until = Date.now() + ms; ;) {
+      if (Number(await h.scalar(`select count(*) from pg_stat_activity where wait_event_type='Lock'
+        and query like '%execute $mig$%' and pid<>pg_backend_pid();`)) === 1) return;
+      requireEvidence(Date.now() < until);
+      await delay(25);
+    }
+  };
+  const refused = async (label) => {
+    const before = await fpNow();
+    const reply = await attempt();
+    if (!reply.msg?.startsWith('REFUSED:') || !reply.msg.includes('drain first')) {
+      console.log(`PROMPT1-MISMATCH ${label} expected a drain refusal, got ${String(reply.msg).slice(0, 300)}`);
+      requireEvidence(false);
+    }
+    equal(reply.fp, before, `${label}-inside`);
+    equal(await fpNow(), before, `${label}-after`);
+    return before;
+  };
+
+  mark('live-chain-and-held-charge');
+  {
+    const before = await h.configure(V2, NOTICE);
+    try {
+      const top = await h.garment('top');
+      const chain = h.fresh(), id = randomUUID();
+      equal((await h.claim(a, chain, 1, id, V2, { items: [top] })).code, 'OK');
+      // A claimed step holds a charge and a running chain.
+      const held = await refused('held-charge');
+      requireEvidence(held.held === 1 && held.chains === 1);
+      await h.release(a, id);
+      // A released step leaves the chain running: still refused, nothing held.
+      const running = await refused('running-chain');
+      requireEvidence(running.held === 0 && running.chains === 1);
+      equal((await h.rpc(a, 'tryon_cancel', { p_chain_id: chain })).code, 'CANCELLED');
+      requireEvidence((await fpNow()).chains === 0);
+    } finally {
+      await h.restore(before);
+    }
+  }
+
+  mark('racing-bootstrap');
+  {
+    const was = { a: await h.controls(a), b: await h.controls(b),
+      capacity: await h.one(`select to_jsonb(k) from private.provider_capacity k where deployment_key=${literal(KEY)};`) };
+    requireEvidence(was.a.tryon_manifest_id === null && was.b.tryon_manifest_id === null);
+    try {
+      // A v2 bootstrap is already executing (it holds the account's controls row). The migration waits for it, then sees and moves
+      // what it wrote: the account ends on v3 inside the migration, never left on v2.
+      const booting = await sleeping(`begin; select public.tryon_bootstrap(${literal(b.uid)},${literal(V2)},${NOTICE},${RESERVED},5000000,1000);
+        select 'HELD'; select pg_sleep(3.31); commit;`, '3.31');
+      const migrating = sql(wrapped(inner, `select 'B:'||coalesce((select tryon_manifest_id from private.ai_controls where owner_id=${literal(b.uid)}),'none');`));
+      migrating.catch(() => {});
+      await waitingOnMigration(2500);
+      requireEvidence(booting.open());
+      await booting.done;
+      const out = await migrating;
+      equal(lineOf(out, 'MSG:'), 'APPLIED');
+      equal(lineOf(out, 'B:'), V3);
+      // The attempt was rolled back; only the committed bootstrap remains.
+      equal((await h.controls(b)).tryon_manifest_id, V2);
+      requireEvidence((await fpNow()).v3 === 0);
+    } finally {
+      await h.restore(was);
+    }
+  }
+
+  mark('racing-claim');
+  {
+    const before = await h.configure(V2, NOTICE);
+    try {
+      const top = await h.garment('top');
+      const fp = await fpNow();
+      // While the migration holds its locks, a v2 claim cannot take the account's controls row: BUSY, nothing claimed or written.
+      const holding = await sleeping(wrapped(inner, `select 'HELD';\nselect pg_sleep(3.17);`), '3.17');
+      const chain = h.fresh();
+      equal(await h.claim(a, chain, 1, randomUUID(), V2, { items: [top] }), { code: 'BUSY', claimed: false });
+      requireEvidence(holding.open());
+      equal(lineOf(await holding.done, 'MSG:'), 'APPLIED');
+      equal(await fpNow(), fp);
+      equal(await h.scalar(`select count(*) from private.tryon_chains where owner_id=${literal(a.uid)} and chain_id=${literal(chain)};`), '0');
+    } finally {
+      await h.restore(before);
+    }
+  }
+}
 
 export async function promptUpgradeSeed(snapshot, sql) {
   const h = helpers(snapshot, sql);

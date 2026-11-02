@@ -107,18 +107,22 @@ describe('try-on request contract', () => {
     expect(Object.keys(TRYON_PROMPTS)).toEqual(Object.keys(TRYON_V2_PROMPTS));
   });
 
-  it('words the layer and outerwear prompts to show a garment with a front opening open, and still adds rather than replaces', () => {
-    expect(TRYON_PROMPTS.layer).toContain('over the clothing they already wear');
-    expect(TRYON_PROMPTS.outerwear).toContain('as the outermost layer');
-    expect(TRYON_PROMPTS.accessory).toContain('adding it without removing or changing any clothing');
+  it('words the layer and outerwear prompts verbatim to wear a garment with a front opening open, adding rather than replacing', () => {
+    const OPEN = 'If this garment has an existing front opening, wear it fully unfastened with its front panels naturally parted, keeping '
+      + 'existing underlying clothing visible through the opening. Do not invent a top or other clothing, or reveal clothing hidden by '
+      + 'another closed layer. If it has no front opening, wear it naturally without creating one. Keep the person\'s face, hair, skin, '
+      + 'body shape, pose, other clothing and background unchanged. Preserve the garment\'s colour, pattern, logos, length, cut and '
+      + 'design; allow only fastening and natural drape changes needed to wear it open.';
+    expect(TRYON_PROMPTS.outerwear).toBe('Image 1 shows a person. Image 2 shows one garment (outerwear). Show the same person wearing this '
+      + `garment as the outermost layer over their existing clothing. ${OPEN} Photorealistic, whole person in frame.`);
+    expect(TRYON_PROMPTS.layer).toBe('Image 1 shows a person. Image 2 shows one garment (layer worn over other clothing). Show the same '
+      + `person wearing this garment over their existing clothing. ${OPEN} Photorealistic, whole person in frame.`);
     for (const slot of ['layer', 'outerwear'] as const) {
-      expect(TRYON_PROMPTS[slot]).toContain('If the garment has a front opening');
-      expect(TRYON_PROMPTS[slot]).toContain('show it worn open or unfastened');
-      expect(TRYON_PROMPTS[slot]).toContain('a garment without a front opening is simply worn over');
-      expect(TRYON_PROMPTS[slot]).toContain('apart from how it is fastened');
+      expect(TRYON_PROMPTS[slot]).not.toContain('clearly shown');
+      expect(TRYON_PROMPTS[slot]).not.toContain('including the top');
+      expect(TRYON_PROMPTS[slot]).not.toContain('apart from how it is fastened');
     }
-    expect(TRYON_PROMPTS.outerwear).toContain('including the top, stays clearly visible');
-    expect(TRYON_PROMPTS.layer).toContain('the top underneath is still clearly shown');
+    expect(TRYON_PROMPTS.accessory).toContain('adding it without removing or changing any clothing');
     for (const slot of ['layer', 'outerwear', 'accessory'] as const) expect(TRYON_PROMPTS[slot]).not.toContain('replacing only the clothing it covers');
     // Fixed words only: no user text or item field can reach a prompt.
     for (const prompt of Object.values(TRYON_PROMPTS)) expect(prompt).toMatch(/^Image 1 shows a person\. Image 2 shows one garment \([a-z -]+\)\. [^{}$]+$/);

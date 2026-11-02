@@ -11,20 +11,25 @@
 --     20261101200000 plus the one named delta): public.tryon_claim and public.tryon_bootstrap (v3 instead of v2). Every other
 --     try-on function compares with the account's configured manifest and needs no change.
 -- Unchanged: constraints, results, chains, photos, RLS and grants, the notice, withdrawal and deletion.
--- Rollout (docs/cloud-development.md): drain (no running chain, no held try-on charge; this migration refuses otherwise), apply,
--- deploy the try-on Edge function, then Pages, back to back. A client or Edge function from another version fails closed.
+-- Rollout (docs/cloud-development.md): drain (no running chain, no reserved or held try-on charge; this migration refuses otherwise),
+-- apply, deploy the try-on Edge function, then Pages, back to back. A client or Edge function from another version fails closed.
 begin;
-set local lock_timeout = '10s';
+set local lock_timeout = '5s';
+
+-- Admission barrier, in this order and held to the commit: private.ai_controls first, in a mode (exclusive) that conflicts with the
+-- row locks every try-on claim, finish, bootstrap and status read takes with select ... for update, then private.tryon_chains, then
+-- private.ai_usage. Only plain reads continue. A function that already holds a controls row finishes before this migration gets the
+-- table, so the drain check below sees everything it wrote; a claim started afterwards gets lock_not_available (BUSY) and no write.
+lock table private.ai_controls in exclusive mode;
+lock table private.tryon_chains in exclusive mode;
+lock table private.ai_usage in exclusive mode;
 
 -- Preconditions: both replaced functions exist with the reviewed properties, v2 and its deployment are installed on the shared
--- key, v3 is not, and nothing is in flight (a step across the cutover would settle as UNAVAILABLE and strand its chain). The tables
--- a claim or finish writes are locked first (share row exclusive: reads continue, writers wait), so no try-on can start between the
--- check and the commit; a claim that already holds a lock finishes first and is then seen by the check.
+-- key, v3 is not, and nothing is in flight (a step across the cutover would settle as UNAVAILABLE and strand its chain). The drain
+-- check runs before the manifest is inserted or any account is moved.
 do $$
 declare f regprocedure; p pg_catalog.pg_proc;
-begin
-  lock table private.tryon_chains, private.ai_usage, private.ai_controls in share row exclusive mode;
-  foreach f in array array['public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[])',
+begin  foreach f in array array['public.tryon_claim(uuid,uuid,integer,uuid,text,uuid,text,uuid,uuid[])',
     'public.tryon_bootstrap(uuid,text,integer,bigint,bigint,integer)']::regprocedure[] loop
     select * into p from pg_catalog.pg_proc where oid=f;
     if not p.prosecdef or not exists(select 1 from unnest(p.proconfig) x where x like 'search_path=%') then
@@ -42,8 +47,8 @@ begin
   if exists(select 1 from private.ai_execution_manifests where id='azure-global-image25-sunburst-tryon-v3') then
     raise exception 'TRYON-PROMPT1 precondition: the v3 manifest already exists';
   end if;
-  if exists(select 1 from private.tryon_chains where state='running' and expires_at>clock_timestamp())
-    or exists(select 1 from private.ai_usage where purpose='try_on' and charge_state='held') then
+  if exists(select 1 from private.tryon_chains where state='running')
+    or exists(select 1 from private.ai_usage where purpose='try_on' and charge_state in ('reserved','held')) then
     raise exception 'TRYON-PROMPT1 precondition: a try-on is still running; drain first';
   end if;
   perform set_config('tryon_prompt1.v2_row',
@@ -63,7 +68,7 @@ $$;
 -- Manifest v3: the v2 numbers, model, deployment key and parameters; the layer and outerwear prompts (prompt version 3) and settings.
 insert into private.ai_execution_manifests values (
   'azure-global-image25-sunburst-tryon-v3','gpt-image-2.5-sunburst',3,
-  '9939e8d31998029e6fdd4874aa2d6d870cfb0134fb3671b066015eec1866694a',
+  'd8d18cba54fa9293f5ea460dc9bdf15cdea9838635169f51a842ffd64e24f8ff',
   '20cefa4d2f2fd2c381ac50f30af286f48ea804d9e6fb6d58ca5c5dbd45fa8efe',
   '0b8df2bd60a93da0b70eb8a69a42810800b09be5bf0ab072506f06bd8e3992e3',
   'Azure OpenAI','stillroom-ai-eval.openai.azure.com','v1/images/edits','Global','GlobalStandard',

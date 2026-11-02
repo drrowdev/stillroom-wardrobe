@@ -48,17 +48,18 @@ export const TRYON_SLOT_WORDS: Readonly<Record<TryOnSlot, string>> = Object.free
 
 const PERSON_KEEP = 'Keep the person\'s face, hair, skin, body shape, pose, other clothing and background unchanged. ';
 const GARMENT_KEEP = `${PERSON_KEEP}Keep the garment's colour, pattern, logos, length and shape.`;
-// Layers and outerwear with a front opening are shown open (TRYON-PROMPT1); "keep the shape" alone made the model copy a closed coat.
-const OPEN_KEEP = `${PERSON_KEEP}Keep the garment's colour, pattern, logos, length and shape, apart from how it is fastened.`;
 const REPLACING = `Show the same person wearing this garment, replacing only the clothing it covers. ${GARMENT_KEEP}`;
+// TRYON-PROMPT1: a layer or outerwear garment with a front opening is worn open so the existing clothing shows through, without
+// inventing clothing; "keep the shape" alone made the model copy a closed coat. The sentences below are fixed words, pinned verbatim.
+const OPEN_RULES = 'If this garment has an existing front opening, wear it fully unfastened with its front panels naturally parted, '
+  + 'keeping existing underlying clothing visible through the opening. Do not invent a top or other clothing, or reveal clothing '
+  + 'hidden by another closed layer. If it has no front opening, wear it naturally without creating one. '
+  + `${PERSON_KEEP}Preserve the garment's colour, pattern, logos, length, cut and design; allow only fastening and natural drape `
+  + 'changes needed to wear it open.';
 const TRYON_SLOT_ACTIONS: Readonly<Record<TryOnSlot, string>> = Object.freeze({
   top: REPLACING, bottom: REPLACING, one_piece: REPLACING, footwear: REPLACING,
-  layer: 'Show the same person wearing this garment over the clothing they already wear, leaving that clothing in place and '
-    + 'visible where the garment is open or short. If the garment has a front opening, show it worn open or unfastened so the top '
-    + `underneath is still clearly shown; a garment without a front opening is simply worn over. ${OPEN_KEEP}`,
-  outerwear: 'Show the same person wearing this garment as the outermost layer, over the clothing they already wear. If the '
-    + 'garment has a front opening, such as a coat or jacket, show it worn open or unfastened so the clothing underneath, '
-    + 'including the top, stays clearly visible; a garment without a front opening is simply worn over. ' + OPEN_KEEP,
+  layer: `Show the same person wearing this garment over their existing clothing. ${OPEN_RULES}`,
+  outerwear: `Show the same person wearing this garment as the outermost layer over their existing clothing. ${OPEN_RULES}`,
   accessory: 'Show the same person wearing or carrying this item in the natural place for it, adding it without removing or '
     + 'changing any clothing. Keep the person\'s face, hair, skin, body shape, pose, clothing and background unchanged. '
     + 'Keep the item\'s colour, pattern, logos and shape.',

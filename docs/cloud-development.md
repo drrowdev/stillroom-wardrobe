@@ -1087,47 +1087,68 @@ merge note.
 Owner trial of 2 November 2026 (four garments): with outerwear selected the coat came out closed, so the top underneath was not visible.
 Cause: the v2 outerwear prompt asks for the garment "as the outermost layer, over the clothing they already wear" and to keep its
 "length and shape", and the model copies the closed coat from the garment photo. Owner decision: show coats and jackets open or
-unfastened by default so the clothing underneath stays visible. Adds `20261102090000_tryon_prompt_v3.sql` after
-`20261101200000`, in one transaction, and the immutable manifest `azure-global-image25-sunburst-tryon-v3` (prompt version 3).
-- **What changes.** Only the `layer` and `outerwear` prompt wording (fixed English words, no item or user text): if the garment has
-  a front opening it is shown worn open or unfastened so the top underneath is still clearly shown, a garment without a front opening
-  is simply worn over, and "keep the garment's colour, pattern, logos, length and shape" now ends "apart from how it is fastened".
-  The other five prompts are byte for byte as in v2 (`tests/unit/tryon-chain.test.ts`). The model, deployment key, request
+unfastened by default when they have a front opening, so the clothing underneath stays visible. Adds
+`20261102090000_tryon_prompt_v3.sql` after `20261101200000`, in one transaction, and the immutable manifest
+`azure-global-image25-sunburst-tryon-v3` (prompt version 3).
+- **What changes.** Only the `layer` and `outerwear` prompt wording (fixed English words, no item or user text; the exact text is
+  pinned in `tests/unit/tryon-chain.test.ts`): an outerwear garment is worn "as the outermost layer over their existing clothing", a
+  layer "over their existing clothing"; a garment with an existing front opening is worn fully unfastened with its front panels
+  naturally parted, keeping the existing underlying clothing visible through the opening; no top or other clothing is invented and
+  nothing hidden by another closed layer is revealed; a garment without a front opening is worn naturally without creating one;
+  the garment's colour, pattern, logos, length, cut and design are preserved, allowing only the fastening and drape changes needed to
+  wear it open.
+  The other five prompts are byte for byte as in v2. The model, deployment key, request
   parameters (same hash), rates, limits, 360,000 micro reservation, six steps, result handling and **notice revision 3** are
   unchanged, so nobody consents again. v1 and v2 stay installed and unchanged; v2 is pinned from `tests/fixtures/tryon-v2-frozen.ts`.
 - **Database.** The migration inserts the v3 manifest and its deployment row (same key), moves configured accounts' `tryon_manifest_id`
   v2 -> v3 and replaces only `tryon_claim` and `tryon_bootstrap` (the only latest definitions that name the manifest; the one literal
-  changes, proven line by line in `tests/unit/tryon-prompt-schema.test.ts`). Every other try-on function compares with the account's
-  configured manifest. Consent, the notice revision, results, chains and the saved reference photo are not written; the photo guard
-  runs only when consent no longer equals the notice, so **the saved reference photo stays**. The migration locks the tables a claim
-  or finish writes (reads continue) and then refuses to run while a try-on is running or a try-on charge is held (drain first), so
-  nothing can start between the check and the commit. Afterwards it checks that v3 is on the shared deployment key, no
-  account is left on v2, no consent changed, the v2 row is unchanged and both replaced functions equal the installed bodies except
-  for the manifest literal.
+  changes, proven line by line and byte for byte in `tests/unit/tryon-prompt-schema.test.ts`). Every other try-on function compares
+  with the account's configured manifest. Consent, the notice revision, results, chains and the saved reference photo are not written;
+  the photo guard runs only when consent no longer equals the notice, so **the saved reference photo stays**.
+  **Admission barrier.** First, in one fixed order held to the commit and under a 5-second `lock_timeout`, the migration takes
+  `private.ai_controls`, then `private.tryon_chains`, then `private.ai_usage` in `exclusive` mode (reads continue). That mode conflicts
+  with the row locks every claim, finish, bootstrap and status read takes with `select ... for update`, so a function that already
+  holds a controls row finishes first (and is then seen by the check), and a claim that starts afterwards fails its `nowait` lock and
+  returns BUSY without writing. Only then does it check that no chain is running and no try-on charge is reserved or held, and refuse
+  (drain first) otherwise, before it inserts v3 or moves any account. The order matches the hosted install (the wrapper's ledger lock
+  first, then these) and the scheduled purge and expiry jobs only wait. Afterwards it checks that v3 is on the shared deployment key,
+  no account is left on v2, no consent changed, the v2 row is unchanged and both replaced functions equal the installed bodies except
+  for the manifest literal. `tests/integration/tryon-prompt.sessions.mjs` runs the migration in the hosted-style `execute` wrapper
+  (rolled back): a running chain and a held charge each refuse it with nothing changed, an executing v2 bootstrap finishes first and is
+  moved to v3, and a v2 claim during the migration's locks gets BUSY. A function call that *begins* inside the lock window runs the
+  old body; that matters only for `tryon_bootstrap`, an operator-only call that is not made during the apply window (the drain step).
 - **Wire contract.** Unchanged (`tryon_status` keys, results, step replies). Only the manifest id the Edge function and the app require
   moved to v3.
+
+The two refusals differ. **Ingress `CONFIG_CHANGED`** (HTTP 503): the request's `manifestId` differs from the Edge version's own; it
+is returned before authentication and before the status read. **Preflight `UNCONFIGURED`**: the request matches the Edge version, but
+the database policy shows a different manifest (or notice). Neither claims or charges anything.
 
 | Database | Edge `try-on` | Pages app | Result |
 | --- | --- | --- | --- |
 | v2 | v2 | v2 | today's behaviour |
-| v3 | v2 | any | the old Edge answers `UNCONFIGURED` (the policy shows v3); nothing is claimed or charged |
-| v2 | v3 | any | the new Edge answers `UNCONFIGURED` (the policy shows v2); nothing is claimed or charged |
-| v3 | v3 | v2 (cached) | the old app reads the status but sees a manifest it does not accept, so try-on shows as unavailable until it is reloaded; nothing is charged |
-| v2 | any | v3 | the new app does not accept the v2 manifest: try-on shows as unavailable |
+| v3 | v2 | v2 or v3 | an app that reads the v3 status does not offer Try on; a request naming v3 meets the old Edge: ingress `CONFIG_CHANGED`; a request naming v2 (an app that cached the old status) meets a database showing v3: preflight `UNCONFIGURED`. Nothing is claimed or charged |
+| v2 | v3 | v2 | the old app reads v2 and sends a v2 request: ingress `CONFIG_CHANGED` at the new Edge; nothing is claimed or charged |
+| v2 | v3 | v3 | the new app does not accept the v2 status, so Try on is not offered; a request that got through is ingress-accepted by the new Edge and meets a v2 database: preflight `UNCONFIGURED` |
+| v3 | v3 | v2 (cached) | the old app reads the status, does not accept the v3 manifest and shows try-on as unavailable until it is reloaded; if it sends anyway, ingress `CONFIG_CHANGED`; nothing is charged |
 | v3 | v3 | v3 | the full feature with the new prompts, no new consent |
 
 Rollout, each its own owner-authorised receipt: **drain first** (`tryon_purge_health()` shows `heldUsage: 0` and no running chain; the
-migration refuses otherwise, so a step never settles across the cutover and a chain never mixes v2 and v3 prompts), apply the
+migration refuses otherwise, so a step never settles across the cutover and a chain never mixes v2 and v3 prompts; a chain still
+marked running after its 30 minutes is ended by `tryon_expire_due`, which the scheduled job runs), apply the
 migration, deploy the `try-on` Edge function, then Pages, back to back. Reload the app (or close and reopen the installed one) to
 leave the cached version; no data is lost. There is no database rollback; if the Edge deploy or Pages is delayed the feature stays
 unavailable (fail closed) and the fix is to finish the deploys. Generated types are unchanged. Release-gates ledger rows follow the
 coordinator's merge note.
 
-**Not verified by any test.** No provider call was made, so nothing shows that the model now renders a coat open, keeps the top
-underneath, or leaves a pullover-style layer alone; the tests pin the wording, hashes and rollout contract only. The evidence is the
-owner's own try-on after the Edge deploy (for example a coat over a visible top). Wording that depends on the garment is not part of
-this packet: only the category is known to the server and no item field is ever sent, so the prompt lets the model read the garment
-photo for a front opening. If pullover- or poncho-like outerwear goes wrong in the trial, a follow-up would need its own manifest.
+**Not verified by any test.** No provider call was made, so nothing shows that the model now renders a coat open, keeps the clothing
+underneath, or leaves a garment without a front opening alone; the tests pin the wording, hashes and rollout contract only. The
+evidence is the owner's own try-on after the Edge deploy. **Owner acceptance has three trials:** (1) a coat or jacket with a front
+opening over a visible top: it is worn open and the top shows; (2) a garment without a front opening (a pullover-style layer or
+outerwear): it is worn naturally, with no opening created; (3) a one-piece or an outerwear-only outfit (nothing underneath to show):
+no top or other clothing appears that was not in the outfit. Wording that depends on the garment is not part of this packet: only the
+category is known to the server and no item field is ever sent, so the prompt lets the model read the garment photo for a front
+opening. If a trial goes wrong, a follow-up would need its own manifest.
 
 **TRYON-FLOW1 try-on starts at once (app only; no schema, Edge or notice change).** Owner request of 1 November 2026. Show on me
 (Today) and Try on (outfit) open straight into generation: with a saved reference photo the chain starts by itself; without one the

@@ -115,13 +115,20 @@ describe('TRYON-PROMPT1 migration', () => {
     const sql = await read(MAIN);
     expect(sql.indexOf('TRYON-PROMPT1 precondition')).toBeGreaterThan(-1);
     expect(sql.indexOf('TRYON-PROMPT1 precondition')).toBeLessThan(sql.indexOf('insert into private.ai_execution_manifests'));
-    expect(sql).toContain("exists(select 1 from private.tryon_chains where state='running' and expires_at>clock_timestamp())");
-    expect(sql).toContain("exists(select 1 from private.ai_usage where purpose='try_on' and charge_state='held')");
     expect(sql).toContain('a try-on is still running; drain first');
-    // The drain check is atomic with the cutover: the writers' tables are locked before it, inside the same transaction.
-    expect(sql).toContain('lock table private.tryon_chains, private.ai_usage, private.ai_controls in share row exclusive mode;');
-    expect(sql.indexOf('lock table')).toBeLessThan(sql.indexOf("exists(select 1 from private.tryon_chains where state='running'"));
-    expect(sql.indexOf('lock table')).toBeLessThan(sql.indexOf('insert into private.ai_execution_manifests'));
+    // The drain check is atomic with the cutover: the admission lock comes first (a mode that conflicts with select ... for update),
+    // then the chains, then the usage, all before the check and every write, in one consistent order.
+    const lockC = sql.indexOf('lock table private.ai_controls in exclusive mode;');
+    const lockH = sql.indexOf('lock table private.tryon_chains in exclusive mode;');
+    const lockU = sql.indexOf('lock table private.ai_usage in exclusive mode;');
+    expect(lockC).toBeGreaterThan(sql.indexOf("set local lock_timeout = '5s';"));
+    expect(lockH).toBeGreaterThan(lockC);
+    expect(lockU).toBeGreaterThan(lockH);
+    expect(sql).not.toMatch(/share row exclusive/);
+    expect(lockU).toBeLessThan(sql.indexOf("exists(select 1 from private.tryon_chains where state='running')"));
+    expect(lockU).toBeLessThan(sql.indexOf('insert into private.ai_execution_manifests'));
+    expect(sql.indexOf("exists(select 1 from private.tryon_chains where state='running')")).toBeLessThan(sql.indexOf('insert into private.ai_execution_manifests'));
+    expect(sql).toContain("exists(select 1 from private.ai_usage where purpose='try_on' and charge_state in ('reserved','held'))");
     expect(sql).toContain("set_config('tryon_prompt1.claim'");
     expect(sql).toContain("set_config('tryon_prompt1.bootstrap'");
     expect(sql).toContain('a replaced function differs from the installed body beyond the manifest literal');
