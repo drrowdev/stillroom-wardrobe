@@ -5,6 +5,7 @@ import { mkdir, open, readdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { messages, type Language } from '../../src/i18n/all';
 import { mockBackend, owners, signIn } from './mock-backend';
+import { reloadUntilVisible } from './webkit-reload';
 import { aiFixture, editItem, openPhotoMenu } from './ai-photo-first-support';
 import { closeAccountMenu, expectIdentity, openAccountMenu } from './shell-support';
 
@@ -515,9 +516,9 @@ test('UX L1b replacement Save is refused while editing; a later implicit Save ke
 const itemUrl = 'http://127.0.0.1:54321/rest/v1/items*';
 const descriptionUrl = 'http://127.0.0.1:54321/rest/v1/rpc/update_image_description';
 const save = (page: Page, language: Language = 'en') => page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true });
+const detailReady = (page: Page) => page.locator('#detail-title').or(page.locator('#detail-edit'));
 async function openMore(page: Page) {
-  // Also used right after a reload: the app boots, restores the session and reads the item first, which can exceed the 5 s default on a loaded runner.
-  await expect(page.locator('#detail-title').or(page.locator('#detail-edit'))).toBeVisible({ timeout: 20_000 });
+  await expect(detailReady(page)).toBeVisible({ timeout: 10_000 });
   if (await page.locator('#detail-edit').isVisible()) await editItem(page);
   await page.locator('.detail-name details').evaluateAll((elements) => elements.forEach((element) => { (element as HTMLDetailsElement).open = true; }));
 }
@@ -574,7 +575,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(Object.keys(calls[0]!.body).sort()).toEqual(['category', 'field_provenance', 'title']);
     expect(calls[1]!.body).toEqual({ p_image_id: image.id, p_expected_description_version: 1, p_alt_text: 'Oma kuvaus / egen beskrivning' });
     await expect(save(page, language)).toBeDisabled();
-    await page.reload();
+    await reloadUntilVisible(page, detailReady(page));
     await openMore(page);
     await expect(page.locator('#detail-title')).toHaveValue('Å overshirt 🌿');
     await expect(page.locator('#detail-description')).toHaveValue('Oma kuvaus / egen beskrivning');
@@ -664,7 +665,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await title.fill('🍂'.repeat(100));
     await expect(save(page, language)).toBeDisabled();
     editorDiagnostics.get(page)?.capture('before-reload');
-    await page.reload();
+    await reloadUntilVisible(page, detailReady(page));
     editorDiagnostics.get(page)?.capture('reloaded');
     await openMore(page);
     editorDiagnostics.get(page)?.capture('reopened');
