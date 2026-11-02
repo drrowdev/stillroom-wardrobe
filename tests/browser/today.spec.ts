@@ -1677,29 +1677,106 @@ test('Undo of an avoided pair restores its card even when a refresh has replaced
   await expect(page.locator('.today-idea-title:focus')).toHaveCount(1);
 });
 
-for (const width of [320, 390]) {
-  test(`Tabbing through every card of the swipe row keeps each focused control fully visible at ${width}px`, async ({ page }) => {
+const zoomed = 'html { font-size: 200%; } body { font-size: 32px; }';
+// Whether the focused element lies fully inside the swipe row; null when focus is outside it.
+const focusInRow = (page: Page) => page.evaluate(() => {
+  const row = document.querySelector('.today-set')!;
+  const element = document.activeElement;
+  if (!element || !row.contains(element)) return null;
+  const edge = row.getBoundingClientRect(), box = element.getBoundingClientRect();
+  return box.left >= edge.left - 1 && box.right <= edge.right + 1;
+});
+for (const [width, zoom] of [[320, false], [390, false], [320, true]] as const) {
+  test(`Tabbing through every card of the swipe row keeps each focused control fully visible at ${width}px${zoom ? ' and 200% text' : ''}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 });
     await start(page);
+    if (zoom) await page.addStyleTag({ content: zoomed });
     await expect(cards(page)).toHaveCount(3);
-    const visible = () => page.evaluate(() => {
-      const row = document.querySelector('.today-set')!;
-      const element = document.activeElement;
-      if (!element || !row.contains(element)) return null;
-      const edge = row.getBoundingClientRect(), box = element.getBoundingClientRect();
-      return box.left >= edge.left - 1 && box.right <= edge.right + 1;
-    });
     await idea(page, 0).getByRole('button', { name: text('calendar.wearToday'), exact: true }).focus();
     let visited = 0;
     for (let step = 0; step < 30; step++) {
-      if (await visible() === null) break;
-      await expect.poll(visible).toBe(true);
+      if (await focusInRow(page) === null) break;
+      await expect.poll(() => focusInRow(page)).toBe(true);
       visited++;
       await page.keyboard.press('Tab');
     }
     // Wear today, Save as outfit, Like and More options on each of the three cards.
     expect(visited).toBe(12);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+}
+
+test('An open More options menu on the last card keeps its focused buttons fully visible at 320px and 200% text', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  await start(page);
+  await page.addStyleTag({ content: zoomed });
+  await expect(cards(page)).toHaveCount(3);
+  await moreOptions(page, 2).focus();
+  await page.keyboard.press('Enter');
+  await expect(menuPanel(page, 2)).toBeVisible();
+  for (const key of ['today.notForMe', 'today.dontPair'] as const) {
+    await page.keyboard.press('Tab');
+    await expect(menuButton(page, key, 'en', 2)).toBeFocused();
+    await expect.poll(() => focusInRow(page)).toBe(true);
+  }
+});
+
+for (const width of [320, 390]) {
+  test(`Clicking the visible part of a card in the swipe row delivers exactly one click at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await start(page);
+    await expect(cards(page)).toHaveCount(3);
+    // Count clicks that reach a button, and keep them from acting (Wear today and the others would change the page).
+    await page.evaluate(() => {
+      const clicks: string[] = [];
+      (window as unknown as { clicks: string[] }).clicks = clicks;
+      window.addEventListener('click', event => {
+        const target = event.target instanceof Element ? event.target.closest('.today-set') : null;
+        if (!target) return;
+        clicks.push(event.target instanceof Element ? event.target.closest('button')?.textContent?.trim() || event.target.closest('button')?.getAttribute('aria-label') || '(not a button)' : '(not an element)');
+        event.stopPropagation();
+        event.preventDefault();
+      }, true);
+    });
+    const row = page.locator('.today-set');
+    const align = async (index: number) => {
+      await row.evaluate((node, slot) => {
+        const own = node.children[slot]!.getBoundingClientRect();
+        node.scrollLeft += own.left - node.getBoundingClientRect().left;
+      }, index);
+      await page.waitForTimeout(150);
+    };
+    const buttons = [text('calendar.wearToday'), text('today.save'), text('today.like'), text('common.moreOptions')];
+    const sent = async (index: number, name: string) => {
+      const control = idea(page, index).getByRole('button', { name, exact: true });
+      const edge = (await row.boundingBox())!;
+      // Bring the control to the middle of the page (vertically only: the row must not move) before pressing it.
+      await page.evaluate(delta => window.scrollBy(0, delta), (await control.boundingBox())!.y - 300);
+      const box = (await control.boundingBox())!;
+      const left = Math.max(box.x, edge.x), right = Math.min(box.x + box.width, edge.x + edge.width);
+      if (right - left < 12) return null;
+      await page.evaluate(() => { (window as unknown as { clicks: string[] }).clicks.length = 0; });
+      await page.mouse.click((left + right) / 2, box.y + box.height / 2);
+      await page.waitForTimeout(150);
+      return page.evaluate(() => [...(window as unknown as { clicks: string[] }).clicks]);
+    };
+    let delivered = 0;
+    // The peeking card (its Wear today is the part showing) and every control of a card brought fully into view.
+    for (const [first, peeking] of [[0, 1], [1, 2]] as const) {
+      await align(first);
+      const clicked = await sent(peeking, text('calendar.wearToday'));
+      expect(clicked, `the peeking card ${peeking + 1}`).toEqual([text('calendar.wearToday')]);
+      delivered++;
+    }
+    for (const index of [0, 1, 2]) {
+      await align(index);
+      for (const name of buttons) {
+        const clicked = await sent(index, name);
+        expect(clicked, `${name} on card ${index + 1}`).toEqual([name === text('common.moreOptions') ? '…' : name]);
+        delivered++;
+      }
+    }
+    expect(delivered).toBe(14);
   });
 }
 

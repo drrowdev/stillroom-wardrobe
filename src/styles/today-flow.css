@@ -31,6 +31,11 @@
 .today-page .today-set > li:only-child { flex-basis: 100%; }
 .today-page .today-set > li > .today-card { flex: 1 1 auto; }
 .today-more-ideas { margin-top: 8px; }
+/* Nothing inside a card may be wider than the card, so a focused control is always fully visible once its card is. */
+.today-page .today-set .today-card { overflow-wrap: anywhere; }
+.today-page .today-set .button, .today-page .today-set .text-button, .today-page .today-set .today-menu, .today-page .today-set .today-menu-panel { max-width: 100%; }
+.today-page .today-set .button, .today-page .today-set .text-button { text-align: center; }
+.today-page .today-set .today-menu-panel .text-button { justify-content: flex-start; text-align: start; }
 @media (min-width: 900px) {
   .today-page .today-set { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; overflow: visible; scroll-snap-type: none; }
   .today-page .today-set > li { flex: none; }
