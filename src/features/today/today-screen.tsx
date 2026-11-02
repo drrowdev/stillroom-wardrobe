@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type FocusEvent as ReactFocusEvent } from 'react';
 import '../../styles/today-flow.css';
 import { Icon } from '../../app/icon';
 import type { OwnerScope } from '../../auth/session';
@@ -213,6 +213,16 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
     return ideaSelection(suggestion.itemIds, components).steps.length ? () => onTryOn({ itemIds: suggestion.itemIds, components }) : null;
   };
   const shownIdeas = shownKeys.flatMap(key => ideas.ideas.find(entry => entry.key === key) ?? []);
+  // Focus moving into a card of the swipe row brings the whole card into view, so no focused control is left cut off by the row's edge.
+  // Only the row scrolls (instantly, so reduced motion is respected); the page does not move.
+  const revealCard = (event: ReactFocusEvent<HTMLOListElement>) => {
+    const scroller = event.currentTarget;
+    const card = event.target instanceof Element ? event.target.closest('li') : null;
+    if (!card || scroller.scrollWidth <= scroller.clientWidth) return;
+    const edge = scroller.getBoundingClientRect(), box = card.getBoundingClientRect();
+    if (box.left >= edge.left - 1 && box.right <= edge.right + 1) return;
+    scroller.scrollLeft += box.left - edge.left;
+  };
   // Until the page moves on after a pair is avoided, nothing is shown in place of the ideas.
   const advancing = shownKeys.length === 0 && ideas.avoids !== handled.current.avoids && ideas.avoidContext === ideas.contextKey;
   const moreButton = <button type="button" className="button button-secondary" disabled={browseLocked} onClick={another}><Icon name="refresh" />{t('today.more')}</button>;
@@ -255,7 +265,7 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
       </div>
       : <>
         {result.missingDetails.includes('formality') && <p className="muted today-hint">{t('today.missingFormality')}</p>}
-        {shownIdeas.length ? <ol ref={row} className="today-set">
+        {shownIdeas.length ? <ol ref={row} className="today-set" onFocus={revealCard}>
           {shownIdeas.map((suggestion, index) => <li key={suggestion.key}>
             <Idea suggestion={suggestion} number={index + 1} total={shownIdeas.length} byId={byId} images={images} t={t} list={list}
               online={online} vote={ideas.votes.get(suggestion.key) ?? null} pending={ideas.pending} failed={ideas.failed === suggestion.key} unresolved={ideas.unresolved === suggestion.key} locked={ideas.unresolved !== null || wear.state.kind === 'inFlight'} onRetry={ideas.retry}

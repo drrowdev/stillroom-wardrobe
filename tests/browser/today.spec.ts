@@ -1548,12 +1548,9 @@ test('Today lays the ideas out as a swipe row on a phone and side by side on a w
   expect(second.x + second.width).toBeGreaterThan(390);
   expect(await set.evaluate(node => node.scrollWidth > node.clientWidth && getComputedStyle(node).scrollSnapType.startsWith('x'))).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  // Reaching a card with the keyboard brings it into view. WebKit's scroll on focus inside a snap row is not deterministic, so only the
-  // Chromium-based projects assert it.
+  // Reaching a card with the keyboard brings it into view.
   await idea(page, 2).getByRole('button', { name: text('calendar.wearToday'), exact: true }).focus();
-  if (test.info().project.name !== 'webkit-photo') {
-    await expect.poll(async () => { const box = await boxOf(2); return box.x >= 0 && box.x + box.width <= 390 + 1; }).toBe(true);
-  }
+  await expect.poll(async () => { const box = await boxOf(2); return box.x >= 0 && box.x + box.width <= 390 + 1; }).toBe(true);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   await page.setViewportSize({ width: 1100, height: 900 });
@@ -1679,6 +1676,32 @@ test('Undo of an avoided pair restores its card even when a refresh has replaced
   expect(await pageIdeas(page)).toContain(before[0]);
   await expect(page.locator('.today-idea-title:focus')).toHaveCount(1);
 });
+
+for (const width of [320, 390]) {
+  test(`Tabbing through every card of the swipe row keeps each focused control fully visible at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 });
+    await start(page);
+    await expect(cards(page)).toHaveCount(3);
+    const visible = () => page.evaluate(() => {
+      const row = document.querySelector('.today-set')!;
+      const element = document.activeElement;
+      if (!element || !row.contains(element)) return null;
+      const edge = row.getBoundingClientRect(), box = element.getBoundingClientRect();
+      return box.left >= edge.left - 1 && box.right <= edge.right + 1;
+    });
+    await idea(page, 0).getByRole('button', { name: text('calendar.wearToday'), exact: true }).focus();
+    let visited = 0;
+    for (let step = 0; step < 30; step++) {
+      if (await visible() === null) break;
+      await expect.poll(visible).toBe(true);
+      visited++;
+      await page.keyboard.press('Tab');
+    }
+    // Wear today, Save as outfit, Like and More options on each of the three cards.
+    expect(visited).toBe(12);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  });
+}
 
 test('Save as outfit and Wear today act on the idea of the card they are on', async ({ page }) => {
   const { api } = await start(page);
