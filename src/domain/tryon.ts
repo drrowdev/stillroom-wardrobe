@@ -2,16 +2,17 @@
 // probe and activation gates. The prompts, request parameters and settings are hashed into the manifest row of
 // 20261003090000_try_on.sql, and the garment selection below is re-run in SQL at chain start (tryon_claim step 1).
 
-// Manifest v2 (TRYON-LIMITS1) adds the layer, outerwear and accessory prompts, allows six chained garments and keeps results until
-// the owner deletes them. Manifest v1 stays installed unchanged; its frozen prompt and settings are pinned in
-// tests/fixtures/tryon-v1-frozen.ts.
-export const TRYON_MANIFEST = 'azure-global-image25-sunburst-tryon-v2';
+// Manifest v2 (TRYON-LIMITS1) added the layer, outerwear and accessory prompts, six chained garments and results kept until the owner
+// deletes them. Manifest v3 (TRYON-PROMPT1) changes only the layer and outerwear wording so a coat or jacket with a front opening is
+// shown open. Manifests v1 and v2 stay installed unchanged; their frozen prompts and settings are pinned in
+// tests/fixtures/tryon-v1-frozen.ts and tests/fixtures/tryon-v2-frozen.ts.
+export const TRYON_MANIFEST = 'azure-global-image25-sunburst-tryon-v3';
 export const TRYON_MODEL = 'gpt-image-2.5-sunburst';
 export const TRYON_DEPLOYMENT = 'eval-image25-sunburst-20260908';
 // The same immutable provider identity as photo enhancement: both features share its capacity and switch (ADR28).
 export const TRYON_DEPLOYMENT_KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';
 export const TRYON_ENDPOINT = 'https://stillroom-ai-eval.openai.azure.com/openai/v1/images/edits';
-export const TRYON_PROMPT_VERSION = 2;
+export const TRYON_PROMPT_VERSION = 3;
 // Revision 3 is the notice that says a saved picture stays until the owner deletes it (TRYON-LIMITS1); revision 2 stated the one
 // reusable reference photo (TRYON-PHOTO1) and revision 1 was never kept. The deployed Edge function checks the configured
 // revision for equality with this constant, so the Edge function must be redeployed together with the migration that moves the
@@ -45,14 +46,19 @@ export const TRYON_SLOT_WORDS: Readonly<Record<TryOnSlot, string>> = Object.free
   outerwear: 'outerwear', accessory: 'accessory',
 });
 
-const GARMENT_KEEP = 'Keep the person\'s face, hair, skin, body shape, pose, other clothing and background unchanged. '
-  + 'Keep the garment\'s colour, pattern, logos, length and shape.';
+const PERSON_KEEP = 'Keep the person\'s face, hair, skin, body shape, pose, other clothing and background unchanged. ';
+const GARMENT_KEEP = `${PERSON_KEEP}Keep the garment's colour, pattern, logos, length and shape.`;
+// Layers and outerwear with a front opening are shown open (TRYON-PROMPT1); "keep the shape" alone made the model copy a closed coat.
+const OPEN_KEEP = `${PERSON_KEEP}Keep the garment's colour, pattern, logos, length and shape, apart from how it is fastened.`;
 const REPLACING = `Show the same person wearing this garment, replacing only the clothing it covers. ${GARMENT_KEEP}`;
 const TRYON_SLOT_ACTIONS: Readonly<Record<TryOnSlot, string>> = Object.freeze({
   top: REPLACING, bottom: REPLACING, one_piece: REPLACING, footwear: REPLACING,
   layer: 'Show the same person wearing this garment over the clothing they already wear, leaving that clothing in place and '
-    + `visible where the garment is open or short. ${GARMENT_KEEP}`,
-  outerwear: `Show the same person wearing this garment as the outermost layer, over the clothing they already wear. ${GARMENT_KEEP}`,
+    + 'visible where the garment is open or short. If the garment has a front opening, show it worn open or unfastened so the top '
+    + `underneath is still clearly shown; a garment without a front opening is simply worn over. ${OPEN_KEEP}`,
+  outerwear: 'Show the same person wearing this garment as the outermost layer, over the clothing they already wear. If the '
+    + 'garment has a front opening, such as a coat or jacket, show it worn open or unfastened so the clothing underneath, '
+    + 'including the top, stays clearly visible; a garment without a front opening is simply worn over. ' + OPEN_KEEP,
   accessory: 'Show the same person wearing or carrying this item in the natural place for it, adding it without removing or '
     + 'changing any clothing. Keep the person\'s face, hair, skin, body shape, pose, clothing and background unchanged. '
     + 'Keep the item\'s colour, pattern, logos and shape.',

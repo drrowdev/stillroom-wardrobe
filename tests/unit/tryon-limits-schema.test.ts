@@ -62,7 +62,7 @@ describe('TRYON-LIMITS1 migration', () => {
     expect(sql).not.toContain('\r');
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
     expect(names.indexOf(MAIN)).toBeGreaterThan(names.indexOf('20261101080000_persistent_ai_availability.sql'));
-    expect(names.at(-1)).toBe(MAIN);
+    expect(names).toContain(MAIN);
     expect([...sql.matchAll(/create or replace function ([a-z_0-9.]+)\(/g)].map((match) => match[1])).toEqual(REPLACED.map((entry) => entry.fn));
     const code = sql.split('\n').filter((line) => !line.trimStart().startsWith('--')).join('\n');
     expect(code).not.toMatch(/\bcreate function\b|\bdrop (function|table|trigger|index)\b|\bgrant\b|\brevoke\b|\btruncate\b|disable trigger/);

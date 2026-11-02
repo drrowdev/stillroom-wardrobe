@@ -1037,7 +1037,8 @@ Owner direction of 1 November 2026 ("Keep the photos until I remove them using t
 `20261101200000_tryon_limits.sql` after `20261101080000`, in one transaction.
 - **Garments.** A try-on has up to six steps, one garment per call: top (or a one-piece), bottoms, layer, outerwear, shoes,
   one accessory, in that order (shoes stay last for outfits without the new kinds). A second layer, outerwear piece or accessory
-  is listed as not included. The new manifest `azure-global-image25-sunburst-tryon-v2` (prompt version 2) adds the layer,
+  is listed as not included. The new manifest `azure-global-image25-sunburst-tryon-v2` (prompt version 2; its layer and outerwear
+  wording was replaced by manifest v3, see TRYON-PROMPT1 below) adds the layer,
   outerwear and accessory prompts and states six steps; the four existing prompts, the parameters, the rates, the 360,000
   micro reservation, the deployment key and the 30-minute chain lifetime are unchanged, and the v1 row stays installed.
   A full chain takes about 4 to 5 minutes (one provider call of roughly 40 seconds per step, sequential, so the 2 requests
@@ -1081,6 +1082,50 @@ then Pages, back to back; the owner then turns try-on on (consent 3) and saves t
 rollback; if the Edge deploy or Pages is delayed the feature stays unavailable (fail closed), and the fix is to finish the deploys.
 Generated types are unchanged (no public function name or signature changed). Release-gates ledger rows follow the coordinator's
 merge note.
+
+**TRYON-PROMPT1 coats and jackets are shown open (source only; hosted apply, Edge and Pages deploys owner-gated).**
+Owner trial of 2 November 2026 (four garments): with outerwear selected the coat came out closed, so the top underneath was not visible.
+Cause: the v2 outerwear prompt asks for the garment "as the outermost layer, over the clothing they already wear" and to keep its
+"length and shape", and the model copies the closed coat from the garment photo. Owner decision: show coats and jackets open or
+unfastened by default so the clothing underneath stays visible. Adds `20261102090000_tryon_prompt_v3.sql` after
+`20261101200000`, in one transaction, and the immutable manifest `azure-global-image25-sunburst-tryon-v3` (prompt version 3).
+- **What changes.** Only the `layer` and `outerwear` prompt wording (fixed English words, no item or user text): if the garment has
+  a front opening it is shown worn open or unfastened so the top underneath is still clearly shown, a garment without a front opening
+  is simply worn over, and "keep the garment's colour, pattern, logos, length and shape" now ends "apart from how it is fastened".
+  The other five prompts are byte for byte as in v2 (`tests/unit/tryon-chain.test.ts`). The model, deployment key, request
+  parameters (same hash), rates, limits, 360,000 micro reservation, six steps, result handling and **notice revision 3** are
+  unchanged, so nobody consents again. v1 and v2 stay installed and unchanged; v2 is pinned from `tests/fixtures/tryon-v2-frozen.ts`.
+- **Database.** The migration inserts the v3 manifest and its deployment row (same key), moves configured accounts' `tryon_manifest_id`
+  v2 -> v3 and replaces only `tryon_claim` and `tryon_bootstrap` (the only latest definitions that name the manifest; the one literal
+  changes, proven line by line in `tests/unit/tryon-prompt-schema.test.ts`). Every other try-on function compares with the account's
+  configured manifest. Consent, the notice revision, results, chains and the saved reference photo are not written; the photo guard
+  runs only when consent no longer equals the notice, so **the saved reference photo stays**. The migration refuses to run while a
+  try-on is running or a try-on charge is held (drain first), and checks afterwards that v3 is on the shared deployment key, no
+  account is left on v2, no consent changed and the v2 row is unchanged.
+- **Wire contract.** Unchanged (`tryon_status` keys, results, step replies). Only the manifest id the Edge function and the app require
+  moved to v3.
+
+| Database | Edge `try-on` | Pages app | Result |
+| --- | --- | --- | --- |
+| v2 | v2 | v2 | today's behaviour |
+| v3 | v2 | any | the old Edge answers `UNCONFIGURED` (the policy shows v3); nothing is claimed or charged |
+| v2 | v3 | any | the new Edge answers `UNCONFIGURED` (the policy shows v2); nothing is claimed or charged |
+| v3 | v3 | v2 (cached) | the old app reads the status but sees a manifest it does not accept, so try-on shows as unavailable until it is reloaded; nothing is charged |
+| v2 | any | v3 | the new app does not accept the v2 manifest: try-on shows as unavailable |
+| v3 | v3 | v3 | the full feature with the new prompts, no new consent |
+
+Rollout, each its own owner-authorised receipt: **drain first** (`tryon_purge_health()` shows `heldUsage: 0` and no running chain; the
+migration refuses otherwise, so a step never settles across the cutover and a chain never mixes v2 and v3 prompts), apply the
+migration, deploy the `try-on` Edge function, then Pages, back to back. Reload the app (or close and reopen the installed one) to
+leave the cached version; no data is lost. There is no database rollback; if the Edge deploy or Pages is delayed the feature stays
+unavailable (fail closed) and the fix is to finish the deploys. Generated types are unchanged. Release-gates ledger rows follow the
+coordinator's merge note.
+
+**Not verified by any test.** No provider call was made, so nothing shows that the model now renders a coat open, keeps the top
+underneath, or leaves a pullover-style layer alone; the tests pin the wording, hashes and rollout contract only. The evidence is the
+owner's own try-on after the Edge deploy (for example a coat over a visible top). Wording that depends on the garment is not part of
+this packet: only the category is known to the server and no item field is ever sent, so the prompt lets the model read the garment
+photo for a front opening. If pullover- or poncho-like outerwear goes wrong in the trial, a follow-up would need its own manifest.
 
 **TRYON-FLOW1 try-on starts at once (app only; no schema, Edge or notice change).** Owner request of 1 November 2026. Show on me
 (Today) and Try on (outfit) open straight into generation: with a saved reference photo the chain starts by itself; without one the

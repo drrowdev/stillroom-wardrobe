@@ -397,7 +397,7 @@ async function exercise(ctx) {
   // attempt as its active request, a reserved result slot, a completed chain with its ready picture and a
   // try-on probe authorisation, plus (VTO-3a) one Stop marker and (TRYON-PHOTO1) one saved reference photo. C's go with the account; D's stay.
   step = 'fixture-tryon';
-  const tryonManifest = "'azure-global-image25-sunburst-tryon-v2'";
+  const tryonManifest = "'azure-global-image25-sunburst-tryon-v3'";
   for (const [label, uid] of [['C', c], ['D', d]]) {
     const slot = randomUUID(), request = randomUUID(), chain = randomUUID(), result = randomUUID();
     const done = randomUUID(), picture = randomUUID();

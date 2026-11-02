@@ -9,6 +9,7 @@ import {
 } from '../../src/domain/tryon';
 import { selectTryOnStepsV1 } from '../fixtures/tryon-select-v1';
 import { TRYON_V1_MANIFEST, TRYON_V1_PROMPTS, TRYON_V1_SETTINGS } from '../fixtures/tryon-v1-frozen';
+import { TRYON_V2_MANIFEST, TRYON_V2_PROMPTS, TRYON_V2_SETTINGS } from '../fixtures/tryon-v2-frozen';
 import { ENHANCE_PARAMETERS } from '../../src/domain/enhancement';
 import { categories } from '../../src/domain/wardrobe';
 
@@ -98,12 +99,29 @@ describe('try-on request contract', () => {
     expect([...tryOnSlots].sort()).toEqual(Object.keys(TRYON_PROMPTS).sort());
   });
 
-  it('keeps the four installed v1 prompts byte for byte and words the three new slots for adding, not replacing', () => {
+  it('keeps the installed v1 prompts and the v2 prompts that did not change byte for byte', () => {
     for (const [slot, prompt] of Object.entries(TRYON_V1_PROMPTS)) expect(TRYON_PROMPTS[slot as keyof typeof TRYON_PROMPTS]).toBe(prompt);
+    for (const slot of ['one_piece', 'top', 'bottom', 'footwear', 'accessory'] as const) expect(TRYON_PROMPTS[slot]).toBe(TRYON_V2_PROMPTS[slot]);
+    expect(TRYON_PROMPTS.layer).not.toBe(TRYON_V2_PROMPTS.layer);
+    expect(TRYON_PROMPTS.outerwear).not.toBe(TRYON_V2_PROMPTS.outerwear);
+    expect(Object.keys(TRYON_PROMPTS)).toEqual(Object.keys(TRYON_V2_PROMPTS));
+  });
+
+  it('words the layer and outerwear prompts to show a garment with a front opening open, and still adds rather than replaces', () => {
     expect(TRYON_PROMPTS.layer).toContain('over the clothing they already wear');
     expect(TRYON_PROMPTS.outerwear).toContain('as the outermost layer');
     expect(TRYON_PROMPTS.accessory).toContain('adding it without removing or changing any clothing');
+    for (const slot of ['layer', 'outerwear'] as const) {
+      expect(TRYON_PROMPTS[slot]).toContain('If the garment has a front opening');
+      expect(TRYON_PROMPTS[slot]).toContain('show it worn open or unfastened');
+      expect(TRYON_PROMPTS[slot]).toContain('a garment without a front opening is simply worn over');
+      expect(TRYON_PROMPTS[slot]).toContain('apart from how it is fastened');
+    }
+    expect(TRYON_PROMPTS.outerwear).toContain('including the top, stays clearly visible');
+    expect(TRYON_PROMPTS.layer).toContain('the top underneath is still clearly shown');
     for (const slot of ['layer', 'outerwear', 'accessory'] as const) expect(TRYON_PROMPTS[slot]).not.toContain('replacing only the clothing it covers');
+    // Fixed words only: no user text or item field can reach a prompt.
+    for (const prompt of Object.values(TRYON_PROMPTS)) expect(prompt).toMatch(/^Image 1 shows a person\. Image 2 shows one garment \([a-z -]+\)\. [^{}$]+$/);
   });
 
   it('pins the installed v1 prompt, parameter and settings hashes from the frozen fixture', async () => {
@@ -115,19 +133,34 @@ describe('try-on request contract', () => {
     expect(sql).toContain(`'USD',800,3000,15000,8000,${TRYON_RESERVATION_MICRO},512000,1600,4194304,512000,70,'2027-01-01T00:00:00Z'`);
   });
 
-  it('pins the v2 prompt, parameter and settings hashes and the manifest envelope in TRYON-LIMITS1', async () => {
+  it('pins the v2 prompt, parameter and settings hashes from the frozen fixture in TRYON-LIMITS1', async () => {
     const sql = await readFile(new URL('../../supabase/migrations/20261101200000_tryon_limits.sql', import.meta.url), 'utf8');
+    for (const hash of [sha(JSON.stringify(TRYON_V2_PROMPTS)), sha(JSON.stringify(TRYON_PARAMETERS)), sha(JSON.stringify(TRYON_V2_SETTINGS))]) {
+      expect(sql).toContain(`'${hash}'`);
+    }
+    expect(sql).toContain(`'${TRYON_V2_MANIFEST}','${TRYON_MODEL}',2,`);
+    expect(sql).toContain(`'USD',800,3000,15000,8000,${TRYON_RESERVATION_MICRO},512000,1600,4194304,512000,70,'2027-01-01T00:00:00Z'`);
+  });
+
+  it('pins the v3 prompt, parameter and settings hashes and the manifest envelope in TRYON-PROMPT1', async () => {
+    const sql = await readFile(new URL('../../supabase/migrations/20261102090000_tryon_prompt_v3.sql', import.meta.url), 'utf8');
     for (const hash of [sha(JSON.stringify(TRYON_PROMPTS)), sha(JSON.stringify(TRYON_PARAMETERS)), sha(JSON.stringify(TRYON_SETTINGS))]) {
       expect(sql).toContain(`'${hash}'`);
     }
     expect(sql).toContain(`'${TRYON_MANIFEST}','${TRYON_MODEL}',${TRYON_PROMPT_VERSION},`);
-    expect(TRYON_MANIFEST).toBe('azure-global-image25-sunburst-tryon-v2');
+    expect(TRYON_MANIFEST).toBe('azure-global-image25-sunburst-tryon-v3');
+    expect(TRYON_PROMPT_VERSION).toBe(3);
     expect(sql).toContain(`'USD',800,3000,15000,8000,${TRYON_RESERVATION_MICRO},512000,1600,4194304,512000,70,'2027-01-01T00:00:00Z'`);
-    // The v1 manifest is not edited: the new migration inserts v2 only, and the request parameters did not change.
+    // The earlier manifests are not edited: the new migration inserts v3 only, and neither the parameters nor the limits changed.
     expect(sql.match(/insert into private\.ai_execution_manifests/g)).toHaveLength(1);
     expect(sha(JSON.stringify(TRYON_PARAMETERS))).toBe(sha(JSON.stringify(TRYON_V1_SETTINGS.parameters)));
+    expect(sha(JSON.stringify(TRYON_PARAMETERS))).toBe(sha(JSON.stringify(TRYON_V2_SETTINGS.parameters)));
+    expect(JSON.stringify(TRYON_SETTINGS.limits)).toBe(JSON.stringify(TRYON_V2_SETTINGS.limits));
+    expect(JSON.stringify({ ...TRYON_SETTINGS, profileId: TRYON_V2_MANIFEST, promptVersion: 2 })).toBe(JSON.stringify(TRYON_V2_SETTINGS));
+    expect(sha(JSON.stringify(TRYON_PROMPTS))).not.toBe(sha(JSON.stringify(TRYON_V2_PROMPTS)));
     expect(TRYON_SETTINGS.maxSteps).toBe(TRYON_MAX_STEPS);
     expect(TRYON_SETTINGS.maxResults).toBe(TRYON_MAX_RESULTS);
+    // The notice is unchanged, so owners are not asked to consent again.
     expect(TRYON_NOTICE_REVISION).toBe(3);
     expect(BigInt(TRYON_RESERVATION_MICRO)).toBe(tryOnEstimateMicro(15000, 8000));
     expect(TRYON_PARAMETERS).toEqual({ ...ENHANCE_PARAMETERS, model: TRYON_DEPLOYMENT });
