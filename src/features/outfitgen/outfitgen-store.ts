@@ -158,6 +158,8 @@ export function readList(store: OutfitGenStore, mode: 'shared' | 'fresh' = 'shar
 }
 /** A decision starts or lands: every list read that began before this moment is out of date. */
 const invalidateList = (store: OutfitGenStore) => { store.listFloor = ++store.listSeq; };
+/** Every decision ends with a list read that postdates it, whatever the outcome: advancing the floor drops reads that were in flight, so a replacement must always follow. */
+const settleList = (store: OutfitGenStore) => { if (!store.disposed) void readList(store, 'fresh'); };
 
 /** Turns suggested outfits on or off. Writes run one at a time, after a running read; the permission is checked again after it. */
 export function writeConsent(store: OutfitGenStore, enabled: boolean): Promise<void> {
@@ -316,11 +318,10 @@ export async function keepSuggestion(store: OutfitGenStore, id: string): Promise
     if (store.disposed) return { code: 'RETRY' };
     invalidateList(store);
     const drop = (key: MessageKey): Decision => {
-      store.update({ list: { kind: 'ready', suggestions: without(store, id) } }); store.notice({ key }); void readList(store, 'fresh'); return { code: 'GONE' };
+      store.update({ list: { kind: 'ready', suggestions: without(store, id) } }); store.notice({ key }); return { code: 'GONE' };
     };
     if (reply.code === 'OK') {
       store.update({ list: { kind: 'ready', suggestions: without(store, id) }, removed: null }); store.notice({ key: 'outfitgen.kept' });
-      void readList(store, 'fresh');
       return { code: 'OK' };
     }
     if (reply.code === 'STALE') return drop('outfitgen.stale');
@@ -331,7 +332,7 @@ export async function keepSuggestion(store: OutfitGenStore, id: string): Promise
   } catch {
     if (!store.disposed) store.notice({ key: 'outfitgen.decideFailed' });
     return { code: 'RETRY' };
-  } finally { mark(store, id, false); }
+  } finally { mark(store, id, false); settleList(store); }
 }
 
 /** Remove hides the suggestion for good (and marks the set as not wanted in Today); the card stays offered for Undo. */
@@ -346,16 +347,15 @@ export async function removeSuggestion(store: OutfitGenStore, id: string): Promi
     invalidateList(store);
     if (reply.code === 'OK') {
       store.update({ list: { kind: 'ready', suggestions: without(store, id) }, removed: card }); store.notice({ key: 'outfitgen.removed' });
-      void readList(store, 'fresh');
       return;
     }
     if (reply.code === 'CONFLICT' || reply.code === 'NOT_FOUND') {
-      store.update({ list: { kind: 'ready', suggestions: without(store, id) } }); store.notice({ key: 'outfitgen.conflict' }); void readList(store, 'fresh'); return;
+      store.update({ list: { kind: 'ready', suggestions: without(store, id) } }); store.notice({ key: 'outfitgen.conflict' }); return;
     }
     store.notice({ key: reply.code === 'BUSY' ? 'outfitgen.decideBusy' : 'outfitgen.decideFailed' });
   } catch {
     if (!store.disposed) store.notice({ key: 'outfitgen.decideFailed' });
-  } finally { mark(store, id, false); }
+  } finally { mark(store, id, false); settleList(store); }
 }
 
 /** Undo puts the suggestion back only while nothing else changed that set's vote in Today and the list has room; the server decides. */
@@ -368,7 +368,7 @@ export async function undoRemoval(store: OutfitGenStore): Promise<void> {
     const reply = await store.api.undoRemove(card.id);
     if (store.disposed) return;
     invalidateList(store);
-    if (reply.code === 'OK') { store.update({ removed: null }); store.notice({ key: 'outfitgen.restored' }); void readList(store, 'fresh'); return; }
+    if (reply.code === 'OK') { store.update({ removed: null }); store.notice({ key: 'outfitgen.restored' }); return; }
     if (reply.code === 'CONFLICT') { store.update({ removed: null }); store.notice({ key: 'outfitgen.undoConflict' }); return; }
     if (reply.code === 'NOT_FOUND') { store.update({ removed: null }); return; }
     // A full list keeps the removal offered, so Undo can be tried again once there is room.
@@ -376,5 +376,5 @@ export async function undoRemoval(store: OutfitGenStore): Promise<void> {
     else store.notice({ key: reply.code === 'BUSY' ? 'outfitgen.decideBusy' : 'outfitgen.decideFailed' });
   } catch {
     if (!store.disposed) store.notice({ key: 'outfitgen.decideFailed' });
-  } finally { mark(store, card.id, false); }
+  } finally { mark(store, card.id, false); settleList(store); }
 }

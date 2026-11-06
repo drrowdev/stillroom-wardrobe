@@ -283,9 +283,12 @@ describe('suggested outfits: manual runs, consent and decisions', () => {
       expect(refused.store.get().notices[0]!.key).toBe(key);
       expect(refused.store.get().list.suggestions.some((s) => s.id === suggestion(1).id)).toBe(false);
     }
+    // The server still holds the card when Keep is only busy.
+    refused.fake.list.mockResolvedValue({ kind: 'ok', suggestions: [suggestion(1)] });
     refused.store.update({ list: { kind: 'ready', suggestions: [suggestion(1)] } });
     refused.fake.keep.mockResolvedValueOnce({ code: 'BUSY', outfitId: null } as never);
     await keepSuggestion(refused.store, suggestion(1).id);
+    await tick();
     expect(refused.store.get().notices[0]!.key).toBe('outfitgen.decideBusy');
     expect(refused.store.get().list.suggestions).toHaveLength(1);
     refused.fake.undoRemove.mockResolvedValueOnce({ code: 'CONFLICT', outfitId: null } as never);
@@ -417,6 +420,28 @@ describe('suggested outfits: consent changes, newer Saves and ordering', () => {
     await tick();
     expect(h.fake.list.mock.calls.length).toBeGreaterThan(calls);
     expect(h.store.get().list.suggestions).toEqual([]);
+  });
+  it('a refused decision still ends with a list read, so a refresh it overlapped is not lost', async () => {
+    const h = harness();
+    await readList(h.store);
+    const keep = deferred<{ code: 'BUSY'; outfitId: null }>();
+    h.fake.keep.mockReturnValueOnce(keep.promise as never);
+    const deciding = keepSuggestion(h.store, suggestion(1).id);
+    await tick();
+    // A run finishes and refreshes the list while Keep is still waiting; the server now holds a third card.
+    h.server.push(suggestion(3));
+    const refresh = deferred<{ kind: 'ok'; suggestions: ReturnType<typeof suggestion>[] }>();
+    h.fake.list.mockReturnValueOnce(refresh.promise);
+    const reading = readList(h.store, 'fresh');
+    await tick();
+    keep.resolve({ code: 'BUSY', outfitId: null });
+    await deciding;
+    refresh.resolve({ kind: 'ok', suggestions: [suggestion(1), suggestion(2), suggestion(3)] });
+    await reading;
+    await tick();
+    await tick();
+    expect(h.store.get().notices[0]!.key).toBe('outfitgen.decideBusy');
+    expect(h.store.get().list.suggestions.map((s) => s.id).sort()).toEqual([suggestion(1).id, suggestion(2).id, suggestion(3).id]);
   });
   it('keeps the removal offered when Undo finds the list full', async () => {
     const h = harness();
