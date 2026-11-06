@@ -304,7 +304,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal(await scalar(`select count(*) from private.outfit_assessed_items where item_id=${literal(top2)};`), '0');
 
     note('caps');
-    await sql(`update private.ai_usage set closed_at=clock_timestamp()-interval '2 hours',created_at=clock_timestamp()-interval '20 minutes'
+    await sql(`update private.ai_usage set closed_at=case when closed_reason is not null then clock_timestamp()-interval '2 hours' end,created_at=clock_timestamp()-interval '20 minutes'
       where request_id in (${[R1, R3, R4].map(literal).join(',')});`);
     // 38 pending rows (over real garments, never a valid outfit with the shoes), then a batch of three suggestions: only two fit under
     // the pending cap of 40, whatever the batch holds.
@@ -328,7 +328,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal(await scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)} and state='suggested';`), '40');
     // The best-scored two were kept; the third was neither recorded nor assessed away (it can be judged again).
     equal(await scalar(`select count(*) from public.suggested_outfits where signature=${literal(await sig(batch[2]))};`), '0');
-    await sql(`update private.ai_usage set closed_at=clock_timestamp()-interval '2 hours',created_at=clock_timestamp()-interval '20 minutes'
+    await sql(`update private.ai_usage set closed_at=case when closed_reason is not null then clock_timestamp()-interval '2 hours' end,created_at=clock_timestamp()-interval '20 minutes'
       where request_id=${literal(R5)};`);
     equal((await claim(randomUUID(), [await sig([fresh[2], bottom, shoes])], { targets: [fresh[2]] })).code, 'PENDING_FULL');
     equal((await rpc(a, 'outfitgen_status')).pending, 2, 'only valid outfits count for the badge');
