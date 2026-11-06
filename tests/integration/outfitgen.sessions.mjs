@@ -13,10 +13,19 @@ import { isDeepStrictEqual } from 'node:util';
 import { requireEvidence } from './preservation.sessions.mjs';
 import { intent, saveHarness } from './item-save.sessions.mjs';
 
-function equal(actual, expected, label = '') {
+// The rehearsal prints only the stage label, so a failed check names itself there (caller line, or the actual value).
+let note = () => {};
+const clean = (value) => String(value).replace(/[^A-Za-z0-9_.:|,-]+/g, '').slice(0, 110);
+function ok(condition) {
+  if (condition) return;
+  note(`check-line-${clean((new Error().stack.split('\n')[2] ?? '').match(/:(\d+):\d+\)?$/)?.[1] ?? '?')}`);
+  requireEvidence(false);
+}
+function equal(actual, expected) {
   if (isDeepStrictEqual(actual, expected)) return;
-  const text = (value) => JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? String(v) : v))?.slice(0, 600);
-  console.log(`OUTFITGEN1-MISMATCH ${label} expected ${text(expected)} actual ${text(actual)}`);
+  const text = (value) => JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? String(v) : v));
+  const line = (new Error().stack.split('\n')[2] ?? '').match(/:(\d+):\d+\)?$/)?.[1] ?? '?';
+  note(`equal-line-${line}-got-${clean(text(actual))}`);
   requireEvidence(false);
 }
 const MANIFEST = 'azure-eu-terra-outfitgen-v1';
@@ -60,6 +69,7 @@ export async function outfitgenUpgradeSeed(snapshot, sql) {
 }
 
 export async function outfitgenUpgradeVerify(seed, sql, mark = () => {}) {
+  note = mark;
   mark('bodies');
   for (const signature of BODIES) {
     const before = seed.bodies[signature];
@@ -67,10 +77,10 @@ export async function outfitgenUpgradeVerify(seed, sql, mark = () => {}) {
     let index = 0;
     const added = [];
     for (const line of after) { if (before[index]?.replace(/\)\);$/, ')') === line.replace(/\)\);$/, ')')) index++; else added.push(line); }
-    requireEvidence(index >= before.length - 3);
+    ok(index >= before.length - 3);
     // Every earlier line is kept in order; what is added is a short outfit-generation block (some of its lines are continuations
     // that name no outfit term themselves).
-    requireEvidence(added.length <= 12 && /outfit/i.test(added.join('\n')));
+    ok(added.length <= 12 && /outfit/i.test(added.join('\n')));
   }
   mark('controls');
   const owners = seed.controls.map((row) => row.owner_id);
@@ -136,6 +146,7 @@ function helpers(snapshot, sql) {
 }
 
 export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
+  note = mark;
   const h = helpers(snapshot, sql);
   const { client } = snapshot;
   const { a, b, one, scalar, rpc, sig, plan, claim, finish, result } = h;
@@ -153,7 +164,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal((await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 2 })).code, 'CONFIG_CHANGED');
     const on = await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 1 });
     equal(on.code, 'OK');
-    requireEvidence(on.unassessed === 5 && on.autoUnassessed === 0 && on.pending === 0 && on.live === false);
+    ok(on.unassessed === 5 && on.autoUnassessed === 0 && on.pending === 0 && on.live === false);
     equal((await rpc(b, 'outfitgen_status')).code, 'INACTIVE');
     equal((await one(`select public.outfitgen_plan(${literal(b.uid)});`)).code, 'INACTIVE');
 
@@ -162,7 +173,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal(p.code, 'OK');
     equal(p.items.length, 5);
     equal([p.pairs, p.disliked, p.known, p.pendingRoom], [[], [], [], 40]);
-    requireEvidence(p.items.every((item) => item.unassessed === true && /^[0-9a-f]{8}-/.test(item.image.path) && item.image.path.startsWith(`${a.uid}/`)
+    ok(p.items.every((item) => item.unassessed === true && /^[0-9a-f]{8}-/.test(item.image.path) && item.image.path.startsWith(`${a.uid}/`)
       && !('title' in item) && !('notes' in item) && !('brand' in item)));
     const [s1, s2, s3] = [await sig([top, bottom, shoes]), await sig([top2, bottom, shoes]), await sig([top, bottom, shoes, layer])];
     const R1 = randomUUID(), R2 = randomUUID(), R3 = randomUUID();
@@ -194,9 +205,9 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
       equal(spending.code, 'OK');
       const no = Number(await scalar(`select admission_no from private.approved_accounts where user_id=${literal(a.uid)};`));
       const mine = spending.accounts.find((entry) => entry.admissionNo === no);
-      requireEvidence(mine !== undefined && mine.features.outfitGen.activated === true && Number(mine.history[0].outfitGen.requests) >= 1);
+      ok(mine !== undefined && mine.features.outfitGen.activated === true && Number(mine.history[0].outfitGen.requests) >= 1);
       equal(mine.current.outfitGen, { usedMicro: '92400' });
-      requireEvidence(BigInt(mine.current.shared.usedMicro) >= 92400n);
+      ok(BigInt(mine.current.shared.usedMicro) >= 92400n);
     } finally {
       await sql('delete from private.app_admins;');
     }
@@ -210,18 +221,18 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal(listed.suggestions.map((s) => s.itemIds.length).sort(), [3, 4]);
     equal((await rpc(b, 'outfitgen_list')).suggestions, []);
     const own = await client.request(a.token, '/rest/v1/suggested_outfits?select=id,item_ids,state', { method: 'GET' });
-    requireEvidence(own.ok && own.data.length === 3);
+    ok(own.ok && own.data.length === 3);
     const foreign = await client.request(b.token, '/rest/v1/suggested_outfits?select=id', { method: 'GET' });
-    requireEvidence(foreign.ok && foreign.data.length === 0);
+    ok(foreign.ok && foreign.data.length === 0);
     const write = await client.request(a.token, '/rest/v1/suggested_outfits', { method: 'POST', body: { item_ids: [top, bottom], state: 'kept' } });
-    requireEvidence(!write.ok);
-    requireEvidence((await client.request(a.token, `/rest/v1/suggested_outfits?id=eq.${listed.suggestions[0].id}`, { method: 'DELETE' })).data?.length !== 1);
+    ok(!write.ok);
+    ok((await client.request(a.token, `/rest/v1/suggested_outfits?id=eq.${listed.suggestions[0].id}`, { method: 'DELETE' })).data?.length !== 1);
     equal(await scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)};`), '3');
 
     mark('dedupe');
     equal((await claim(R2, [s1])).code, 'CONFLICT');
     const p2 = await plan();
-    requireEvidence([s1, s2, s3].every((value) => p2.known.includes(value)));
+    ok([s1, s2, s3].every((value) => p2.known.includes(value)));
     equal((await rpc(a, 'outfitgen_status')).unassessed, 3);
 
     mark('keep-remove');
@@ -250,7 +261,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     // Undo must not restore the older like over it, and must not delete the newer dislike.
     const vote = (value) => client.request(a.token, '/rest/v1/suggestion_feedback?on_conflict=owner_id,signature',
       { method: 'POST', body: { owner_id: a.uid, item_ids: [top, bottom, shoes, layer], vote: value }, headers: { Prefer: 'resolution=merge-duplicates,return=minimal' } });
-    requireEvidence((await vote(1)).ok && (await vote(-1)).ok);
+    ok((await vote(1)).ok && (await vote(-1)).ok);
     equal((await rpc(a, 'outfitgen_undo_remove', { p_id: four.id })).code, 'CONFLICT');
     equal(await scalar(`select vote from public.suggestion_feedback where owner_id=${literal(a.uid)} and signature=${literal(s3)};`), '-1');
     equal(await scalar(`select state from public.suggested_outfits where id=${literal(four.id)};`), 'removed');
@@ -267,7 +278,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal((await finish(R3, 'FAILED', null, null, null)).replayed, true);
     equal((await finish(R3, 'OK', USAGE, results, null)).code, 'USAGE_CONFLICT');
     const status = await rpc(a, 'outfitgen_status');
-    requireEvidence(Number.isSafeInteger(status.cooldownUntilMs) && status.cooldownUntilMs > status.serverTimeMs);
+    ok(Number.isSafeInteger(status.cooldownUntilMs) && status.cooldownUntilMs > status.serverTimeMs);
     equal((await claim(randomUUID(), [s4], { auto: true, targets: [top2] })).code, 'COOLDOWN');
 
     mark('expiry');
@@ -322,14 +333,14 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     mark('stale');
     // An edit that changes what was judged drops a declined judgement (it can be judged again); a removal is never dropped.
     const planBefore = await plan();
-    requireEvidence(planBefore.known.includes(s2) && planBefore.known.includes(s3));
+    ok(planBefore.known.includes(s2) && planBefore.known.includes(s3));
     await sql(`update public.items set colours='{green}' where id=${literal(top2)};`);
     const after = await plan();
-    requireEvidence(!after.known.includes(s2) && after.known.includes(s3));
+    ok(!after.known.includes(s2) && after.known.includes(s3));
     // A garment taken out of suggestions hides the sets that contain it, without deleting them.
     await sql(`update public.items set exclude_suggestions=true where id=${literal(fresh[0])};`);
-    requireEvidence((await rpc(a, 'outfitgen_list')).suggestions.every((s) => !s.itemIds.includes(fresh[0])));
-    requireEvidence(Number(await scalar(`select count(*) from public.suggested_outfits where ${literal(fresh[0])}=any(item_ids);`)) >= 0);
+    ok((await rpc(a, 'outfitgen_list')).suggestions.every((s) => !s.itemIds.includes(fresh[0])));
+    ok(Number(await scalar(`select count(*) from public.suggested_outfits where ${literal(fresh[0])}=any(item_ids);`)) >= 0);
     await sql(`update public.items set exclude_suggestions=false where id=${literal(fresh[0])};`);
 
     mark('keep-recheck');
@@ -359,11 +370,14 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     try {
       const big = await plan();
       equal(big.code, 'OK');
-      requireEvidence(big.items.length <= 500 && big.items.some((item) => item.id === newest && item.unassessed === true));
-      requireEvidence(big.items.filter((item) => item.unassessed).length <= 100 + made.length);
+      ok(big.items.length <= 500 && big.items.some((item) => item.id === newest && item.unassessed === true));
+      ok(big.items.filter((item) => item.unassessed).length <= 100 + made.length);
     } finally {
       await sql(bulkSql(a.uid, newest, 'remove'));
     }
+  } catch (error) {
+    note(`throw-${clean(error?.message)}`);
+    throw error;
   } finally {
     await h.restore(before, made);
   }
