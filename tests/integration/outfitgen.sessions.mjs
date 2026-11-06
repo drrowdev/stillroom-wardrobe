@@ -15,6 +15,7 @@ import { intent, saveHarness } from './item-save.sessions.mjs';
 
 // The rehearsal prints only the stage label, so a failed check names itself there (caller line, or the actual value).
 let note = () => {};
+let last = '';
 const clean = (value) => String(value).replace(/[^A-Za-z0-9_.:|,-]+/g, '').slice(0, 110);
 function ok(condition) {
   if (condition) return;
@@ -152,14 +153,14 @@ function helpers(snapshot, sql) {
 }
 
 export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
-  note = mark;
+  note = (label) => { last = label; mark(label); };
   const h = helpers(snapshot, sql);
   const { client } = snapshot;
   const { a, b, one, scalar, rpc, sig, plan, claim, finish, result } = h;
   const before = await h.configure();
   const made = [];
   try {
-    mark('setup');
+    note('setup');
     // Earlier rehearsal stages left other eligible garments for this owner, so counts are relative to this baseline.
     const base = (await rpc(a, 'outfitgen_status')).unassessed;
     ok(Number.isSafeInteger(base));
@@ -177,7 +178,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal((await rpc(b, 'outfitgen_status')).code, 'INACTIVE');
     equal((await one(`select public.outfitgen_plan(${literal(b.uid)});`)).code, 'INACTIVE');
 
-    mark('plan-claim');
+    note('plan-claim');
     const p = await plan();
     equal(p.code, 'OK');
     equal(p.items.length, base + 5);
@@ -197,7 +198,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal(await scalar(`select count(*) from private.ai_usage where owner_id=${literal(a.uid)} and purpose='outfitgen' and charge_state='held';`), '1');
     equal(await scalar(`select reserved_micro::text from private.ai_usage where request_id=${literal(R1)};`), '400000');
 
-    mark('finish');
+    note('finish');
     const results = [result([top, bottom, shoes], 'suggested', 9), result([top2, bottom, shoes], 'declined', 3),
       result([top, bottom, shoes, layer], 'suggested', 8), result([top, top2, shoes], 'suggested', 10), result([top, bottom], 'suggested', 10)];
     const done = await finish(R1, 'OK', USAGE, results, [top, bottom]);
@@ -238,13 +239,13 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     ok((await client.request(a.token, `/rest/v1/suggested_outfits?id=eq.${listed.suggestions[0].id}`, { method: 'DELETE' })).data?.length !== 1);
     equal(await scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)};`), '3');
 
-    mark('dedupe');
+    note('dedupe');
     equal((await claim(R2, [s1])).code, 'CONFLICT');
     const p2 = await plan();
     ok([s1, s2, s3].every((value) => p2.known.includes(value)));
     equal((await rpc(a, 'outfitgen_status')).unassessed, base + 3);
 
-    mark('keep-remove');
+    note('keep-remove');
     const three = listed.suggestions.find((s) => s.itemIds.length === 3), four = listed.suggestions.find((s) => s.itemIds.length === 4);
     const O1 = randomUUID();
     equal((await rpc(b, 'outfitgen_keep', { p_id: three.id, p_outfit_id: randomUUID() })).code, 'NOT_FOUND');
@@ -276,7 +277,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal(await scalar(`select state from public.suggested_outfits where id=${literal(four.id)};`), 'removed');
     equal((await claim(randomUUID(), [s3])).code, 'CONFLICT');
 
-    mark('failure-cooldown');
+    note('failure-cooldown');
     const s4 = await sig([top2, bottom, shoes, layer]);
     const c3 = await claim(R3, [s4], { targets: [top2] });
     equal(c3.code, 'OK');
@@ -290,7 +291,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     ok(Number.isSafeInteger(status.cooldownUntilMs) && status.cooldownUntilMs > status.serverTimeMs);
     equal((await claim(randomUUID(), [s4], { auto: true, targets: [top2] })).code, 'COOLDOWN');
 
-    mark('expiry');
+    note('expiry');
     await sql(`update private.ai_usage set closed_at=clock_timestamp()-interval '2 hours' where request_id=${literal(R3)};`);
     const R4 = randomUUID();
     equal((await claim(R4, [s4], { targets: [top2] })).code, 'OK');
@@ -302,7 +303,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal(await scalar(`select count(*) from public.suggested_outfits where signature=${literal(s4)};`), '0');
     equal(await scalar(`select count(*) from private.outfit_assessed_items where item_id=${literal(top2)};`), '0');
 
-    mark('caps');
+    note('caps');
     await sql(`update private.ai_usage set closed_at=clock_timestamp()-interval '2 hours',created_at=clock_timestamp()-interval '20 minutes'
       where request_id in (${[R1, R3, R4].map(literal).join(',')});`);
     // 38 pending rows (over real garments, never a valid outfit with the shoes), then a batch of three suggestions: only two fit under
@@ -332,14 +333,14 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal((await claim(randomUUID(), [await sig([fresh[2], bottom, shoes])], { targets: [fresh[2]] })).code, 'PENDING_FULL');
     equal((await rpc(a, 'outfitgen_status')).pending, 2, 'only valid outfits count for the badge');
 
-    mark('rate-limit');
+    note('rate-limit');
     await sql(`delete from public.suggested_outfits where owner_id=${literal(a.uid)} and state='suggested';
       insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
         select ${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp(),1,1,'estimated','outfitgen' from generate_series(1,4);`);
     equal((await claim(randomUUID(), [await sig([fresh[2], bottom, shoes])], { targets: [fresh[2]] })).code, 'RATE_LIMIT');
     await sql(`delete from private.ai_usage where purpose='outfitgen' and reserved_micro=1 and owner_id=${literal(a.uid)};`);
 
-    mark('stale');
+    note('stale');
     // An edit that changes what was judged drops a declined judgement (it can be judged again); a removal is never dropped.
     const planBefore = await plan();
     ok(planBefore.known.includes(s2) && planBefore.known.includes(s3));
@@ -352,7 +353,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     ok(Number(await scalar(`select count(*) from public.suggested_outfits where ${literal(fresh[0])}=any(item_ids);`)) >= 0);
     await sql(`update public.items set exclude_suggestions=false where id=${literal(fresh[0])};`);
 
-    mark('keep-recheck');
+    note('keep-recheck');
     const suggestion = (ids) => sql(`insert into public.suggested_outfits(owner_id,item_ids,state,title,reason,occasion,score,fingerprint,manifest_id,prompt_version,request_id)
       values (${literal(a.uid)},${uuids(ids)},'suggested','Fictional set','Calm colours.','smart',9,repeat('e',64),${literal(MANIFEST)},1,${literal(R1)});`);
     const rowOf = (ids) => scalar(`select id from public.suggested_outfits where signature=private.outfitgen_signature(${uuids(ids)});`);
@@ -371,7 +372,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal(await scalar(`select count(*) from public.outfits o where o.owner_id=${literal(a.uid)} and o.id in (select outfit_id from public.outfit_items where item_id=${literal(fresh[2])});`), '1');
     equal(await scalar(`select state from public.suggested_outfits where signature=private.outfitgen_signature(${uuids(dup)});`), 'declined');
 
-    mark('many-garments');
+    note('many-garments');
     // With more than 500 eligible garments a new garment must still be planned, however its id sorts. The bulk rows stand for already
     // assessed garments; they are written and removed with triggers off.
     const newest = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
@@ -385,7 +386,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
       await sql(bulkSql(a.uid, newest, 'remove'));
     }
   } catch (error) {
-    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`throw-${clean(error?.message)}`);
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
     throw error;
   } finally {
     await h.restore(before, made);
