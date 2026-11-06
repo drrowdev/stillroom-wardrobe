@@ -91,7 +91,14 @@ describe('outfit generation migration (source proofs; the SQL itself runs in the
     expect(keep.indexOf('outfitgen_valid_set')).toBeLessThan(keep.indexOf('public.save_outfit('));
     expect(keep.indexOf('outfitgen_signature(array(')).toBeLessThan(keep.indexOf('public.save_outfit('));
     const undo = sql.slice(sql.indexOf('create function public.outfitgen_undo_remove'));
-    expect(undo).toContain("if s.vote_before is null or not found or f.vote<>-1 then return jsonb_build_object('code','CONFLICT')");
+    expect(undo).toContain("if s.vote_before is null or not v_found or f.vote<>-1 then return jsonb_build_object('code','CONFLICT')");
+    // One lock order for the vote writer's trigger, Remove and Undo: the vote row, then the suggestion row; contention is BUSY.
+    const remove = sql.slice(sql.indexOf('create function public.outfitgen_remove'), sql.indexOf('create function public.outfitgen_undo_remove'));
+    for (const body of [remove, undo.slice(0, undo.indexOf('create or replace function private.admin_account_v3'))]) {
+      expect(body.indexOf('from public.suggestion_feedback where owner_id=v_owner and signature=v_signature for update'))
+        .toBeLessThan(body.indexOf('from public.suggested_outfits where id=p_id and owner_id=v_owner for update'));
+      expect(body).toContain('exception when lock_not_available or deadlock_detected then');
+    }
     // Any later vote write voids the ticket, including the Today writer's upsert that keeps created_at.
     const voided = sql.slice(sql.indexOf('create function private.outfitgen_vote_changed'), sql.indexOf('create function private.outfitgen_eligible'));
     expect(voided).toContain('after insert or update or delete on public.suggestion_feedback');
@@ -103,11 +110,12 @@ describe('outfit generation migration (source proofs; the SQL itself runs in the
     expect(keep.indexOf('for update')).toBeLessThan(keep.indexOf('outfitgen_valid_set'));
     expect(keep).not.toContain('o.deleted_at is null\n');
     expect(keep).toContain("'IN_TRASH'");
-    expect(keep).toContain("exception when lock_not_available then");
+    expect(keep).toContain("exception when lock_not_available or deadlock_detected then");
     // Planning puts garments waiting for assessment first and rotates the partner pool, so no garment is hidden by a fixed prefix.
     const plan = sql.slice(sql.indexOf('create function public.outfitgen_plan'), sql.indexOf('-- Marks items assessed'));
-    expect(plan).toContain('r.pending and r.rn<=100');
-    expect(plan).toContain('md5(pool.id::text||current_date::text)');
+    expect(plan).toContain('r.grp<2 and r.rn<=100');
+    expect(plan).toContain('md5(r.id::text||current_date::text)');
+    expect(plan).toContain('select id from anchors');
     expect(plan).not.toContain('order by i.id limit 500');
     const valid = sql.slice(sql.indexOf('create function private.outfitgen_valid_set'), sql.indexOf('-- Already judged'));
     for (const rule of ['public.combination_rules', 'public.suggestion_feedback', 'c.f=1', 'outfitgen_eligible']) expect(valid).toContain(rule);

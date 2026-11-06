@@ -357,8 +357,10 @@ begin
         and im.state='ready' and im.created_at>s.created_at))
       and s.fingerprint is distinct from private.outfitgen_fingerprint(s.owner_id,s.item_ids)
       or s.state='declined' and s.prompt_version<(select m.prompt_version from private.ai_execution_manifests m where m.id=c.outfitgen_manifest_id));
-  -- Garments still waiting for assessment come first (oldest first, at most 100 per plan, so coverage is eventual however many
-  -- garments exist); the rest of the 500 is a partner pool that rotates daily rather than a fixed prefix.
+  -- Anchors are chosen apart from the partner pool: up to 100 unassessed garments added since consent (what automatic runs may
+  -- assess), up to 100 other unassessed ones (manual runs), oldest first, so a pre-consent backlog never hides a new garment and
+  -- coverage stays eventual. The rest of the 500 is a partner pool taken from every other eligible garment (unassessed ones
+  -- included), rotating daily rather than a fixed prefix.
   select coalesce(jsonb_agg(x.j order by x.id),'[]'::jsonb) into v_items from (
     select i.id,jsonb_build_object('id',i.id,'category',i.category,'colours',to_jsonb(i.colours),'pattern',i.pattern,
       'sleeve_length',i.sleeve_length,'garment_length',i.garment_length,'seasons',to_jsonb(i.seasons),'formality',i.formality,
@@ -376,13 +378,17 @@ begin
       join public.item_images im on im.owner_id=i.owner_id and im.item_id=i.id and im.state='ready' and im.retired_at is null
     where i.owner_id=p_owner_id and i.id in (
       with pool as (
-        select ei.id,ei.created_at,not exists(select 1 from private.outfit_assessed_items a where a.owner_id=ei.owner_id and a.item_id=ei.id) pending
+        select ei.id,ei.created_at,case when exists(select 1 from private.outfit_assessed_items a where a.owner_id=ei.owner_id and a.item_id=ei.id) then 2
+          when c.outfitgen_consented_at is not null and ei.created_at>=c.outfitgen_consented_at then 0 else 1 end grp
         from public.items ei where ei.owner_id=p_owner_id and private.outfitgen_eligible(ei.owner_id,ei.id)),
       ranked as (
-        select pool.id,pool.pending,row_number() over (partition by pool.pending
-          order by case when pool.pending then pool.created_at end,md5(pool.id::text||current_date::text),pool.id) rn from pool)
-      select r.id from ranked r where (r.pending and r.rn<=100)
-        or (not r.pending and r.rn<=500-least(100,(select count(*) from pool where pool.pending)))
+        select pool.id,pool.grp,row_number() over (partition by pool.grp
+          order by case when pool.grp<2 then pool.created_at end,md5(pool.id::text||current_date::text),pool.id) rn from pool),
+      anchors as (select r.id from ranked r where r.grp<2 and r.rn<=100)
+      select a.id from anchors a
+      union
+      (select r.id from ranked r where r.id not in (select id from anchors)
+        order by md5(r.id::text||current_date::text),r.id limit 500-(select count(*) from anchors))
     )) x;
   select coalesce(jsonb_agg(jsonb_build_array(r.item_low,r.item_high)),'[]'::jsonb) into v_pairs
     from public.combination_rules r where r.owner_id=p_owner_id;
@@ -698,49 +704,60 @@ begin
   end;
   update public.suggested_outfits set state='kept',kept_outfit_id=p_outfit_id,decided_at=clock_timestamp() where id=s.id;
   return jsonb_build_object('code','OK','outfitId',p_outfit_id);
-exception when lock_not_available then
+exception when lock_not_available or deadlock_detected then
   return jsonb_build_object('code','BUSY');
 end;
 $$;
 
 -- Remove: permanent. It also records the existing disliked-combination vote, so Today stops showing this exact set too; the
 -- vote that was there before and when this call wrote it are kept so Undo can restore it only if nothing changed since.
+-- Lock order everywhere (the Today vote writer, its outfitgen_vote_changed trigger, Remove and Undo): the vote row first, then the
+-- suggestion row. A lock timeout or deadlock is answered BUSY, never raised.
 create function public.outfitgen_remove(p_id uuid) returns jsonb
 language plpgsql security definer set search_path = '' set lock_timeout = '2s' as $$
 declare v_owner uuid := auth.uid(); s public.suggested_outfits; f public.suggestion_feedback; v_now timestamptz := clock_timestamp();
-  v_before text;
+  v_before text; v_signature text;
 begin
   if v_owner is null or not private.is_approved() then return jsonb_build_object('code','UNAVAILABLE'); end if;
+  select signature into v_signature from public.suggested_outfits where id=p_id and owner_id=v_owner;
+  if not found then return jsonb_build_object('code','NOT_FOUND'); end if;
+  select * into f from public.suggestion_feedback where owner_id=v_owner and signature=v_signature for update;
+  v_before := case when not found then 'none' when f.vote=1 then 'like' else 'dislike' end;
   select * into s from public.suggested_outfits where id=p_id and owner_id=v_owner for update;
   if not found then return jsonb_build_object('code','NOT_FOUND'); end if;
   if s.state='removed' then return jsonb_build_object('code','OK','replayed',true); end if;
   if s.state<>'suggested' then return jsonb_build_object('code','CONFLICT'); end if;
-  select * into f from public.suggestion_feedback where owner_id=v_owner and signature=s.signature for update;
-  v_before := case when not found then 'none' when f.vote=1 then 'like' else 'dislike' end;
   insert into public.suggestion_feedback(owner_id,item_ids,vote,created_at) values(v_owner,s.item_ids,-1,v_now)
     on conflict (owner_id,signature) do update set vote=-1,created_at=v_now;
   update public.suggested_outfits set state='removed',decided_at=v_now,vote_before=v_before,vote_set_at=v_now where id=s.id;
   return jsonb_build_object('code','OK');
+exception when lock_not_available or deadlock_detected then
+  return jsonb_build_object('code','BUSY');
 end;
 $$;
 
 create function public.outfitgen_undo_remove(p_id uuid) returns jsonb
 language plpgsql security definer set search_path = '' set lock_timeout = '2s' as $$
-declare v_owner uuid := auth.uid(); s public.suggested_outfits; f public.suggestion_feedback;
+declare v_owner uuid := auth.uid(); s public.suggested_outfits; f public.suggestion_feedback; v_signature text; v_found boolean;
 begin
   if v_owner is null or not private.is_approved() then return jsonb_build_object('code','UNAVAILABLE'); end if;
+  select signature into v_signature from public.suggested_outfits where id=p_id and owner_id=v_owner;
+  if not found then return jsonb_build_object('code','NOT_FOUND'); end if;
+  select * into f from public.suggestion_feedback where owner_id=v_owner and signature=v_signature for update;
+  v_found := found;
   select * into s from public.suggested_outfits where id=p_id and owner_id=v_owner for update;
   if not found then return jsonb_build_object('code','NOT_FOUND'); end if;
   if s.state='suggested' then return jsonb_build_object('code','OK','replayed',true); end if;
   if s.state<>'removed' then return jsonb_build_object('code','CONFLICT'); end if;
-  select * into f from public.suggestion_feedback where owner_id=v_owner and signature=s.signature for update;
   -- The ticket (vote_before) is cleared by outfitgen_vote_changed whenever anyone writes this set's vote after the Remove,
   -- so a surviving ticket proves the dislike is still the one this Remove wrote.
-  if s.vote_before is null or not found or f.vote<>-1 then return jsonb_build_object('code','CONFLICT'); end if;
+  if s.vote_before is null or not v_found or f.vote<>-1 then return jsonb_build_object('code','CONFLICT'); end if;
   if s.vote_before='none' then delete from public.suggestion_feedback where id=f.id;
   elsif s.vote_before='like' then update public.suggestion_feedback set vote=1 where id=f.id; end if;
   update public.suggested_outfits set state='suggested',decided_at=null,vote_before=null,vote_set_at=null where id=s.id;
   return jsonb_build_object('code','OK');
+exception when lock_not_available or deadlock_detected then
+  return jsonb_build_object('code','BUSY');
 end;
 $$;
 

@@ -53,6 +53,7 @@ commit;`;
 set local session_replication_role = replica;
 insert into public.items(id,owner_id,title,category,colours) select b.id,${literal(owner)},'Fictional bulk '||b.id,'top','{navy}' from (${ids}) b;
 insert into public.items(id,owner_id,title,category,colours) values (${literal(newest)},${literal(owner)},'Fictional bulk newest','top','{navy}');
+insert into public.items(id,owner_id,title,category,colours,created_at) select md5('outfitgen-old-'||n)::uuid,${literal(owner)},'Fictional bulk old '||n,'top','{navy}',clock_timestamp()-interval '30 days' from generate_series(1,120) n;
 insert into public.item_images(id,owner_id,item_id,state,main_bytes,thumb_bytes,main_sha256,thumb_sha256,width,height,alt_text)
   select gen_random_uuid(),i.owner_id,i.id,'ready',100000,10000,repeat('a',64),repeat('b',64),800,1000,'photo' from public.items i where i.${where};
 insert into private.outfit_assessed_items(owner_id,item_id) select ${literal(owner)},b.id from (${ids}) b;
@@ -380,8 +381,9 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     try {
       const big = await plan();
       equal(big.code, 'OK');
-      ok(big.items.length <= 500 && big.items.some((item) => item.id === newest && item.unassessed === true));
-      ok(big.items.filter((item) => item.unassessed).length <= 100 + made.length);
+      // A backlog of 120 older unassessed garments (added before consent) must not hide the new, auto-eligible one.
+      ok(big.items.length <= 500 && big.items.some((item) => item.id === newest && item.unassessed === true && item.auto === true));
+      ok(big.items.filter((item) => item.unassessed && !item.auto).length >= 100);
     } finally {
       await sql(bulkSql(a.uid, newest, 'remove'));
     }
