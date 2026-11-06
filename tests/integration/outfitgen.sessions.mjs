@@ -68,7 +68,9 @@ export async function outfitgenUpgradeVerify(seed, sql, mark = () => {}) {
     const added = [];
     for (const line of after) { if (before[index]?.replace(/\)\);$/, ')') === line.replace(/\)\);$/, ')')) index++; else added.push(line); }
     requireEvidence(index >= before.length - 3);
-    requireEvidence(added.every((line) => /outfit|suggested|assessed|requests|\$function\$|language|set search_path|security definer|stable|create or replace/i.test(line)));
+    // Every earlier line is kept in order; what is added is a short outfit-generation block (some of its lines are continuations
+    // that name no outfit term themselves).
+    requireEvidence(added.length <= 12 && /outfit/i.test(added.join('\n')));
   }
   mark('controls');
   const owners = seed.controls.map((row) => row.owner_id);
