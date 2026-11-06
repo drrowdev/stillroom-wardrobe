@@ -683,6 +683,16 @@ async function foreignMatrix(attacker, victim) {
   const stylistConsent = await probeRpc(attacker, victim, 'stylist_set_consent', { p_enabled: null, p_notice_revision: null });
   if (control(attacker, 'stylist_set_consent', matchOutcome({ status: 200, data: { code: 'INVALID_INPUT' } }, stylistConsent),
     describe(stylistConsent))) tag('stylist_set_consent', `${d}:owner-only`);
+  // OUTFITGEN1: status, consent and the suggestion list act only on the caller's own controls and rows.
+  const outfitgen = await probeRpc(attacker, victim, 'outfitgen_status', {});
+  if (control(attacker, 'outfitgen_status', outfitgen.ok && typeof outfitgen.data?.code === 'string'
+    && applicationCode(outfitgen) !== 'UNAVAILABLE', describe(outfitgen))) tag('outfitgen_status', `${d}:owner-only`);
+  const outfitgenConsent = await probeRpc(attacker, victim, 'outfitgen_set_consent', { p_enabled: null, p_notice_revision: null });
+  if (control(attacker, 'outfitgen_set_consent', matchOutcome({ status: 200, data: { code: 'INVALID_INPUT' } }, outfitgenConsent),
+    describe(outfitgenConsent))) tag('outfitgen_set_consent', `${d}:owner-only`);
+  const outfitgenList = await probeRpc(attacker, victim, 'outfitgen_list', {});
+  if (control(attacker, 'outfitgen_list', outfitgenList.ok && isDeepStrictEqual(outfitgenList.data, { code: 'OK', suggestions: [] }),
+    describe(outfitgenList))) tag('outfitgen_list', `${d}:owner-only`);
   // Enhancement status and consent act only on the caller's own controls, like the stylist pair.
   const enhance = await probeRpc(attacker, victim, 'enhance_status', {});
   if (control(attacker, 'enhance_status', enhance.ok && typeof enhance.data?.code === 'string'

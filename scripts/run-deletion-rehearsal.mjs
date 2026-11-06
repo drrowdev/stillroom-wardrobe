@@ -443,6 +443,24 @@ async function exercise(ctx) {
     throw new Error('SEED:tryon');
   }
   const dStops = await stopRows(d);
+  // OUTFITGEN1: both owners hold a suggestion, an assessed item and a frozen batch with its usage row. C's go with the account; D's stay.
+  step = 'fixture-outfitgen';
+  for (const uid of [c, d]) {
+    const request = randomUUID();
+    await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose,closed_reason,closed_at)
+      values (${literal(uid)},${literal(request)},to_char(now() at time zone 'UTC','YYYY-MM'),now(),1,1,'estimated','outfitgen','FAILED',now());
+    insert into private.outfitgen_requests(owner_id,request_id,mode,signatures,target_items)
+      values (${literal(uid)},${literal(request)},'manual','{}','{}');
+    insert into public.suggested_outfits(owner_id,item_ids,state,title,reason,occasion,score,fingerprint,manifest_id,prompt_version,request_id)
+      select ${literal(uid)},array(select id from public.items where owner_id=${literal(uid)} order by id limit 2),'suggested','Fictional','Fictional','smart',9,
+        repeat('e',64),'azure-eu-terra-outfitgen-v1',1,${literal(request)};
+    insert into private.outfit_assessed_items(owner_id,item_id)
+      select ${literal(uid)},id from public.items where owner_id=${literal(uid)} order by id limit 1;`);
+  }
+  const outfitgenRows = (uid) => sql(`select (select count(*) from public.suggested_outfits where owner_id=${literal(uid)})
+    ||':'||(select count(*) from private.outfit_assessed_items where owner_id=${literal(uid)})
+    ||':'||(select count(*) from private.outfitgen_requests where owner_id=${literal(uid)});`);
+  if (await outfitgenRows(c) !== '1:1:1' || await outfitgenRows(d) !== '1:1:1') throw new Error('SEED:outfitgen');
   step = 'fixture';
   const before = await digest(d);
   const cBefore = JSON.parse(await digest(c));
@@ -657,6 +675,7 @@ async function exercise(ctx) {
   // C's try-on rows are gone, D's stay, and neither provider slot was released by the deletion.
   if (await tryonRows(c) !== '0:0:0:0:0:0:0' || await tryonRows(d) !== '1:2:1:2:1:1:1') throw new Error('RESULT:tryon');
   if (await stopRows(d) !== dStops) throw new Error('RESULT:tryon-stops');
+  if (await outfitgenRows(c) !== '0:0:0' || await outfitgenRows(d) !== '1:1:1') throw new Error('RESULT:outfitgen');
   if (await heldTryonSlots() !== '2') throw new Error('RESULT:tryon-slots');
   const purged = await call('/rest/v1/rpc/purge_deletion_receipts', { method: 'POST', ...service, body: {} }, 10_000);
   if (!purged?.response.ok || (await purged.response.text()).trim() !== '0') throw new Error('RESULT:purge');

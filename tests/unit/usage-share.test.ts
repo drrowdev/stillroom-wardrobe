@@ -43,7 +43,7 @@ describe('monthSplit', () => {
   });
   it('uses the month totals the exact table shows; setup holds are not part of them', () => {
     const month: MonthHistory = { month: '2026-09', analysis: spend('100', '20', '3', 1), stylist: spend('400', '0', '50', 2),
-      enhancement: spend('0', '0', '0'), tryOn: spend('7', '0', '0', 1) };
+      enhancement: spend('0', '0', '0'), tryOn: spend('7', '0', '0', 1), outfitGen: spend('0', '0', '0') };
     const totals = monthTotals(month);
     expect(monthSplit(totals)).toEqual({ usedMicro: '527', pendingMicro: '53', requests: 4 });
     expect(BigInt(monthSplit(totals).usedMicro) + BigInt(monthSplit(totals).pendingMicro)).toBe(BigInt(totals.totalMicro));

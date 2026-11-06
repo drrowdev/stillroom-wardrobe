@@ -312,3 +312,38 @@ handler against real ordinary Auth/DB with **only Google transport synthetic**.
 These are engineering tests, not paid accuracy, billing, retention, regional
 wire, hosted rollout or representative-photo evidence. No provider credential,
 private photo or paid call is used. Save/restore never invokes this adapter.
+
+## OUTFITGEN1a outfit judging backend (inactive) - 6 November 2026
+
+Owner decision (ADR31): the AI judges which combinations of the owner's own clothes look good; Today stays deterministic.
+Source only: the `outfit-generate` Edge function, `20261106090000_outfit_generation` and the inactive expiry job
+`20261106090100_outfitgen_expire_schedule`. Nothing is applied, deployed, consented or activated.
+
+- **Route.** The Stylist's Terra deployment (`eval-terra-20260709`, `gpt-5.6-terra-2026-07-09`, chat completions), manifest
+  `azure-eu-terra-outfitgen-v1`, prompt version 1, notice revision 1, `reasoning_effort: medium`, `store: false`, explicit cache
+  mode, one call and no retry or fallback. Same secret as photo analysis and the Stylist.
+- **What is sent.** Up to 8 stored main photos (`detail: high`, at most 3 MiB together, packed by bytes and estimated tokens, not
+  only by count), read server-side with the owner's JWT, and per garment only category, colours, pattern, sleeve and garment
+  length, seasons, formality, warmth and coverage (user- or AI-observed only), favourite. Never titles, notes, brands or prices.
+  Up to 24 candidate sets per call, named by ref. Photos of other owners are unreachable (owner JWT, owner-prefix path).
+- **Candidates.** The server builds them (`src/domain/outfit-candidates.ts`): a finite, diverse, deterministic list per garment,
+  validity and the owner's explicit bans as the only hard filters. The model returns exactly one verdict per candidate ref
+  (good or skip, score 1-10, occasion, title, reason in the owner's language); a missing, duplicate, unknown or malformed verdict
+  makes the whole reply unusable. A suggestion needs a good verdict at score 8 or more; this is a trial threshold, not evidence.
+- **Cost and limits.** Reservation 373,402 micro-USD (the 48,000 input / 8,192 output envelope at LongCo 4.40/19.80); recorded
+  usage is priced at ShortCo 2.20/13.20; the shared monthly allowance decides. One live batch per owner, 6 calls an hour, 40 a
+  day, 4 in ten minutes, automatic runs at most 3 per 6 hours and a 15-minute cooldown after any failure or expiry, at most 40
+  pending suggestions across a whole batch. A reply with no usable metering keeps the reservation (nothing proves it was free)
+  and does not switch the feature off; unreadable usage on a reply that did arrive does, as for the Stylist.
+- **Open Azure gate.** `docs/azure-garment-evaluation.md` records 20K TPM / 20 RPM for the eval deployment. That is historical and
+  unverified; an 8-photo call is about 30,000 input tokens. The real quota must be confirmed (or raised) before activation. If it
+  stays low, garments per call are reduced deliberately (the quality consequence: fewer garments are compared per call and more
+  calls are needed), never silently replaced by thumbnails.
+- **Data.** `suggested_outfits` (owner-readable, written only by definer functions), `outfit_assessed_items`, `outfitgen_requests`.
+  Keep, Remove and Undo are `outfitgen_keep`, `outfitgen_remove`, `outfitgen_undo_remove`. Not exported or restored; deleted with
+  the account.
+- **Consent.** Notice revision 1 (the app text arrives with OUTFITGEN1b) says that photos and details of the clothes are sent to
+  Azure, that this also happens automatically after Save and when the app opens, what is kept and for how long, and how to turn it
+  off. Pending suggestions are stored until the owner keeps or removes them.
+- **Evidence.** Engineering tests only; no provider call. Prompt quality, tokens per photo, latency and the quota question are
+  verified only by the owner trial with real photos.

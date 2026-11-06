@@ -14,7 +14,8 @@ import '../../styles/data-flow.css';
 type Props = { client: AppClient; scope: OwnerScope; online: boolean; language: Language; t: Translate; onBack: () => void };
 type Load = { kind: 'checking' } | { kind: 'denied' } | { kind: 'failed' } | { kind: 'ready'; spending: AdminSpending; failed: boolean; read: number };
 
-const purposeKey: Record<SpendPurpose, MessageKey> = { analysis: 'admin.tagging', stylist: 'admin.stylist', enhancement: 'admin.enhancement', tryOn: 'admin.tryOn' };
+const purposeKey: Record<SpendPurpose, MessageKey> = { analysis: 'admin.tagging', stylist: 'admin.stylist', enhancement: 'admin.enhancement', tryOn: 'admin.tryOn',
+  outfitGen: 'admin.outfitGen' };
 const reasonKey: Record<AdminReason, MessageKey> = { RAISE: 'admin.reasonRaise', LOWER: 'admin.reasonLower', PAUSE: 'admin.reasonPause',
   RESTORE: 'admin.reasonRestore', CORRECTION: 'admin.reasonCorrection' };
 const errorKey: Record<LimitReason, MessageKey> = { FORMAT: 'admin.errFormat', NOT_POSITIVE: 'admin.errPositive', APP_LIMIT: 'admin.overAppLimit' };

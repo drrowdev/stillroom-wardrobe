@@ -2120,3 +2120,33 @@ browser/translations/build/dependency/secret, eight bounded artifacts and actual
 visual review remain mandatory. No source-complete or merge-ready claim follows
 from native units/static checks, and no hosted/provider/paid/deployment authority
 is added.
+
+## OUTFITGEN1a AI-judged outfit suggestions, backend only - 6 November 2026
+
+Source packet for ADR31 (owner decisions of 6 November 2026; plan approved with binding amendments B1-B5 and S1-S4). Inactive:
+nothing here is applied, deployed, consented or activated, and no provider is called. Contract details are in `blueprint/20`,
+`blueprint/08` and `blueprint/10`; this section records the engineering evidence and the rollout.
+
+- **Files.** `20261106090000_outfit_generation.sql` (purpose, controls columns, the immutable manifest
+  `azure-eu-terra-outfitgen-v1`, `suggested_outfits`, `outfit_assessed_items`, `outfitgen_requests`, the owner and service
+  functions, the replaced `private.admin_account_v3` and `private.deletion_owner_rows_absent`, each its latest body plus additions
+  only), `20261106090100_outfitgen_expire_schedule.sql` (inactive job), `supabase/functions/outfit-generate`,
+  `src/domain/outfitgen.ts`, `src/domain/outfit-candidates.ts`. The admin spending parser and view include the `outfitGen` purpose
+  so the history total stays right (`SPEND_PURPOSES`).
+- **Validation done.** Unit tests for the candidates, request and verdict contract, the handler (mocked Auth, RPC, Storage and
+  provider) and the migration source proofs. The SQL was also executed once on a scratch in-process PostgreSQL (PGlite) over the
+  whole migration chain, with stubs for Auth, Storage and pg_cron, as a smoke test of syntax and the main flows. That is not the
+  CI rehearsal: concurrency, ACLs, RLS as the authenticated role and the real Storage and Edge runtime are CI-only.
+- **CI registration.** `scripts/preservation-rehearsal.mjs` (inventory, stage `outfitgen-prior`, the PASS line),
+  `tests/integration/outfitgen.sessions.mjs` (upgrade proof of the two replaced bodies, then claim, finish, dedupe, caps, Keep,
+  Remove, Undo, failure, cooldown, expiry, stale handling and owner isolation), `scripts/isolation-catalog.mjs` and the audit probes,
+  `scripts/run-deletion-rehearsal.mjs`, `scripts/backend/ci-storage-guard.mjs`, `scripts/backend/local.mjs` (the function inventory).
+- **Rollout (each step a separate owner or coordinator gate; none is done by this packet).** 1. Confirm the Azure TPM/RPM quota of
+  the Terra deployment (the documented 20K TPM / 20 RPM is historical and unverified). 2. Apply `20261106090000` and
+  `20261106090100`. 3. **Activate the `stillroom-outfitgen-expire` job before the first trial:** a request whose reply is never
+  finished (runtime termination is not covered by background work) stays held until it settles. 4. Deploy `outfit-generate`.
+  5. OUTFITGEN1b (the app: Settings card, Suggested outfits list, triggers). 6. Bootstrap the owner's controls (manifest, notice 1,
+  maximum request at least the reservation). 7. The owner consents and runs the trial.
+- **Owner trial plan.** With real photos: one manual run, review of the first ~30 suggestions (kept against removed, any clash,
+  any duplicate), tokens, cost and time per call from the ledger, any 429, then a second run after adding two garments (only
+  sets with the new garments should appear). Tuning (score bar, garments per call, prompt wording) is a new manifest version.

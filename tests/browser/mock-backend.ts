@@ -616,7 +616,8 @@ export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits |
       analysis: index === 0 ? adminSpend(Math.round(1_234_567 * scale), 300_000, 4_097_351, 5) : adminSpend(Math.round(2_500_000 * scale) + index * 100_000, 0, 0, 7 + index),
       stylist: index === 0 ? adminSpend(0, 4_840, admissionNo === 1 ? 129_360 : 0, 2) : adminSpend(index * 12_345, 0, 0, index),
       enhancement: admissionNo === 1 && index === 1 ? adminSpend(120_000, 0, 0, 1) : adminSpend(0, 0, 0, 0),
-      tryOn: admissionNo === 1 && index === 0 ? adminSpend(240_000, 0, 360_000, 2) : adminSpend(0, 0, 0, 0) }));
+      tryOn: admissionNo === 1 && index === 0 ? adminSpend(240_000, 0, 360_000, 2) : adminSpend(0, 0, 0, 0),
+      outfitGen: admissionNo === 1 && index === 0 ? adminSpend(0, 92_400, 0, 1) : adminSpend(0, 0, 0, 0) }));
     const current = history[0]!;
     const more = extra[admissionNo] ?? {};
     const used = (spend: { totalMicro: string }, feature?: 'stylist' | 'enhancement' | 'tryOn') => String(BigInt(spend.totalMicro) + BigInt(feature ? more[feature] ?? 0 : 0));
@@ -624,11 +625,13 @@ export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits |
       features: { analysis: { configured: limits[admissionNo] !== null, activated: true },
         stylist: { configured: limits[admissionNo] !== null, activated: true },
         enhancement: { configured: limits[admissionNo] !== null, activated: false },
-        tryOn: { configured: limits[admissionNo] !== null, activated: false } },
+        tryOn: { configured: limits[admissionNo] !== null, activated: false },
+        outfitGen: { configured: limits[admissionNo] !== null, activated: false } },
       limits: limits[admissionNo], history,
-      current: { period: months[0]!, shared: { usedMicro: String(BigInt(used(current.analysis)) + BigInt(used(current.stylist, 'stylist')) + BigInt(used(current.enhancement, 'enhancement')) + BigInt(used(current.tryOn, 'tryOn'))) },
+      current: { period: months[0]!, shared: { usedMicro: String(BigInt(used(current.analysis)) + BigInt(used(current.stylist, 'stylist')) + BigInt(used(current.enhancement, 'enhancement')) + BigInt(used(current.tryOn, 'tryOn')) + BigInt(used(current.outfitGen))) },
         analysis: { usedMicro: used(current.analysis) }, stylist: { usedMicro: used(current.stylist, 'stylist') },
-        enhancement: { usedMicro: used(current.enhancement, 'enhancement') }, tryOn: { usedMicro: used(current.tryOn, 'tryOn') } },
+        enhancement: { usedMicro: used(current.enhancement, 'enhancement') }, tryOn: { usedMicro: used(current.tryOn, 'tryOn') },
+        outfitGen: { usedMicro: used(current.outfitGen) } },
       openAllocations: { enhancementProbe: admissionNo === 1 ? { count: 1, allocationMicro: '260000', maxCalls: 2 } : { count: 0, allocationMicro: '0', maxCalls: 0 },
         tryOnProbe: admissionNo === 1 ? { count: 1, allocationMicro: '1800000', maxCalls: 5 } : { count: 0, allocationMicro: '0', maxCalls: 0 } } };
   };

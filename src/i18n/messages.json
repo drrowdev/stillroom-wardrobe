@@ -711,5 +711,6 @@
   "admin.errPositive": {"en":"Enter an amount above zero.","fi":"Anna nollaa suurempi summa.","sv":"Ange ett belopp över noll."},
   "admin.overAppLimit": {"en":"The app limit is US$200 per account per month.","fi":"Sovelluksen raja on 200 US$ tiliä kohden kuukaudessa.","sv":"Appens gräns är 200 US$ per konto och månad."},
   "admin.tryOn": {"en":"Try-on","fi":"Sovitus","sv":"Provning"},
+  "admin.outfitGen": {"en":"Outfit suggestions","fi":"Asuehdotukset","sv":"Outfitförslag"},
   "common.moreOptions": {"en":"More options","fi":"Lisää vaihtoehtoja","sv":"Fler alternativ"}
 }

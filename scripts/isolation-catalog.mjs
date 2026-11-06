@@ -92,6 +92,12 @@ export const EXPOSED_RPCS = Object.freeze([
   fn('admin_ai_spending_v2', 'integer', ['p_months']),
   fn('admin_set_ai_limits_v2', 'smallint, text, jsonb, jsonb, text',
     ['p_admission_no', 'p_account_version', 'p_expected', 'p_limits', 'p_reason_code']),
+  fn('outfitgen_status', '', []),
+  fn('outfitgen_set_consent', 'boolean, integer', ['p_enabled', 'p_notice_revision']),
+  fn('outfitgen_list', '', []),
+  fn('outfitgen_keep', 'uuid, uuid', ['p_id', 'p_outfit_id']),
+  fn('outfitgen_remove', 'uuid', ['p_id']),
+  fn('outfitgen_undo_remove', 'uuid', ['p_id']),
 ]);
 
 // Public functions reachable only with service credentials (Edge/operator) or only by the database owner (scheduled
@@ -133,6 +139,13 @@ export const SERVICE_ONLY_RPCS = Object.freeze([
   fn('tryon_bootstrap', 'uuid, text, integer, bigint, bigint, integer',
     ['p_owner_id', 'p_manifest_id', 'p_notice_revision', 'p_max_request_micro', 'p_monthly_allowance_micro', 'p_max_requests_per_hour']),
   fn('tryon_discard_transient', '', []),
+  fn('outfitgen_plan', 'uuid', ['p_owner_id']),
+  fn('outfitgen_assess', 'uuid, uuid[]', ['p_owner_id', 'p_items']),
+  fn('outfitgen_claim', 'uuid, uuid, text, boolean, text[], uuid[]',
+    ['p_owner_id', 'p_request_id', 'p_manifest_id', 'p_auto', 'p_signatures', 'p_targets']),
+  fn('outfitgen_finish', 'uuid, uuid, text, jsonb, jsonb, uuid[]',
+    ['p_owner_id', 'p_request_id', 'p_code', 'p_usage', 'p_results', 'p_assessed']),
+  fn('outfitgen_expire_due', 'integer', ['p_limit']),
 ]);
 
 // Private helpers that RLS/Storage policies evaluate as `authenticated`; their bodies are pinned to migrations.
@@ -198,6 +211,11 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'ai_budget_contract()', 'ai_budget_used(uuid, timestamp with time zone)', 'ai_budget_json(bigint, numeric)',
   'admin_account_v3(private.approved_accounts, timestamp with time zone, text[])', 'admin_budget_shape(jsonb)',
   'admin_set_budget(smallint, text, jsonb, jsonb, text)',
+  'outfitgen_signature(uuid[])', 'outfitgen_fingerprint(uuid, uuid[])', 'outfitgen_row_guard()', 'outfitgen_remove_item_rows()',
+  'outfitgen_eligible(uuid, uuid)', 'outfitgen_valid_set(uuid, uuid[])', 'outfitgen_known(uuid, text)',
+  'outfitgen_permission(public.profiles, private.ai_controls)', 'outfitgen_expire(uuid, timestamp with time zone, integer)',
+  'outfitgen_record(uuid, uuid, jsonb, uuid[], private.ai_execution_manifests)',
+  'outfitgen_replay(private.ai_usage_evidence, private.ai_usage, public.profiles, private.ai_controls)',
 ]);
 
 // Supabase-provided GraphQL entrypoint; its privileges are provider-managed and recorded, not asserted.
@@ -218,6 +236,8 @@ export const PUBLIC_TABLES = Object.freeze({
     'title_snapshot', 'category_snapshot'] } },
   combination_rules: { table: SIUD, columns: {} },
   suggestion_feedback: { table: SIUD, columns: {} },
+  // Owners read their own suggestions; every write is a definer function (outfitgen_keep, outfitgen_remove, outfitgen_undo_remove).
+  suggested_outfits: { table: ['SELECT'], columns: {} },
 });
 export const PRIVATE_TABLES = Object.freeze([
   'approved_accounts', 'deletion_jobs', 'ai_controls', 'ai_usage', 'ai_requests', 'item_save_used_ids',
@@ -228,6 +248,7 @@ export const PRIVATE_TABLES = Object.freeze([
   'provider_capacity', 'provider_deployments', 'provider_slots', 'image_enhancements', 'enhancement_outputs', 'image_provenance',
   'image_enhancement_bindings', 'restore_image_markers', 'enhancement_probe_authorisations', 'app_admins', 'ai_limit_audit',
   'tryon_chains', 'tryon_attempts', 'tryon_results', 'tryon_probe_authorisations', 'tryon_chain_stops', 'tryon_person_photos',
+  'outfit_assessed_items', 'outfitgen_requests',
 ]);
 const OWNER_EXPRESSION = '(private.is_approved() AND (owner_id = ( SELECT auth.uid() AS uid)))';
 export const OWNER_POLICIES = Object.freeze([
@@ -467,6 +488,7 @@ export const isInconclusive = (result) => INCONCLUSIVE_CODES.includes(applicatio
 const UNREACHABLE_ANALYZED = 'an analyzed Save needs a completed provider analysis claim, which normal sessions cannot create in this job';
 const UNREACHABLE_TRYON = 'a try-on chain or result needs the service-only claim/finish path; tryon.sessions.mjs checks both directions'
   + ' (tryon_cancel replies CANCELLED alike for a missing or foreign chain id: it records only the caller\'s own Stop marker)';
+const UNREACHABLE_OUTFITGEN = 'a suggestion exists only after the service-only claim/finish path; outfitgen.sessions.mjs checks both directions';
 const req = (refs, extra = {}) => Object.freeze({ refs: Object.freeze(refs), ...extra });
 /**
  * Per-signature requirements. `refs` are fixture references that must each be substituted on their own (the
@@ -552,6 +574,12 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   tryon_person_photo_delete_v1: req([], { ownerOnly: true }),
   admin_ai_spending_v2: req([], { adminOnly: true }),
   admin_set_ai_limits_v2: req([], { adminOnly: true }),
+  outfitgen_status: req([], { ownerOnly: true }),
+  outfitgen_set_consent: req([], { ownerOnly: true }),
+  outfitgen_list: req([], { ownerOnly: true }),
+  outfitgen_keep: req([], { unverified: UNREACHABLE_OUTFITGEN }),
+  outfitgen_remove: req([], { unverified: UNREACHABLE_OUTFITGEN }),
+  outfitgen_undo_remove: req([], { unverified: UNREACHABLE_OUTFITGEN }),
 });
 const DIRECTIONS = [['A', 'B'], ['B', 'A']];
 const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|admin-denied|mixed|collision|unverified|tuple|ref:[A-Za-z]+))$/;

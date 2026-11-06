@@ -46,7 +46,7 @@ describe('TRYON-PROMPT1 migration', () => {
     expect(sql).not.toContain('\r');
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
     expect(names.indexOf(MAIN)).toBeGreaterThan(names.indexOf(PREVIOUS));
-    expect(names.at(-1)).toBe(MAIN);
+    expect(names.indexOf(MAIN)).toBe(names.indexOf(PREVIOUS) + 1);
     expect([...sql.matchAll(/create or replace function ([a-z_0-9.]+)\(/g)].map((match) => match[1])).toEqual(REPLACED);
     expect(code(sql)).not.toMatch(/\bcreate function\b|\bdrop (function|table|trigger|index|column)\b|\bgrant\b|\brevoke\b|\btruncate\b|disable trigger|\bdelete from\b|\balter table\b/);
   });

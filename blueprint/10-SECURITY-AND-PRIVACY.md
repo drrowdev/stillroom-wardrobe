@@ -228,3 +228,14 @@ Freeze/withdrawal/deletion stops new analysis and result retrieval; deletion rem
 Execute the access matrix in `12` with normal A/B logins and an anonymous client: tables, RPCs, Storage download/list/sign/upload/delete, foreign keys, exports, account freeze, cache reset and recommendation inputs. Assert that no table, routine, route or domain type creates a connection between users. Inspect the browser bundle for service-key canaries.
 
 Administrator privilege is used only in separately labelled provisioning/configuration fixtures, never in access assertions. The delivered PostgreSQL checks execute under the authenticated role with simulated identity claims. The real-session harness signs in using passwords and rejects service-key input; it has not run here because no Supabase project/test logins were supplied. Its Auth/Storage results remain release gates.
+
+## OUTFITGEN1a privacy addendum (ADR31) - 6 November 2026
+
+Outfit judging sends the main photos (up to 8 per call) and enum, number and boolean details of the owner's own garments to Azure
+OpenAI (EU DataZone, `store: false`, not used for training, flagged content may be retained for abuse review, no zero-retention
+claim) only under its own consent (notice revision 1), which also covers the automatic runs after Save and when the app opens.
+Photos are read with the owner's JWT and never stored by the function. Titles, notes, brands and prices are never sent. Pending
+suggestions are persisted until the owner keeps or removes them; they are private rows (owner-readable, written only by definer
+functions), not exported or restored, and deleted with the account. Removing a suggestion also records the existing disliked
+combination, which hides that exact set from Today's suggestions. Model text (title, reason) is length-limited and rendered only as
+text. Accounts stay independent: nothing here is shared, and the admin sees only the app-recorded spending amount for the purpose.

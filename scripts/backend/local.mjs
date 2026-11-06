@@ -636,10 +636,10 @@ export async function readCredentialCache() {
 }
 
 export function assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles,
-  deleteAccountFiles, sharedFiles, stylistFiles, enhanceFiles, tryOnFiles) {
+  deleteAccountFiles, sharedFiles, stylistFiles, enhanceFiles, tryOnFiles, outfitGenFiles) {
     const sections = [...config.matchAll(/^\[functions\.([^\]]+)\]/gm)].map((match) => match[1]);
-    if (JSON.stringify(sections.sort()) !== '["analyze-clothing","delete-account","enhance-photo","finalize-analyzed-item","finalize-image-change","stylist-chat","try-on"]'
-      || JSON.stringify([...directories].sort()) !== '["_shared","analyze-clothing","delete-account","enhance-photo","finalize-analyzed-item","finalize-image-change","stylist-chat","try-on"]'
+    if (JSON.stringify(sections.sort()) !== '["analyze-clothing","delete-account","enhance-photo","finalize-analyzed-item","finalize-image-change","outfit-generate","stylist-chat","try-on"]'
+      || JSON.stringify([...directories].sort()) !== '["_shared","analyze-clothing","delete-account","enhance-photo","finalize-analyzed-item","finalize-image-change","outfit-generate","stylist-chat","try-on"]'
       || JSON.stringify([...files].sort()) !== JSON.stringify([
         'azure-openai.ts', 'azure-profiles.ts', 'deno.d.ts', 'deno.json', 'google-cloud.ts', 'handler.ts', 'index.ts', 'protocol.ts',
       ])
@@ -657,6 +657,8 @@ export function assertAnalysisServeContract(config, directories, files, help, fi
       || JSON.stringify([...enhanceFiles].sort()) !== '["azure.ts","deno.json","handler.ts","index.ts"]'
       || !Array.isArray(tryOnFiles)
       || JSON.stringify([...tryOnFiles].sort()) !== '["azure.ts","deno.json","handler.ts","index.ts"]'
+      || !Array.isArray(outfitGenFiles)
+      || JSON.stringify([...outfitGenFiles].sort()) !== '["azure.ts","deno.json","handler.ts","index.ts"]'
       || !/^\[edge_runtime\]\s*\nenabled = true\s*$/m.test(config)
       || !/^\[functions\.analyze-clothing\]\s*\nenabled = true\s*\nverify_jwt = true\s*$/m.test(config)
       || !/^\[functions\.finalize-analyzed-item\]\s*\nenabled = true\s*\nverify_jwt = true\s*$/m.test(config)
@@ -665,6 +667,7 @@ export function assertAnalysisServeContract(config, directories, files, help, fi
       || !/^\[functions\.stylist-chat\]\s*\nenabled = true\s*\nverify_jwt = true\s*$/m.test(config)
       || !/^\[functions\.enhance-photo\]\s*\nenabled = true\s*\nverify_jwt = true\s*$/m.test(config)
       || !/^\[functions\.try-on\]\s*\nenabled = true\s*\nverify_jwt = true\s*$/m.test(config)
+      || !/^\[functions\.outfit-generate\]\s*\nenabled = true\s*\nverify_jwt = true\s*$/m.test(config)
       || help?.code !== 0 || !/^ *Serve all Functions locally\./m.test(help.stdout)
       || !/^ *supabase functions serve \[flags\] \[<Function name\.\.\.>\]\s*$/m.test(help.stdout)) {
       fail('REFUSED: the pinned analysis function serve contract does not match.');
@@ -735,7 +738,7 @@ export async function probeAnalysisHandler(transport = closingFetch, timeout = 2
 
 // Every served function besides analyze-clothing. Each worker must answer its own preflight before "ready".
 export const WARM_FUNCTIONS = Object.freeze(['finalize-analyzed-item', 'finalize-image-change', 'delete-account', 'stylist-chat',
-  'enhance-photo', 'try-on']);
+  'enhance-photo', 'try-on', 'outfit-generate']);
 
 export async function probeServedFunction(name, transport = closingFetch, timeout = 2000) {
   if (!WARM_FUNCTIONS.includes(name)) throw new AnalysisStartupError('reader-failed');
@@ -1219,14 +1222,15 @@ export async function startAnalysisServer() {
     const stylistFiles = await readdir(path.join(directory, 'stylist-chat'), { withFileTypes: true });
     const enhanceFiles = await readdir(path.join(directory, 'enhance-photo'), { withFileTypes: true });
     const tryOnFiles = await readdir(path.join(directory, 'try-on'), { withFileTypes: true });
-    if ([...deleteAccountFiles, ...sharedFiles, ...stylistFiles, ...enhanceFiles, ...tryOnFiles].some((entry) => !entry.isFile() || entry.isSymbolicLink())) {
+    const outfitGenFiles = await readdir(path.join(directory, 'outfit-generate'), { withFileTypes: true });
+    if ([...deleteAccountFiles, ...sharedFiles, ...stylistFiles, ...enhanceFiles, ...tryOnFiles, ...outfitGenFiles].some((entry) => !entry.isFile() || entry.isSymbolicLink())) {
       fail('REFUSED: unexpected account-deletion source inventory.');
     }
     assertAnalysisServeContract(await readFile(path.join(ROOT, 'supabase', 'config.toml'), 'utf8'),
       entries.map((entry) => entry.name), files.map((entry) => entry.name), await cli(['functions', 'serve', '--help']),
       finalizerFiles.map((entry) => entry.name), imageChangeFiles.map((entry) => entry.name),
       deleteAccountFiles.map((entry) => entry.name), sharedFiles.map((entry) => entry.name), stylistFiles.map((entry) => entry.name),
-      enhanceFiles.map((entry) => entry.name), tryOnFiles.map((entry) => entry.name));
+      enhanceFiles.map((entry) => entry.name), tryOnFiles.map((entry) => entry.name), outfitGenFiles.map((entry) => entry.name));
     const require = createRequire(import.meta.url);
     const packagePath = require.resolve('supabase/package.json');
     const pkg = JSON.parse(await readFile(packagePath, 'utf8'));
