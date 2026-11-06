@@ -160,6 +160,9 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
   const made = [];
   try {
     mark('setup');
+    // Earlier rehearsal stages left other eligible garments for this owner, so counts are relative to this baseline.
+    const base = (await rpc(a, 'outfitgen_status')).unassessed;
+    ok(Number.isSafeInteger(base));
     const top = await h.garment('top'), bottom = await h.garment('bottom'), shoes = await h.garment('footwear');
     const top2 = await h.garment('top', ['red']), layer = await h.garment('layer');
     made.push(top, bottom, shoes, top2, layer);
@@ -170,15 +173,15 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal((await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 2 })).code, 'CONFIG_CHANGED');
     const on = await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 1 });
     equal(on.code, 'OK');
-    ok(on.unassessed === 5 && on.autoUnassessed === 0 && on.pending === 0 && on.live === false);
+    ok(on.unassessed === base + 5 && on.autoUnassessed === 0 && on.pending === 0 && on.live === false);
     equal((await rpc(b, 'outfitgen_status')).code, 'INACTIVE');
     equal((await one(`select public.outfitgen_plan(${literal(b.uid)});`)).code, 'INACTIVE');
 
     mark('plan-claim');
     const p = await plan();
     equal(p.code, 'OK');
-    equal(p.items.length, 5);
-    equal([p.pairs, p.disliked, p.known, p.pendingRoom], [[], [], [], 40]);
+    equal(p.items.length, base + 5);
+    equal(p.pendingRoom, 40);
     ok(p.items.every((item) => item.unassessed === true && /^[0-9a-f]{8}-/.test(item.image.path) && item.image.path.startsWith(`${a.uid}/`)
       && !('title' in item) && !('notes' in item) && !('brand' in item)));
     const [s1, s2, s3] = [await sig([top, bottom, shoes]), await sig([top2, bottom, shoes]), await sig([top, bottom, shoes, layer])];
@@ -239,7 +242,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal((await claim(R2, [s1])).code, 'CONFLICT');
     const p2 = await plan();
     ok([s1, s2, s3].every((value) => p2.known.includes(value)));
-    equal((await rpc(a, 'outfitgen_status')).unassessed, 3);
+    equal((await rpc(a, 'outfitgen_status')).unassessed, base + 3);
 
     mark('keep-remove');
     const three = listed.suggestions.find((s) => s.itemIds.length === 3), four = listed.suggestions.find((s) => s.itemIds.length === 4);
