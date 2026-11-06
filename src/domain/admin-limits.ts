@@ -6,7 +6,7 @@ import { locales, type Language } from '../i18n';
 /** The account's one editable value. The retired hourly and per-feature limits are no longer read or written. */
 export type Limits = { monthlyAllowanceMicro: string };
 export type LimitField = 'monthlyAllowanceMicro';
-export const SPEND_PURPOSES = ['analysis', 'stylist', 'enhancement', 'tryOn'] as const;
+export const SPEND_PURPOSES = ['analysis', 'stylist', 'enhancement', 'tryOn', 'outfitGen'] as const;
 export type SpendPurpose = (typeof SPEND_PURPOSES)[number];
 export type MonthSpend = { confirmedMicro: string; estimatedMicro: string; reservedMicro: string; totalMicro: string; requests: number };
 export type MonthHistory = { month: string } & Record<SpendPurpose, MonthSpend>;
@@ -69,16 +69,16 @@ function parseAccount(value: unknown, months: readonly string[]): AdminAccount |
   const rows: MonthHistory[] = [];
   for (const [index, entry] of history.entries()) {
     if (!exact(entry, ['month', ...SPEND_PURPOSES]) || entry.month !== months[index]) return null;
-    const [analysis, stylist, enhancement, tryOn] = SPEND_PURPOSES.map((purpose) => parseMonthSpend(entry[purpose]));
-    if (!analysis || !stylist || !enhancement || !tryOn) return null;
-    rows.push({ month: months[index]!, analysis, stylist, enhancement, tryOn });
+    const [analysis, stylist, enhancement, tryOn, outfitGen] = SPEND_PURPOSES.map((purpose) => parseMonthSpend(entry[purpose]));
+    if (!analysis || !stylist || !enhancement || !tryOn || !outfitGen) return null;
+    rows.push({ month: months[index]!, analysis, stylist, enhancement, tryOn, outfitGen });
   }
   const shared = parseCurrent(current.shared);
-  const [analysis, stylist, enhancement, tryOn] = SPEND_PURPOSES.map((purpose) => parseCurrent(current[purpose]));
+  const [analysis, stylist, enhancement, tryOn, outfitGen] = SPEND_PURPOSES.map((purpose) => parseCurrent(current[purpose]));
   const probe = parseProbe(openAllocations.enhancementProbe), tryOnProbe = parseProbe(openAllocations.tryOnProbe);
-  if (!shared || !analysis || !stylist || !enhancement || !tryOn || !probe || !tryOnProbe) return null;
+  if (!shared || !analysis || !stylist || !enhancement || !tryOn || !outfitGen || !probe || !tryOnProbe) return null;
   return { admissionNo, enabled, accountVersion, features: flags, limits: parsedLimits, history: rows,
-    current: { period: current.period, shared, analysis, stylist, enhancement, tryOn }, probe, tryOnProbe };
+    current: { period: current.period, shared, analysis, stylist, enhancement, tryOn, outfitGen }, probe, tryOnProbe };
 }
 /** The admin_ai_spending_v2 reply under the budget contract, with exactly the keys ADR27 allows; anything else is refused whole. */
 export function parseSpending(value: unknown): AdminSpending | null {
@@ -130,7 +130,7 @@ export function parseWriteResult(value: unknown): WriteResult | null {
 }
 
 const addMicro = (...values: string[]) => values.reduce((sum, value) => sum + BigInt(value), 0n).toString();
-/** Confirmed plus estimated plus reserved, per feature; the total the view shows, summed over the four features. */
+/** Confirmed plus estimated plus reserved, per feature; the total the view shows, summed over every feature. */
 export function monthTotals(month: MonthHistory): MonthSpend {
   const parts = SPEND_PURPOSES.map((purpose) => month[purpose]);
   return { confirmedMicro: addMicro(...parts.map((part) => part.confirmedMicro)), estimatedMicro: addMicro(...parts.map((part) => part.estimatedMicro)),

@@ -12,12 +12,16 @@ import {
   ROOT, DB_CONTAINER, PROJECT_ID, MIGRATION_HASH, assertLoopbackUrl, assertLocalApi, assertPublishableKey,
   normalSessionEnvironment, validateSessionEnvironment, commandEnvironment, requireDocker, requireLocalContainer,
   LocalBackendError, securityFailureExitCode, describeGenerationResult, describeStartupOrResetFailure,
-  assertAnalysisServeContract, ownAnalysisProcess, probeAnalysisHandler, waitForAnalysisHandler,
+  assertAnalysisServeContract as assertServeContract, ownAnalysisProcess, probeAnalysisHandler, waitForAnalysisHandler,
   readAnalysisRuntime, runCommand, createServedDiagnostics, parseServedDiagnostics, servedCode,
   withAnalyzedSaveFixtureLock,
 } from '../../scripts/backend/local.mjs';
 // @ts-expect-error Executable normal-session JavaScript has no TypeScript declaration.
 import { analysisRequest, servedInvalidTokenRequest } from '../integration/ai-analysis.sessions.mjs';
+
+// The outfit-generate inventory is the last argument of the contract; the cases below vary the earlier ones.
+const outfitGenFiles = ['azure.ts', 'deno.json', 'handler.ts', 'index.ts'];
+const assertAnalysisServeContract = (...args: unknown[]) => (assertServeContract as (...all: unknown[]) => void)(...args, outfitGenFiles);
 
 // Re-derive the tag by hand from the pinned CLI source, and the digest from both registries, whenever the pin changes.
 const pgMetaPullStep = (() => {
@@ -399,9 +403,10 @@ describe('owned B1 function lifecycle', () => {
     + '\n[functions.delete-account]\nenabled = true\nverify_jwt = true\n'
     + '\n[functions.stylist-chat]\nenabled = true\nverify_jwt = true\n'
     + '\n[functions.enhance-photo]\nenabled = true\nverify_jwt = true\n'
-    + '\n[functions.try-on]\nenabled = true\nverify_jwt = true\n';
+    + '\n[functions.try-on]\nenabled = true\nverify_jwt = true\n'
+    + '\n[functions.outfit-generate]\nenabled = true\nverify_jwt = true\n';
   const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json', 'azure-openai.ts', 'azure-profiles.ts'];
-  const directories = ['finalize-analyzed-item', 'analyze-clothing', 'finalize-image-change', 'delete-account', '_shared', 'stylist-chat', 'enhance-photo', 'try-on'];
+  const directories = ['finalize-analyzed-item', 'analyze-clothing', 'finalize-image-change', 'delete-account', '_shared', 'stylist-chat', 'enhance-photo', 'try-on', 'outfit-generate'];
   const finalizerFiles = ['index.ts', 'handler.ts', 'deno.json', 'verify-image.ts'];
   const imageChangeFiles = ['index.ts', 'handler.ts', 'deno.json'];
   const deleteFiles = ['index.ts', 'handler.ts', 'deno.json'];
@@ -412,6 +417,10 @@ describe('owned B1 function lifecycle', () => {
   const help = { code: 0, stdout: '  Serve all Functions locally.\n  supabase functions serve [flags] [<Function name...>]\n', stderr: '' };
   it('requires the observed all-functions capability and closed enabled inventory', () => {
     expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles, enhanceFiles, tryOnFiles)).not.toThrow();
+    expect(() => assertServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles, enhanceFiles, tryOnFiles, outfitGenFiles.slice(1))).toThrow();
+    expect(() => assertServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles, enhanceFiles, tryOnFiles, [...outfitGenFiles, '.env'])).toThrow();
+    expect(() => assertAnalysisServeContract(config.replace('[functions.outfit-generate]\nenabled = true\nverify_jwt = true',
+      '[functions.outfit-generate]\nenabled = true\nverify_jwt = false'), directories, files, help, finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles, enhanceFiles, tryOnFiles)).toThrow();
     for (const text of [config.replace('verify_jwt = true', 'verify_jwt = false'),
       config.replace('[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = true',
         '[functions.finalize-analyzed-item]\nenabled = true\nverify_jwt = false'),
@@ -478,10 +487,8 @@ describe('owned B1 function lifecycle', () => {
       deleteFiles, sharedFiles, stylistFiles, enhanceFiles, tryOnFiles)).toThrow();
     expect(() => assertAnalysisServeContract(config, directories.filter((name) => name !== 'try-on'), files, help,
       finalizerFiles, imageChangeFiles, deleteFiles, sharedFiles, stylistFiles, enhanceFiles, tryOnFiles)).toThrow();
-    // @ts-expect-error the try-on file list is required
     expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles,
       deleteFiles, sharedFiles, stylistFiles, enhanceFiles)).toThrow();
-    // @ts-expect-error the enhancement file list is required
     expect(() => assertAnalysisServeContract(config, directories, files, help, finalizerFiles, imageChangeFiles,
       deleteFiles, sharedFiles, stylistFiles)).toThrow();
     expect(() => assertAnalysisServeContract(config, directories.filter((name) => name !== '_shared'), files, help,

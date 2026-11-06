@@ -141,6 +141,8 @@ const baseTable = [
   '   `20261101090000` | ` `              | `2026-11-01 09:00:00` ',
   '   `20261101200000` | ` `              | `2026-11-01 20:00:00` ',
   '   `20261102090000` | ` `              | `2026-11-02 09:00:00` ',
+  '   `20261106090000` | ` `              | `2026-11-06 09:00:00` ',
+  '   `20261106090100` | ` `              | `2026-11-06 09:01:00` ',
   '',
   '',
 ].join('\n');
@@ -188,12 +190,15 @@ const targetTable = [
   '   `20261101090000` | `20261101090000` | `2026-11-01 09:00:00` ',
   '   `20261101200000` | `20261101200000` | `2026-11-01 20:00:00` ',
   '   `20261102090000` | `20261102090000` | `2026-11-02 09:00:00` ',
+  '   `20261106090000` | `20261106090000` | `2026-11-06 09:00:00` ',
+  '   `20261106090100` | `20261106090100` | `2026-11-06 09:01:00` ',
   '',
   '',
 ].join('\n');
 const pendingRow = (table: string, version: string) => table.replace(`\`${version}\` | \`${version}\``, `\`${version}\` | \` \`             `);
 // Historical stages remain pending for later migrations; target includes the new lifecycle.
-const tryonV3PriorTable = pendingRow(targetTable, '20261102090000');
+const outfitgenPriorTable = pendingRow(pendingRow(targetTable, '20261106090100'), '20261106090000');
+const tryonV3PriorTable = pendingRow(outfitgenPriorTable, '20261102090000');
 const limitsPriorTable = pendingRow(tryonV3PriorTable, '20261101200000');
 const budget2PriorTable = pendingRow(limitsPriorTable, '20261101090000');
 const availPriorTable = pendingRow(budget2PriorTable, '20261101080000');
@@ -434,10 +439,14 @@ describe('CI-only preservation guards', () => {
     }
   });
   it('pins the regular migration inventory, preserving earlier lengths and hashes', async () => {
-    expect(inventory().map((entry) => entry.version)).toEqual(['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000', '20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000', '20260925120000', '20260925120100', '20260927090000', '20260928090000', '20260928090100', '20260929090000', '20260929090100', '20261001090000', '20261002090000', '20261003090000', '20261003090100', '20261004090000', '20261005090000', '20261007090000', '20261008080000', '20261009090000', '20261010090000', '20261011090000',     '20261011100000', '20261101080000',     '20261101090000', '20261101200000', '20261102090000']);
+    const versions = inventory().map((entry) => entry.version);
+    // Each feature only appends: the frozen history stays in order and the newest migrations close the list.
+    expect(versions).toEqual([...versions].sort());
+    expect(versions.slice(0, 2)).toEqual(['20260905000000', '20260906000000']);
+    expect(versions.slice(-5)).toEqual(['20261101090000', '20261101200000', '20261102090000', '20261106090000', '20261106090100']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
-    for (const index of [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]) for (const [key, value] of [
+    for (const index of inventory().keys()) for (const [key, value] of [
       ['name', 'unexpected.sql'], ['bytes', 0], ['bytes', present(inventory()[index]).bytes + 1],
       ['sha256', 'b'.repeat(64)], ['regular', false], ['symlink', true],
     ]) {
@@ -475,45 +484,24 @@ describe('CI-only preservation guards', () => {
     expect(() => assertCapabilities([{ code: 0, stdout: '  --local\n' }, ...help.slice(1)])).toThrow();
   });
   it('parses source-derived applied/pending tables without claiming execution', () => {
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000', '20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000', '20260925120000', '20260925120100', '20260927090000', '20260928090000', '20260928090100', '20260929090000', '20260929090100', '20261001090000', '20261002090000', '20261003090000', '20261003090100', '20261004090000', '20261005090000',     '20261007090000', '20261008080000', '20261009090000', '20261010090000', '20261011090000',     '20261011100000', '20261101080000',     '20261101090000', '20261101200000', '20261102090000'] });
-    expect(assertHistory(targetTable, 'target')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000', '20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000', '20260925120000', '20260925120100', '20260927090000', '20260928090000', '20260928090100', '20260929090000', '20260929090100', '20261001090000', '20261002090000', '20261003090000', '20261003090100', '20261004090000', '20261005090000', '20261007090000', '20261008080000', '20261009090000', '20261010090000', '20261011090000', '20261011100000', '20261101080000', '20261101090000', '20261101200000', '20261102090000'], pending: [] });
-    expect(assertHistory(priorMainTable, 'prior-main')).toEqual({ applied: ['20260905000000', '20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000'], pending: ['20260921193000', '20260922020000', '20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000', '20260925120000', '20260925120100', '20260927090000', '20260928090000', '20260928090100', '20260929090000', '20260929090100', '20261001090000', '20261002090000', '20261003090000', '20261003090100', '20261004090000', '20261005090000',     '20261007090000', '20261008080000', '20261009090000', '20261010090000', '20261011090000',     '20261011100000', '20261101080000',     '20261101090000', '20261101200000', '20261102090000'] });
-    expect(assertHistory(azureTable, 'azure-target')).toEqual({
-      applied: inventory().slice(0, 10).map((entry) => entry.version), pending: ['20260922020000', '20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000', '20260925120000', '20260925120100', '20260927090000', '20260928090000', '20260928090100', '20260929090000', '20260929090100', '20261001090000', '20261002090000', '20261003090000', '20261003090100', '20261004090000', '20261005090000',       '20261007090000', '20261008080000', '20261009090000', '20261010090000', '20261011090000',       '20261011100000', '20261101080000', '20261101090000',       '20261101200000', '20261102090000'],
-    });
-    expect(assertHistory(imageChangeTable, 'image-change')).toEqual({
-      applied: inventory().slice(0, 11).map((entry) => entry.version), pending: ['20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000', '20260925120000', '20260925120100', '20260927090000', '20260928090000', '20260928090100', '20260929090000', '20260929090100', '20261001090000', '20261002090000', '20261003090000', '20261003090100', '20261004090000', '20261005090000',       '20261007090000', '20261008080000', '20261009090000', '20261010090000', '20261011090000',       '20261011100000', '20261101080000', '20261101090000',       '20261101200000', '20261102090000'],
-    });
-    expect(assertHistory(coloursTable, 'colours')).toEqual({
-      applied: inventory().slice(0, 12).map((entry) => entry.version), pending: ['20260924100100', '20260925090000', '20260925100000', '20260925110000', '20260925120000', '20260925120100', '20260927090000', '20260928090000', '20260928090100', '20260929090000', '20260929090100', '20261001090000', '20261002090000', '20261003090000', '20261003090100', '20261004090000', '20261005090000',       '20261007090000', '20261008080000', '20261009090000', '20261010090000', '20261011090000',       '20261011100000', '20261101080000', '20261101090000',       '20261101200000', '20261102090000'],
-    });
-    expect(assertHistory(tryonStopTable, 'tryon-stop')).toEqual({
-            applied: inventory().slice(0, 28).map((entry) => entry.version), pending: ['20261005090000', '20261007090000', '20261008080000', '20261009090000', '20261010090000', '20261011090000',             '20261011100000', '20261101080000', '20261101090000',             '20261101200000', '20261102090000'],
-    });
-    expect(assertHistory(save1PriorTable, 'save1-prior')).toEqual({
-            applied: inventory().slice(0, 30).map((entry) => entry.version), pending: ['20261008080000', '20261009090000', '20261010090000', '20261011090000',             '20261011100000', '20261101080000', '20261101090000',             '20261101200000', '20261102090000'],
-    });
-    expect(assertHistory(budget1PriorTable, 'budget1-prior')).toEqual({
-            applied: inventory().slice(0, 32).map((entry) => entry.version), pending: ['20261010090000', '20261011090000',             '20261011100000', '20261101080000', '20261101090000',             '20261101200000', '20261102090000'],
-    });
-          expect(assertHistory(ideaPriorTable, 'idea-prior')).toEqual({
-            applied: inventory().slice(0, 33).map((entry) => entry.version),             pending: ['20261011090000', '20261011100000', '20261101080000', '20261101090000',             '20261101200000', '20261102090000'],
-          });
-    expect(assertHistory(photoPriorTable, 'photo-prior')).toEqual({
-      applied: inventory().slice(0, 34).map((entry) => entry.version),       pending: ['20261011100000', '20261101080000', '20261101090000',       '20261101200000', '20261102090000'],
-    });
-    expect(assertHistory(availPriorTable, 'avail-prior')).toEqual({
-            applied: inventory().slice(0, 35).map((entry) => entry.version), pending: ['20261101080000', '20261101090000',             '20261101200000', '20261102090000'],
-    });
-          expect(assertHistory(budget2PriorTable, 'budget2-prior')).toEqual({
-            applied: inventory().slice(0, 36).map((entry) => entry.version),             pending: ['20261101090000', '20261101200000', '20261102090000'],
-          });
-    expect(assertHistory(limitsPriorTable, 'limits-prior')).toEqual({
-                  applied: inventory().slice(0, 37).map((entry) => entry.version), pending: ['20261101200000', '20261102090000'],
-    });
-                expect(assertHistory(tryonV3PriorTable, 'tryon-v3-prior')).toEqual({
-                  applied: inventory().slice(0, 38).map((entry) => entry.version), pending: ['20261102090000'],
-                });
+    const versions = inventory().map((entry) => entry.version);
+    const at = (applied: number) => ({ applied: versions.slice(0, applied), pending: versions.slice(applied) });
+    expect(assertHistory(baseTable, 'base')).toEqual(at(1));
+    expect(assertHistory(targetTable, 'target')).toEqual(at(versions.length));
+    expect(assertHistory(priorMainTable, 'prior-main')).toEqual(at(9));
+    expect(assertHistory(azureTable, 'azure-target')).toEqual(at(10));
+    expect(assertHistory(imageChangeTable, 'image-change')).toEqual(at(11));
+    expect(assertHistory(coloursTable, 'colours')).toEqual(at(12));
+    expect(assertHistory(tryonStopTable, 'tryon-stop')).toEqual(at(28));
+    expect(assertHistory(save1PriorTable, 'save1-prior')).toEqual(at(30));
+    expect(assertHistory(budget1PriorTable, 'budget1-prior')).toEqual(at(32));
+    expect(assertHistory(ideaPriorTable, 'idea-prior')).toEqual(at(33));
+    expect(assertHistory(photoPriorTable, 'photo-prior')).toEqual(at(34));
+    expect(assertHistory(availPriorTable, 'avail-prior')).toEqual(at(35));
+    expect(assertHistory(budget2PriorTable, 'budget2-prior')).toEqual(at(36));
+    expect(assertHistory(limitsPriorTable, 'limits-prior')).toEqual(at(37));
+    expect(assertHistory(tryonV3PriorTable, 'tryon-v3-prior')).toEqual(at(38));
+    expect(assertHistory(outfitgenPriorTable, 'outfitgen-prior')).toEqual(at(39));
     for (const [table, stage] of [[tryonStopTable, 'target'], [tryonStopTable, 'colours'], [targetTable, 'tryon-stop'],
       [coloursTable, 'tryon-stop'], [save1PriorTable, 'target'], [targetTable, 'save1-prior'], [tryonStopTable, 'save1-prior'],
       [save1PriorTable, 'tryon-stop'], [save1PriorTable, 'budget1-prior'], [targetTable, 'budget1-prior'], [budget1PriorTable, 'target'],
@@ -522,8 +510,11 @@ describe('CI-only preservation guards', () => {
       [photoPriorTable, 'idea-prior'], [availPriorTable, 'target'], [targetTable, 'avail-prior'], [photoPriorTable, 'avail-prior'],
       [availPriorTable, 'photo-prior'], [budget2PriorTable, 'target'], [targetTable, 'budget2-prior'], [availPriorTable, 'budget2-prior'],
       [budget2PriorTable, 'avail-prior'], [limitsPriorTable, 'target'], [targetTable, 'limits-prior'], [budget2PriorTable, 'limits-prior'],
-      [limitsPriorTable, 'budget2-prior'], [tryonV3PriorTable, 'target'], [targetTable, 'tryon-v3-prior'],
-      [limitsPriorTable, 'tryon-v3-prior'], [tryonV3PriorTable, 'limits-prior']] as const)
+      [limitsPriorTable, 'budget2-prior']] as const)
+      expect(() => assertHistory(table, stage)).toThrow();
+    for (const [table, stage] of [[tryonV3PriorTable, 'target'], [targetTable, 'tryon-v3-prior'], [limitsPriorTable, 'tryon-v3-prior'],
+      [tryonV3PriorTable, 'limits-prior'], [outfitgenPriorTable, 'target'], [targetTable, 'outfitgen-prior'],
+      [tryonV3PriorTable, 'outfitgen-prior'], [outfitgenPriorTable, 'tryon-v3-prior']] as const)
       expect(() => assertHistory(table, stage)).toThrow();
     for (const [table, stage] of [[imageChangeTable, 'target'], [imageChangeTable, 'colours'], [coloursTable, 'target'],
       [coloursTable, 'image-change'], [targetTable, 'colours'], [azureTable, 'image-change']] as const)
@@ -545,7 +536,7 @@ describe('CI-only preservation guards', () => {
   it('retains SOURCE-DERIVED renderer padding, widths and decorative blank lines', () => {
     for (const table of [baseTable, priorMainTable, azureTable, imageChangeTable, coloursTable, tryonStopTable, budget1PriorTable, ideaPriorTable, photoPriorTable, targetTable]) {
       const lines = table.split('\n');
-      expect(lines).toHaveLength(45);
+      expect(lines).toHaveLength(inventory().length + 6);
       expect(lines.slice(0, 2)).toEqual(['', '  ']);
       expect(lines.slice(-2)).toEqual(['', '']);
       for (const line of lines.slice(2, -2)) {
@@ -617,7 +608,7 @@ describe('CI-only preservation guards', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toBe('EVIDENCE_REQUIRED');
     expect(historyFailureDetail(failure)).toBe(`; reason=${reason}`);
-    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: ['20260906000000', '20260909070000', '20260909110000', '20260909180000', '20260910070000', '20260911040000', '20260911200000', '20260913120000', '20260921193000', '20260922020000', '20260924100000', '20260924100100', '20260925090000', '20260925100000', '20260925110000', '20260925120000', '20260925120100', '20260927090000', '20260928090000', '20260928090100', '20260929090000', '20260929090100', '20261001090000', '20261002090000', '20261003090000', '20261003090100', '20261004090000', '20261005090000',     '20261007090000', '20261008080000', '20261009090000', '20261010090000', '20261011090000',     '20261011100000', '20261101080000', '20261101090000',     '20261101200000', '20261102090000'] });
+    expect(assertHistory(baseTable, 'base')).toEqual({ applied: ['20260905000000'], pending: inventory().slice(1).map((entry) => entry.version) });
   });
   it('distinguishes history command failure without forwarding command output or arbitrary errors', () => {
     const privateText = 'arbitrary upstream text /private/fixture-path';
@@ -1762,7 +1753,7 @@ describe('import safety and frozen integration boundary', () => {
     expect(main.indexOf('await verifyCiStorageGuard();')).toBeGreaterThan(main.indexOf("await migrateToAzureTarget(run, 'base')"));
     expect(main.indexOf("await history('azure-target');")).toBeGreaterThan(main.indexOf('await verifyCiStorageGuard();'));
     expect(main.indexOf('ITEM_LIFECYCLE_CATALOG_SQL')).toBeGreaterThan(main.indexOf("await history('azure-target');"));
-    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(17);
+    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(18);
     const prior = main.slice(main.indexOf("stage = 'AZ1-prior-main-reset'"));
     expect(source).toContain("const PRIOR_MAIN_VERSION = '20260913120000';");
     expect(source).toContain('MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION)');
@@ -1824,8 +1815,10 @@ describe('COL1 strict preservation pass and twelve-only probes (source order, no
                         "await history('limits-prior'); await verifyCiStorageGuard();", 'await budget2Compare(', 'await budget2CatalogProbe(',
                         'await budget2BehaviourProbes(', 'await limitsUpgradeSeed(', "await migrateToStage(run, 'limits-prior', 'tryon-v3-prior')",
                         "await history('tryon-v3-prior'); await verifyCiStorageGuard();", 'await limitsUpgradeVerify(', 'await tryonLimitsProbes(',
-                        'await promptMigrationGuards(', 'await promptUpgradeSeed(', "await migrateToStage(run, 'tryon-v3-prior', 'target')",
-                        "await history('target'); await verifyCiStorageGuard();", 'await promptUpgradeVerify(', 'await tryonPromptProbes(',
+                        'await promptMigrationGuards(', 'await promptUpgradeSeed(', "await migrateToStage(run, 'tryon-v3-prior', 'outfitgen-prior')",
+                        "await history('outfitgen-prior'); await verifyCiStorageGuard();", 'await promptUpgradeVerify(', 'await tryonPromptProbes(',
+                        'await outfitgenUpgradeSeed(', "await migrateToStage(run, 'outfitgen-prior', 'target')",
+                        "await history('target'); await verifyCiStorageGuard();", 'await outfitgenUpgradeVerify(', 'await outfitgenProbes(',
                         'await colourFinalizer.stop()',
       "'--version', COLOUR_VERSION", "await history('colours'); await verifyCiStorageGuard();", 'provision-test-users.mjs',
       "await colourProbes(twelveEnv, privilegedLocalSql, 'colours')", 'await twelveFinalizer.stop()']) {

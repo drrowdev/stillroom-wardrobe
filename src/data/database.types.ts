@@ -435,6 +435,84 @@ export type Database = {
           },
         ]
       }
+      suggested_outfits: {
+        Row: {
+          created_at: string
+          decided_at: string | null
+          fingerprint: string
+          id: string
+          item_ids: string[]
+          kept_outfit_id: string | null
+          manifest_id: string
+          occasion: string | null
+          owner_id: string
+          prompt_version: number
+          reason: string | null
+          request_id: string
+          score: number
+          signature: string
+          state: string
+          title: string | null
+          vote_before: string | null
+          vote_set_at: string | null
+        }
+        Insert: {
+          created_at?: string
+          decided_at?: string | null
+          fingerprint: string
+          id?: string
+          item_ids: string[]
+          kept_outfit_id?: string | null
+          manifest_id: string
+          occasion?: string | null
+          owner_id: string
+          prompt_version: number
+          reason?: string | null
+          request_id: string
+          score: number
+          signature?: string
+          state: string
+          title?: string | null
+          vote_before?: string | null
+          vote_set_at?: string | null
+        }
+        Update: {
+          created_at?: string
+          decided_at?: string | null
+          fingerprint?: string
+          id?: string
+          item_ids?: string[]
+          kept_outfit_id?: string | null
+          manifest_id?: string
+          occasion?: string | null
+          owner_id?: string
+          prompt_version?: number
+          reason?: string | null
+          request_id?: string
+          score?: number
+          signature?: string
+          state?: string
+          title?: string | null
+          vote_before?: string | null
+          vote_set_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "suggested_outfits_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["owner_id"]
+          },
+          {
+            foreignKeyName: "suggested_outfits_owner_id_kept_outfit_id_fkey"
+            columns: ["owner_id", "kept_outfit_id"]
+            isOneToOne: false
+            referencedRelation: "outfits"
+            referencedColumns: ["owner_id", "id"]
+          },
+        ]
+      }
       suggestion_feedback: {
         Row: {
           created_at: string
@@ -846,6 +924,46 @@ export type Database = {
           version: number
         }[]
       }
+      outfitgen_assess: {
+        Args: { p_items: string[]; p_owner_id: string }
+        Returns: Json
+      }
+      outfitgen_claim: {
+        Args: {
+          p_auto: boolean
+          p_manifest_id: string
+          p_owner_id: string
+          p_request_id: string
+          p_signatures: string[]
+          p_targets: string[]
+        }
+        Returns: Json
+      }
+      outfitgen_expire_due: { Args: { p_limit: number }; Returns: Json }
+      outfitgen_finish: {
+        Args: {
+          p_assessed: string[]
+          p_code: string
+          p_owner_id: string
+          p_request_id: string
+          p_results: Json
+          p_usage: Json
+        }
+        Returns: Json
+      }
+      outfitgen_keep: {
+        Args: { p_id: string; p_outfit_id: string }
+        Returns: Json
+      }
+      outfitgen_list: { Args: never; Returns: Json }
+      outfitgen_plan: { Args: { p_owner_id: string }; Returns: Json }
+      outfitgen_remove: { Args: { p_id: string }; Returns: Json }
+      outfitgen_set_consent: {
+        Args: { p_enabled: boolean; p_notice_revision: number }
+        Returns: Json
+      }
+      outfitgen_status: { Args: never; Returns: Json }
+      outfitgen_undo_remove: { Args: { p_id: string }; Returns: Json }
       prepare_item_deletion: {
         Args: {
           p_expected_version: number

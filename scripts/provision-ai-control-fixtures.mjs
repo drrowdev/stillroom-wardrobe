@@ -257,7 +257,9 @@ async function main() {
     // authorisations, and in the shared private.ai_usage/ai_usage_evidence only rows with purpose='try_on'; these fixtures
     // create none of them, so its runs are not counted below.
     { name: 'stillroom-tryon-expire', schedule: '*/15 * * * *', command: 'select public.tryon_expire_due(500)',
-      username: 'postgres', database: 'postgres', active: true }]);
+      username: 'postgres', database: 'postgres', active: true },
+    { name: 'stillroom-outfitgen-expire', schedule: '*/5 * * * *', command: 'select public.outfitgen_expire_due(500)',
+      username: 'postgres', database: 'postgres', active: false }]);
     // The others inactive and never run: the structural proof that the schedule did not touch the fixtures above.
     requireEvidence(schedule.runs === 0 && schedule.schemaDenied === true && schedule.logRun === 'on');
     requireEvidence(['GMT', 'UTC', 'Etc/UTC'].includes(schedule.timezone));

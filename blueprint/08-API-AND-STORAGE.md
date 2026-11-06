@@ -969,3 +969,14 @@ usage and allowance fields, and `admin_set_ai_limits_v2` sets one amount
 withdrawal still works, and `admin_ai_spending` / `admin_set_ai_limits` (v1)
 always answer `UNAVAILABLE`. The Edge functions require the header and a
 closed `budget` reply before any claim.
+
+## OUTFITGEN1a outfit judging contract (ADR31, inactive)
+
+`POST /functions/v1/outfit-generate` takes only `{requestId, mode: 'auto' | 'manual', language: 'en' | 'fi' | 'sv'}` and answers
+`{code: 'OK', suggested, judged, remaining}` or a closed code (`INVALID_INPUT`, `UNAUTHENTICATED`, `UNAVAILABLE`, `INACTIVE`,
+`CONSENT_REQUIRED`, `UNCONFIGURED`, `CONFIG_CHANGED`, `BUSY`, `PENDING_FULL`, `RATE_LIMIT`, `COOLDOWN`, `ALLOWANCE`, `CONFLICT`,
+`TERMINAL`, `FILTERED`, `FAILED`, `TIMEOUT`). The owner comes only from the verified token. Owner RPCs (budget header required where
+the Stylist's are): `outfitgen_status`, `outfitgen_set_consent`, `outfitgen_list`, `outfitgen_keep(p_id, p_outfit_id)`,
+`outfitgen_remove(p_id)`, `outfitgen_undo_remove(p_id)`. Service-only: `outfitgen_plan`, `outfitgen_assess`, `outfitgen_claim`,
+`outfitgen_finish`, `outfitgen_expire_due`. Owners read `suggested_outfits` directly (select only). Photos are read from private
+Storage with the owner's own JWT, never the service role.

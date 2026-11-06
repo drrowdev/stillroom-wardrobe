@@ -17,12 +17,12 @@ function account(admissionNo = 1) {
   return {
     admissionNo, enabled: true, accountVersion: 'a'.repeat(64),
     features: { analysis: { configured: true, activated: true }, stylist: { configured: true, activated: true }, enhancement: { configured: false, activated: false },
-      tryOn: { configured: true, activated: false } },
+      tryOn: { configured: true, activated: false }, outfitGen: { configured: true, activated: false } },
     limits: limits(),
     history: months.map((month) => ({ month, analysis: spend('1200', '300', '4097351', 3), stylist: spend('0', '4840', '0', 1), enhancement: spend(),
-      tryOn: spend('240000', '0', '360000', 2) })),
-    current: { period: '2026-09', shared: { usedMicro: '4102191' }, analysis: { usedMicro: '4097351' },
-      stylist: { usedMicro: '4840' }, enhancement: { usedMicro: '0' }, tryOn: { usedMicro: '600000' } },
+      tryOn: spend('240000', '0', '360000', 2), outfitGen: spend('0', '90000', '0', 1) })),
+    current: { period: '2026-09', shared: { usedMicro: '4192191' }, analysis: { usedMicro: '4097351' },
+      stylist: { usedMicro: '4840' }, enhancement: { usedMicro: '0' }, tryOn: { usedMicro: '600000' }, outfitGen: { usedMicro: '90000' } },
     openAllocations: { enhancementProbe: { count: 0, allocationMicro: '0', maxCalls: 0 }, tryOnProbe: { count: 1, allocationMicro: '1800000', maxCalls: 5 } },
   };
 }
@@ -45,13 +45,14 @@ describe('admin spending reply (budget contract)', () => {
     const v1 = reply((value) => { for (const entry of value.accounts) {
       const shape = entry as Record<string, unknown> & typeof entry;
       delete (shape.features as Record<string, unknown>).tryOn;
+      delete (shape.features as Record<string, unknown>).outfitGen;
       shape.limits = { shared: { monthlyAllowanceMicro: '20000000', maxRequestMicro: '4097351', maxRequestsPerHour: 30 },
         stylist: { monthlyAllowanceMicro: null, maxRequestMicro: null, maxRequestsPerHour: null },
         enhancement: { monthlyAllowanceMicro: null, maxRequestMicro: null, maxRequestsPerHour: null } } as never;
       shape.current = { period: '2026-09', shared: { usedMicro: '0', lastHour: 0 }, analysis: { usedMicro: '0', lastHour: 0 },
         stylist: { usedMicro: '0', lastHour: 0 }, enhancement: { usedMicro: '0', lastHour: 0 } } as never;
       delete (shape.openAllocations as Record<string, unknown>).tryOnProbe;
-      for (const month of shape.history) Object.assign(month, { tryOn: { available: false } });
+      for (const month of shape.history) { delete (month as Record<string, unknown>).outfitGen; Object.assign(month, { tryOn: { available: false } }); }
     } });
     expect(parseSpendingV1(v1)).not.toBeNull();
     expect(parseSpending(v1)).toBeNull();
@@ -84,15 +85,19 @@ describe('admin spending reply (budget contract)', () => {
     ['an extra limit', (value: ReturnType<typeof base>) => { Object.assign(value.accounts[0]!.limits, { maxSteps: 3 }); }],
     ['a missing try-on flag', (value: ReturnType<typeof base>) => { delete (value.accounts[0]!.features as Partial<typeof value.accounts[0]['features']>).tryOn; }],
     ['a missing try-on current use', (value: ReturnType<typeof base>) => { delete (value.accounts[0]!.current as Partial<typeof value.accounts[0]['current']>).tryOn; }],
+    ['a missing outfit suggestions spend', (value: ReturnType<typeof base>) => { delete (value.accounts[0]!.history[0]! as Partial<typeof value.accounts[0]['history'][0]>).outfitGen; }],
+    ['an outfit suggestions total that is not the sum', (value: ReturnType<typeof base>) => { value.accounts[0]!.history[0]!.outfitGen.totalMicro = '1'; }],
+    ['a missing outfit suggestions flag', (value: ReturnType<typeof base>) => { delete (value.accounts[0]!.features as Partial<typeof value.accounts[0]['features']>).outfitGen; }],
+    ['a missing outfit suggestions current use', (value: ReturnType<typeof base>) => { delete (value.accounts[0]!.current as Partial<typeof value.accounts[0]['current']>).outfitGen; }],
     ['accounts out of order', (value: ReturnType<typeof base>) => { value.accounts.reverse(); }],
     ['a third account', (value: ReturnType<typeof base>) => { value.accounts.push(account(2)); }],
     ['a short account version', (value: ReturnType<typeof base>) => { value.accounts[0]!.accountVersion = 'abc'; }],
   ])('refuses %s', (_, change) => {
     expect(parseSpending(reply(change))).toBeNull();
   });
-  it('sums the four features for the total row', () => {
+  it('sums every feature, outfit suggestions included, for the total row', () => {
     const month = parseSpending(base())!.accounts[0]!.history[0]!;
-    expect(monthTotals(month)).toEqual({ confirmedMicro: '241200', estimatedMicro: '5140', reservedMicro: '4457351', totalMicro: '4703691', requests: 6 });
+    expect(monthTotals(month)).toEqual({ confirmedMicro: '241200', estimatedMicro: '95140', reservedMicro: '4457351', totalMicro: '4793691', requests: 7 });
   });
 });
 
