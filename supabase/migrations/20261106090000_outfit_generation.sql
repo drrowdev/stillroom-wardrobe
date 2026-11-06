@@ -55,7 +55,7 @@ create table public.suggested_outfits (
   occasion text check (occasion in ('home','everyday','smart','business','formal')),
   score smallint not null check (score between 1 and 10),
   fingerprint text not null check (fingerprint ~ '^[0-9a-f]{64}$'),
-  manifest_id text not null references private.ai_execution_manifests(id),
+  manifest_id text not null check (manifest_id ~ '^[a-z0-9][a-z0-9._-]{0,127}$'), -- Written only by definer functions from the claimed manifest.
   prompt_version integer not null check (prompt_version between 1 and 2147483647),
   request_id uuid not null,
   created_at timestamptz not null default clock_timestamp(),
@@ -820,7 +820,7 @@ language sql stable security definer set search_path = '' as $$
 $$;
 
 revoke all on function private.outfitgen_signature(uuid[]),private.outfitgen_fingerprint(uuid,uuid[]),private.outfitgen_row_guard(),
-  private.outfitgen_remove_item_rows(),private.outfitgen_eligible(uuid,uuid),private.outfitgen_valid_set(uuid,uuid[]),
+  private.outfitgen_remove_item_rows(),private.outfitgen_vote_changed(),private.outfitgen_eligible(uuid,uuid),private.outfitgen_valid_set(uuid,uuid[]),
   private.outfitgen_known(uuid,text),private.outfitgen_permission(public.profiles,private.ai_controls),
   private.outfitgen_expire(uuid,timestamptz,integer),
   private.outfitgen_record(uuid,uuid,jsonb,uuid[],private.ai_execution_manifests),
