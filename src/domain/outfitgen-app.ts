@@ -49,7 +49,8 @@ export function parseOutfitGenStatus(value: unknown): OutfitGenStatus | null {
     || !(c.consentedAt === null || typeof c.consentedAt === 'string') || (c.consentedAt === null) !== (c.noticeRevision === null)) return null;
   const budget = parseOptionalAiBudget(value.budget);
   if (!budget.ok) return null;
-  if (!count(value.pending, OUTFITGEN_LIMITS.pending) || !count(value.unassessed, 1_000_000) || !count(value.autoUnassessed, 1_000_000)
+  // A count above the server's cap of 40 is read as it is, never refused: an over-cap number must not hide Settings or Turn off.
+  if (!count(value.pending, 1_000_000) || !count(value.unassessed, 1_000_000) || !count(value.autoUnassessed, 1_000_000)
     || !count(value.autoCallsLeft, 3) || typeof value.live !== 'boolean'
     || !(value.cooldownUntilMs === null || count(value.cooldownUntilMs, 2 ** 53 - 1))) return null;
   let policy: OutfitGenPolicy | null = null;
@@ -116,7 +117,7 @@ export type SuggestionList = { kind: 'ok'; suggestions: Suggestion[] } | { kind:
 export function parseSuggestionList(value: unknown): SuggestionList | null {
   if (hasKeys(value, ['code'])) return value.code === 'UNAVAILABLE' ? { kind: 'unavailable' } : null;
   if (!hasKeys(value, ['code', 'suggestions']) || value.code !== 'OK' || !Array.isArray(value.suggestions)
-    || value.suggestions.length > OUTFITGEN_LIMITS.pending) return null;
+    || value.suggestions.length > 1000) return null;
   const suggestions: Suggestion[] = [];
   const seen = new Set<string>();
   for (const entry of value.suggestions) {
@@ -133,9 +134,9 @@ export function parseSuggestionList(value: unknown): SuggestionList | null {
   return { kind: 'ok', suggestions };
 }
 
-export type DecisionCode = 'OK' | 'UNAVAILABLE' | 'NOT_FOUND' | 'CONFLICT' | 'STALE' | 'IN_TRASH' | 'BUSY' | 'INVALID_INPUT';
+export type DecisionCode = 'OK' | 'UNAVAILABLE' | 'NOT_FOUND' | 'CONFLICT' | 'STALE' | 'IN_TRASH' | 'BUSY' | 'INVALID_INPUT' | 'PENDING_FULL';
 export type KeepReply = { code: DecisionCode; outfitId: string | null };
-const decisionCodes: readonly DecisionCode[] = ['OK', 'UNAVAILABLE', 'NOT_FOUND', 'CONFLICT', 'STALE', 'IN_TRASH', 'BUSY', 'INVALID_INPUT'];
+const decisionCodes: readonly DecisionCode[] = ['OK', 'UNAVAILABLE', 'NOT_FOUND', 'CONFLICT', 'STALE', 'IN_TRASH', 'BUSY', 'INVALID_INPUT', 'PENDING_FULL'];
 /** Keep, Remove and Undo answer a small closed object; anything else is unknown, and null here means treat as failed. */
 export function parseDecision(value: unknown, kind: 'keep' | 'remove' | 'undo'): KeepReply | null {
   if (!record(value) || typeof value.code !== 'string') return null;
@@ -152,7 +153,8 @@ export const generateCodes = ['UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRE
   'COOLDOWN', 'PENDING_FULL', 'ALLOWANCE', 'RATE_LIMIT', 'TERMINAL', 'CONFLICT', 'FILTERED', 'FAILED', 'TIMEOUT', 'INVALID_INPUT',
   'TOO_LARGE', 'UNSUPPORTED_MEDIA'] as const;
 export type GenerateCode = (typeof generateCodes)[number];
-export type GenerateReply = { code: 'OK'; suggested: number; judged: number; remaining: boolean } | { code: GenerateCode };
+/** NOT_SENT: the last check before the request found it no longer allowed, so nothing was sent. */
+export type GenerateReply = { code: 'OK'; suggested: number; judged: number; remaining: boolean } | { code: GenerateCode | 'NOT_SENT' };
 /** The outfit-generate reply: the OK counts, or one closed code. Anything unreadable is FAILED. */
 export function parseGenerateReply(status: number, value: unknown): GenerateReply {
   if (status === 200 && hasKeys(value, ['code', 'suggested', 'judged', 'remaining']) && value.code === 'OK'

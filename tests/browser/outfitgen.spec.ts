@@ -151,6 +151,19 @@ test.describe('OUTFITGEN1b suggested outfits', () => {
     await expect(cards(page)).toHaveCount(1);
   });
 
+  test('Undo says plainly when the list is full and stays available', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true, suggestions: true });
+    await expect(cards(page)).toHaveCount(2);
+    await cards(page).first().getByRole('button', { name: text('outfitgen.removeLabel', 'en', { title: 'Crisp navy' }), exact: true }).click();
+    await expect(cards(page)).toHaveCount(1);
+    api.outfitgenControl.undoCodes.push('PENDING_FULL');
+    await section(page).getByRole('button', { name: text('common.undo'), exact: true }).click();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.full'));
+    await expect(cards(page)).toHaveCount(1);
+    await section(page).getByRole('button', { name: text('common.undo'), exact: true }).click();
+    await expect(cards(page)).toHaveCount(2);
+  });
+
   test('says plainly when a suggestion can no longer be kept', async ({ page }) => {
     const { api } = await start(page, { setup: {}, consent: true, suggestions: true });
     const keep = (title: string) => cards(page).filter({ hasText: title }).getByRole('button', { name: text('outfitgen.keepLabel', 'en', { title }), exact: true });

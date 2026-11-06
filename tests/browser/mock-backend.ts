@@ -544,7 +544,7 @@ function stylistStatus(setup: StylistSetup, consent: number | null) {
 export type OutfitGenSetup = { configured: boolean; activated: boolean; noticeRevision: number; manifestId: string; modelId: string;
   maxRequestMicro: string; totalAllowanceMicro: string; totalMicro: string };
 export type MockSuggestion = { id: string; owner: string; itemIds: string[]; title: string; reason: string; occasion: string; score: number;
-  state: 'suggested' | 'kept' | 'removed' };
+  state: 'suggested' | 'kept' | 'removed' | 'declined' };
 export type OutfitGenReply = { status: number; body: unknown; add?: Omit<MockSuggestion, 'owner' | 'state' | 'id'>[]; hold?: Promise<void> };
 const outfitGenDefaults: OutfitGenSetup = { configured: false, activated: false, noticeRevision: 1, manifestId: OUTFITGEN_MANIFEST, modelId: OUTFITGEN_MODEL,
   maxRequestMicro: '373402', totalAllowanceMicro: '17940000', totalMicro: '0' };
@@ -1070,6 +1070,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (!target) { await json({ code: 'NOT_FOUND' }); return; }
       if (name === 'outfitgen_keep') {
         const code = outfitgenControl.decisionCodes.shift() ?? 'OK';
+        // A set that can no longer be kept is not listed again (the real list only shows valid sets).
+        if (code === 'STALE' || code === 'IN_TRASH') target.state = 'declined';
         if (code !== 'OK') { await json({ code }); return; }
         target.state = 'kept';
         const now = new Date().toISOString();

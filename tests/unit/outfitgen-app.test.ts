@@ -34,7 +34,10 @@ describe('suggested outfits: closed replies', () => {
     expect(parseOutfitGenStatus({ code: 'UNAVAILABLE' })).toMatchObject({ code: 'UNAVAILABLE', policy: null });
     expect(parseOutfitGenStatus({ code: 'INACTIVE' })).toBeNull();
     expect(parseOutfitGenStatus({ ...raw(), extra: 1 })).toBeNull();
-    expect(parseOutfitGenStatus(raw({ pending: 41 }))).toBeNull();
+    // A count above the server's cap is read as it is, so it can never hide Settings or Turn off.
+    expect(parseOutfitGenStatus(raw({ pending: 41 }))).toMatchObject({ code: 'OK', pending: 41 });
+    expect(outfitGenView({ kind: 'ready', status: status({ pending: 41 }) }, true, false)).toMatchObject({ kind: 'on', turnOff: true, card: true });
+    expect(autoBlock(status({ pending: 41 }), local())).toBe('full');
     expect(parseOutfitGenStatus(raw({ autoCallsLeft: 4 }))).toBeNull();
     expect(parseOutfitGenStatus(raw({ live: 'no' }))).toBeNull();
     expect(parseOutfitGenStatus(raw({ cooldownUntilMs: -1 }))).toBeNull();
@@ -56,6 +59,7 @@ describe('suggested outfits: closed replies', () => {
     expect(parseDecision({ code: 'OK', outfitId: ids[0] }, 'keep')).toEqual({ code: 'OK', outfitId: ids[0] });
     expect(parseDecision({ code: 'OK', outfitId: 'x' }, 'keep')).toBeNull();
     expect(parseDecision({ code: 'IN_TRASH' }, 'keep')).toEqual({ code: 'IN_TRASH', outfitId: null });
+    expect(parseDecision({ code: 'PENDING_FULL' }, 'undo')).toEqual({ code: 'PENDING_FULL', outfitId: null });
     expect(parseDecision({ code: 'OK', replayed: true }, 'remove')).toEqual({ code: 'OK', outfitId: null });
     expect(parseDecision({ code: 'STALE', x: 1 }, 'keep')).toBeNull();
     expect(parseDecision({ code: 'NOPE' }, 'undo')).toBeNull();
@@ -135,17 +139,22 @@ function harness(statuses: OutfitGenStatus[] = [status()]) {
   const abort = new AbortController();
   const store = new OutfitGenStore(supabase(), config, { ownerId: owner, epoch: 1, signal: abort.signal });
   const queue = [...statuses];
+  // What the server holds; the decisions below change it, as the real ones do.
+  const server = [suggestion(1), suggestion(2)];
+  const everything = [suggestion(1), suggestion(2)];
+  const drop = (id: string) => { const at = server.findIndex((entry) => entry.id === id); if (at >= 0) server.splice(at, 1); };
   const fake = {
     outfitGenStatus: vi.fn(async () => ({ kind: 'ready' as const, status: queue.length > 1 ? queue.shift()! : queue[0]! })),
     outfitGenConsent: vi.fn(async (enabled: boolean) => ({ kind: 'applied' as const, status: status({}, 'OK', enabled).consent!.enabled ? status() : status({}, 'CONSENT_REQUIRED', false) })),
-    list: vi.fn(async () => ({ kind: 'ok' as const, suggestions: [suggestion(1), suggestion(2)] })),
-    keep: vi.fn<(id: string, outfit: string) => Promise<{ code: 'OK'; outfitId: string }>>(async () => ({ code: 'OK', outfitId: ids[3]! })),
-    remove: vi.fn(async () => ({ code: 'OK' as const, outfitId: null })),
-    undoRemove: vi.fn(async () => ({ code: 'OK' as const, outfitId: null })),
-    generate: vi.fn<(input: { requestId: string; mode: string; language: string }) => Promise<GenerateReply>>(async () => ({ code: 'OK', suggested: 1, judged: 4, remaining: false })),
+    list: vi.fn(async () => ({ kind: 'ok' as const, suggestions: [...server] })),
+    keep: vi.fn<(id: string, outfit: string) => Promise<{ code: 'OK'; outfitId: string }>>(async (id) => { drop(id); return { code: 'OK', outfitId: ids[3]! }; }),
+    remove: vi.fn(async (id: string) => { drop(id); return { code: 'OK' as const, outfitId: null }; }),
+    undoRemove: vi.fn(async (id: string) => { if (!server.some((entry) => entry.id === id)) server.push(everything.find((entry) => entry.id === id)!); return { code: 'OK' as const, outfitId: null }; }),
+    generate: vi.fn<(input: { requestId: string; mode: string; language: string }, signal?: AbortSignal, before?: () => string | null) => Promise<GenerateReply>>(
+      async (...args) => (args[2]?.() ? { code: 'NOT_SENT' } : { code: 'OK', suggested: 1, judged: 4, remaining: false })),
   };
   store.api = fake as unknown as OutfitGenClient;
-  return { store, abort, fake };
+  return { store, abort, fake, server };
 }
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 // The runner reads the page's online and visibility state; a plain Node test has neither.
@@ -300,7 +309,7 @@ describe('suggested outfits: triggers', () => {
       expect(run).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(30_000);
       expect(run).toHaveBeenCalledTimes(1);
-      expect(run).toHaveBeenCalledWith('en');
+      expect(run).toHaveBeenCalledWith('en', expect.any(Function));
       await vi.advanceTimersByTimeAsync(600_000);
       expect(run).toHaveBeenCalledTimes(1);
     } finally { vi.useRealTimers(); }
@@ -316,7 +325,7 @@ describe('suggested outfits: triggers', () => {
       trigger.appOpen();
       await vi.advanceTimersByTimeAsync(10_000);
       expect(run).toHaveBeenCalledTimes(1);
-      expect(run).toHaveBeenCalledWith('sv');
+      expect(run).toHaveBeenCalledWith('sv', expect.any(Function));
     } finally { vi.useRealTimers(); }
   });
   it('stays silent when the store is unavailable or throws, and stops with the scope', async () => {
@@ -333,6 +342,111 @@ describe('suggested outfits: triggers', () => {
       abort.abort();
       await vi.advanceTimersByTimeAsync(200_000);
       expect(run).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('suggested outfits: consent changes, newer Saves and ordering', () => {
+  beforeEach(() => page());
+  it('sends nothing when Turn off is requested while the status read is in flight', async () => {
+    const h = harness();
+    await readStatus(h.store);
+    const read = deferred<{ kind: 'ready'; status: OutfitGenStatus }>();
+    h.fake.outfitGenStatus.mockReturnValueOnce(read.promise);
+    const run = runAuto(h.store, 'en');
+    await tick();
+    const off = writeConsent(h.store, false);
+    read.resolve({ kind: 'ready', status: status() });
+    await Promise.all([run, off]);
+    expect(h.fake.generate).not.toHaveBeenCalled();
+    expect(h.fake.outfitGenConsent).toHaveBeenCalledWith(false);
+    expect(h.store.failedAtMs).toBeNull();
+  });
+  it('checks again right before the request: a change after the status read stops it, with no cooldown and no call counted', async () => {
+    const h = harness();
+    h.fake.generate.mockImplementationOnce(async (...args) => {
+      h.store.update({ writing: true });
+      return args[2]?.() ? { code: 'NOT_SENT' } : { code: 'OK', suggested: 1, judged: 1, remaining: false };
+    });
+    await runAuto(h.store, 'en');
+    expect(h.fake.generate).toHaveBeenCalledTimes(1);
+    expect(h.store.failedAtMs).toBeNull();
+    expect(h.store.autoCalls).toBe(0);
+    expect(h.store.get().notices).toEqual([]);
+  });
+  it('stops an automatic run that a newer Save has superseded', async () => {
+    const h = harness();
+    let newest = true;
+    h.fake.generate.mockImplementationOnce(async (...args) => { newest = false; return args[2]?.() ? { code: 'NOT_SENT' } : { code: 'OK', suggested: 1, judged: 1, remaining: false }; });
+    await runAuto(h.store, 'en', () => newest);
+    expect(h.store.autoCalls).toBe(0);
+    const stale = harness();
+    await runAuto(stale.store, 'en', () => false);
+    expect(stale.fake.generate).not.toHaveBeenCalled();
+  });
+  it('a manual run takes a fresh status first and sends nothing when consent is gone', async () => {
+    const h = harness([status(), status({}, 'CONSENT_REQUIRED', false)]);
+    await readStatus(h.store);
+    await runManual(h.store, 'en');
+    expect(h.fake.outfitGenStatus).toHaveBeenCalledTimes(2);
+    expect(h.fake.generate).not.toHaveBeenCalled();
+    expect(h.store.get().notices.map((n) => n.key)).toEqual(['outfitgen.off']);
+    expect(h.store.get().running).toBeNull();
+    const writing = harness();
+    await readStatus(writing.store);
+    writing.store.update({ writing: true });
+    await runManual(writing.store, 'en');
+    expect(writing.fake.generate).not.toHaveBeenCalled();
+  });
+  it('an older list read cannot bring back a card that was decided meanwhile', async () => {
+    const h = harness();
+    await readList(h.store);
+    const stale = deferred<{ kind: 'ok'; suggestions: ReturnType<typeof suggestion>[] }>();
+    h.fake.list.mockReturnValueOnce(stale.promise);
+    const reading = readList(h.store, 'fresh');
+    await tick();
+    await keepSuggestion(h.store, suggestion(1).id);
+    stale.resolve({ kind: 'ok', suggestions: [suggestion(1), suggestion(2)] });
+    await reading;
+    await tick();
+    await readList(h.store, 'fresh');
+    expect(h.store.get().list.suggestions.map((s) => s.id)).toEqual([suggestion(2).id]);
+    // The same holds for Remove, and the snapshot after a decision is a new read.
+    const calls = h.fake.list.mock.calls.length;
+    await removeSuggestion(h.store, suggestion(2).id);
+    await tick();
+    expect(h.fake.list.mock.calls.length).toBeGreaterThan(calls);
+    expect(h.store.get().list.suggestions).toEqual([]);
+  });
+  it('keeps the removal offered when Undo finds the list full', async () => {
+    const h = harness();
+    await readList(h.store);
+    await removeSuggestion(h.store, suggestion(1).id);
+    h.fake.undoRemove.mockResolvedValueOnce({ code: 'PENDING_FULL', outfitId: null } as never);
+    await undoRemoval(h.store);
+    expect(h.store.get().notices.map((n) => n.key)).toEqual(['outfitgen.full', 'outfitgen.removed']);
+    expect(h.store.get().removed?.id).toBe(suggestion(1).id);
+    await undoRemoval(h.store);
+    expect(h.store.get().removed).toBeNull();
+  });
+  it('makes no run from a trigger that a newer Save superseded while it was loading', async () => {
+    vi.useFakeTimers();
+    try {
+      const run = vi.fn(async () => undefined);
+      const loaded = deferred<{ run: typeof run }>();
+      const trigger = new OutfitGenTrigger({ ownerId: owner, epoch: 1, signal: new AbortController().signal }, () => loaded.promise, () => 'en');
+      trigger.noteSaved();
+      await vi.advanceTimersByTimeAsync(90_000);
+      trigger.noteSaved();
+      loaded.resolve({ run });
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(run).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(90_000);
+      expect(run).toHaveBeenCalledTimes(1);
+      const current = (run.mock.calls[0] as unknown as [string, () => boolean])[1];
+      expect(current()).toBe(true);
+      trigger.noteSaved();
+      expect(current()).toBe(false);
     } finally { vi.useRealTimers(); }
   });
 });

@@ -2142,8 +2142,8 @@ nothing here is applied, deployed, consented or activated, and no provider is ca
   Remove, Undo, failure, cooldown, expiry, stale handling and owner isolation), `scripts/isolation-catalog.mjs` and the audit probes,
   `scripts/run-deletion-rehearsal.mjs`, `scripts/backend/ci-storage-guard.mjs`, `scripts/backend/local.mjs` (the function inventory).
 - **Rollout (each step a separate owner or coordinator gate; none is done by this packet).** 1. Confirm the Azure TPM/RPM quota of
-  the Terra deployment (the documented 20K TPM / 20 RPM is historical and unverified). 2. Apply `20261106090000` and
-  `20261106090100`. 3. **Activate the `stillroom-outfitgen-expire` job before the first trial:** a request whose reply is never
+  the Terra deployment (the documented 20K TPM / 20 RPM is historical and unverified). 2. Apply `20261106090000`, `20261106090100` and
+  `20261107090000` (Undo respects the cap of 40 pending suggestions; added by the 1b review). 3. **Activate the `stillroom-outfitgen-expire` job before the first trial:** a request whose reply is never
   finished (runtime termination is not covered by background work) stays held until it settles. 4. Deploy `outfit-generate`.
   5. OUTFITGEN1b (the app: Settings card, Suggested outfits list, triggers). 6. Bootstrap the owner's controls (manifest, notice 1,
   maximum request at least the reservation). 7. The owner consents and runs the trial.
@@ -2165,5 +2165,6 @@ deploy of this packet is a separate owner step.
 - **Validation.** Unit: `tests/unit/outfitgen-app.test.ts`, `tests/unit/outfitgen-notice.test.ts`. Browser: `tests/browser/outfitgen.spec.ts`
   on the mock backend (`outfitgenControl`), with the writes counter of `outfits.spec.ts` ignoring the read-only status and list calls.
   `npm run check:translations`, typecheck and lint.
+- **Review fixes (Sol, PR #210).** A run is gated again right before the request is sent (consent change pending, consent off, limit, offline, newer Save), so Turn off can't race a run; a newer Save supersedes an older trigger even while it loads; a list read that began before a decision can't bring a decided card back; status and list parsers read counts above the server cap instead of refusing them; Undo answers PENDING_FULL when 40 suggestions are pending (forward migration `20261107090000_outfitgen_undo_capacity.sql`, its exact-body proof in `tests/unit/outfitgen-schema.test.ts` and a probe in `tests/integration/outfitgen.sessions.mjs`). The notice now says that kept, removed and judged-but-not-suggested sets stay stored (reason and garment list; nothing expires on time) until one of their garments is permanently deleted or the account is.
 - **Not verified here.** Real Azure behaviour, how long a run takes on a phone, and whether a mobile browser keeps a 90-second
   request alive while the app is in the background (a cut request ends as a quiet failure and the server expiry job settles it).

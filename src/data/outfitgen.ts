@@ -1,4 +1,4 @@
-import { AiClient, AiError } from './ai';
+import { AiClient, AiError, AiNotSentError, type BeforeSend } from './ai';
 import {
   GENERATE_TIMEOUT_MS, parseDecision, parseGenerateReply, parseOutfitGenStatus, parseSuggestionList,
   type GenerateReply, type KeepReply, type OutfitGenStatus, type SuggestionList,
@@ -56,12 +56,15 @@ export class OutfitGenClient extends AiClient {
     if (!decision) throw new AiError('UNAVAILABLE');
     return decision;
   }
-  /** One run. The server answers when its work is done (it bounds that to about 75 seconds); there is never a retry. */
-  async generate(input: { requestId: string; mode: OutfitGenMode; language: OutfitGenLanguage }, signal?: AbortSignal): Promise<GenerateReply> {
+  /** One run. The server answers when its work is done (it bounds that to about 75 seconds); there is never a retry. `beforeSend` is the last check. */
+  async generate(input: { requestId: string; mode: OutfitGenMode; language: OutfitGenLanguage }, signal?: AbortSignal,
+    beforeSend?: BeforeSend): Promise<GenerateReply> {
     try {
-      const reply = await this.request('/functions/v1/outfit-generate', input, GENERATE_TIMEOUT_MS, {}, signal);
+      const reply = await this.request('/functions/v1/outfit-generate', input, GENERATE_TIMEOUT_MS, {}, signal, beforeSend);
       return parseGenerateReply(reply.status, reply.value);
     } catch (error) {
+      // `beforeSend` runs after authentication, right before the POST; a refusal there means nothing was sent.
+      if (error instanceof AiNotSentError) return { code: 'NOT_SENT' };
       if (error instanceof AiError && (error.code === 'TIMEOUT' || error.code === 'UNAUTHENTICATED')) return { code: error.code };
       return { code: 'FAILED' };
     }

@@ -341,6 +341,26 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal((await claim(randomUUID(), [await sig([fresh[2], bottom, shoes])], { targets: [fresh[2]] })).code, 'RATE_LIMIT');
     await sql(`delete from private.ai_usage where purpose='outfitgen' and reserved_micro=1 and owner_id=${literal(a.uid)};`);
 
+    note('undo-capacity');
+    // Undo puts a suggestion back among the pending ones, so it respects the same cap of 40: with 41 pending rows, one Remove leaves
+    // 40 and its Undo is refused (nothing changes); with room, the Undo works.
+    await sql(`with g as (select id from public.items where owner_id=${literal(a.uid)} and id<>${literal(shoes)}::uuid and id=any(${uuids(made)})),
+      c as (select array[x.id,y.id,z.id] ids from g x join g y on y.id>x.id join g z on z.id>y.id
+        union all select array[x.id,y.id,z.id,w.id] from g x join g y on y.id>x.id join g z on z.id>y.id join g w on w.id>z.id)
+      insert into public.suggested_outfits(owner_id,item_ids,state,title,reason,occasion,score,fingerprint,manifest_id,prompt_version,request_id)
+        select ${literal(a.uid)},ids,'suggested','capfill','r','smart',9,repeat('c',64),${literal(MANIFEST)},1,${literal(R1)} from c order by random() limit 41;`);
+    equal(await scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)} and title='capfill';`), '41');
+    const capId = await scalar(`select id from public.suggested_outfits where owner_id=${literal(a.uid)} and title='capfill' limit 1;`);
+    equal((await rpc(a, 'outfitgen_remove', { p_id: capId })).code, 'OK');
+    equal(await scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)} and state='suggested';`), '40');
+    equal((await rpc(a, 'outfitgen_undo_remove', { p_id: capId })).code, 'PENDING_FULL');
+    equal(await scalar(`select state from public.suggested_outfits where id=${literal(capId)};`), 'removed');
+    await sql(`delete from public.suggested_outfits where id in (select id from public.suggested_outfits where owner_id=${literal(a.uid)}
+      and title='capfill' and state='suggested' limit 1);`);
+    equal((await rpc(a, 'outfitgen_undo_remove', { p_id: capId })).code, 'OK');
+    await sql(`delete from public.suggestion_feedback where owner_id=${literal(a.uid)} and signature=(select signature from public.suggested_outfits where id=${literal(capId)});
+      delete from public.suggested_outfits where owner_id=${literal(a.uid)} and title='capfill';`);
+
     note('stale');
     // An edit that changes what was judged drops a declined judgement (it can be judged again); a removal is never dropped.
     const planBefore = await plan();

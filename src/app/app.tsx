@@ -168,7 +168,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   const [outfitTrigger] = useState(() => new OutfitGenTrigger(scope, async () => {
     const { outfitGenStoreFor, runAuto } = await import('../features/outfitgen/outfitgen-store');
     const store = outfitGenStoreFor(client, scope, config);
-    return store ? { run: (lang) => runAuto(store, lang) } : null;
+    return store ? { run: (lang, current) => runAuto(store, lang, current) } : null;
   }, () => languageNow.current));
   useEffect(() => { outfitTrigger.appOpen(); }, [outfitTrigger]);
   const weather = weatherConfig(profile);

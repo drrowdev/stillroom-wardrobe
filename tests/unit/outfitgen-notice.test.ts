@@ -13,7 +13,7 @@ describe('suggested outfits notice', () => {
     const notice = JSON.stringify({ noticeRevision: OUTFITGEN_NOTICE_REVISION,
       ...Object.fromEntries(OUTFITGEN_NOTICE_KEYS.map((key) => [key, messages[key]])) });
     expect(OUTFITGEN_NOTICE_REVISION).toBe(1);
-    expect(createHash('sha256').update(notice).digest('hex')).toBe('66f4a5cbb15d510a1856ea48b12919656f30c90d14082add75a709e703884a7b');
+    expect(createHash('sha256').update(notice).digest('hex')).toBe('493827adc53315128512bd9648b2ceab22e8f65e6286c182d62744cdc45730b3');
   });
   it('is shown in full by the Settings card, in the same order', () => {
     const source = readFileSync('src/features/settings/outfitgen-settings.tsx', 'utf8');
@@ -33,6 +33,9 @@ describe('suggested outfits notice', () => {
     expect(en('outfitgenC.processing')).toContain('EU Data Zone');
     expect(en('outfitgenC.stored')).toContain('Suggestions are saved in the app until you keep or remove them');
     expect(en('outfitgenC.stored')).toContain('marks the set as not wanted in Today');
+    // Decided suggestions stay stored, and when they are deleted.
+    expect(en('outfitgenC.stored')).toContain('Kept and removed suggestions stay saved, with their reason and list of garments');
+    expect(en('outfitgenC.stored')).toContain('permanently delete one of those garments, or your account');
     expect(en('outfitgenC.charges')).toContain('counts toward your monthly AI limit');
     expect(en('outfitgenC.charges')).toContain('even if nothing is suggested');
     expect(en('outfitgenC.optOut')).toContain('Turning it off stops new runs');

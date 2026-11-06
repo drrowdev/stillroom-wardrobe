@@ -12,7 +12,7 @@ describe('scheduled AI purge migration', () => {
   it('retains the reviewed migration order including the model identity addition', async () => {
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
     expect(names.length).toBeGreaterThanOrEqual(41);
-    expect(names.slice(-28)).toEqual([NAME, '20260925100000_uniform_id_conflicts.sql', '20260925110000_restore_item_save.sql',
+    expect(names.slice(-29)).toEqual([NAME, '20260925100000_uniform_id_conflicts.sql', '20260925110000_restore_item_save.sql',
       '20260925120000_account_deletion.sql', '20260925120100_deletion_receipt_purge_schedule.sql', '20260927090000_restore_attribution.sql',
       '20260928090000_stylist_chat.sql', '20260928090100_stylist_expire_schedule.sql',
       '20260929090000_photo_enhancement.sql', '20260929090100_enhance_expire_schedule.sql', '20261001090000_admin_limits.sql',
@@ -20,7 +20,7 @@ describe('scheduled AI purge migration', () => {
       '20261004090000_tryon_stop_before_claim.sql', '20261005090000_provider_refusal.sql', '20261007090000_outfit_lifecycle.sql', '20261008080000_analysis_model_identity.sql', '20261009090000_stylist_weather_outerwear.sql',
       '20261010090000_shared_ai_budget.sql', '20261011090000_tryon_idea.sql', '20261011100000_tryon_person_photo.sql', '20261101080000_persistent_ai_availability.sql',
       '20261101090000_unreserved_analysis_manifest.sql', '20261101200000_tryon_limits.sql', '20261102090000_tryon_prompt_v3.sql',
-      '20261106090000_outfit_generation.sql', '20261106090100_outfitgen_expire_schedule.sql']);
+      '20261106090000_outfit_generation.sql', '20261106090100_outfitgen_expire_schedule.sql', '20261107090000_outfitgen_undo_capacity.sql']);
   });
 
   it('schedules exactly one fixed, bounded, inactive job', async () => {
