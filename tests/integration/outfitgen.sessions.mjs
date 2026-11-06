@@ -100,7 +100,9 @@ function helpers(snapshot, sql) {
   const { client, owners: [a, b] } = snapshot;
   const one = async (text) => JSON.parse(await sql(text));
   const scalar = async (text) => (await sql(text)).trim();
-  const rpc = (owner, name, body = {}) => client.rpc(owner, name, body);
+  const rpc = async (owner, name, body = {}) => {
+    try { return await client.rpc(owner, name, body); } catch (error) { note(`rpc-${name}`); throw error; }
+  };
   const sig = (ids) => scalar(`select private.outfitgen_signature(${uuids(ids)});`);
   const plan = () => one(`select public.outfitgen_plan(${literal(a.uid)});`);
   const claim = (id, signatures, { auto = false, targets = [] } = {}) => one(`select public.outfitgen_claim(${literal(a.uid)},${literal(id)},${literal(MANIFEST)},
@@ -111,6 +113,7 @@ function helpers(snapshot, sql) {
     title: decision === 'suggested' ? 'Fictional navy set' : null, reason: decision === 'suggested' ? 'Calm colours.' : null, ...over });
   const sh = saveHarness(client, a);
   const garment = async (category, colours = ['navy']) => {
+    note(`garment-${category}`);
     const value = sh.track(intent());
     value.p_item.category = category;
     value.p_item.colours = colours;
@@ -376,7 +379,7 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
       await sql(bulkSql(a.uid, newest, 'remove'));
     }
   } catch (error) {
-    note(`throw-${clean(error?.message)}`);
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`throw-${clean(error?.message)}`);
     throw error;
   } finally {
     await h.restore(before, made);
