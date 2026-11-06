@@ -55,7 +55,9 @@ export class AiClient {
   }
   protected async request(path: '/rest/v1/rpc/ai_status' | '/rest/v1/rpc/ai_set_consent'
     | '/rest/v1/rpc/ai_analysis_status' | '/rest/v1/rpc/ai_request_control' | '/functions/v1/analyze-clothing'
-    | '/rest/v1/rpc/stylist_status' | '/rest/v1/rpc/stylist_set_consent' | '/functions/v1/stylist-chat',
+    | '/rest/v1/rpc/stylist_status' | '/rest/v1/rpc/stylist_set_consent' | '/functions/v1/stylist-chat'
+    | '/rest/v1/rpc/outfitgen_status' | '/rest/v1/rpc/outfitgen_set_consent' | '/rest/v1/rpc/outfitgen_list' | '/rest/v1/rpc/outfitgen_keep'
+    | '/rest/v1/rpc/outfitgen_remove' | '/rest/v1/rpc/outfitgen_undo_remove' | '/functions/v1/outfit-generate',
     body: object | Blob, ms: number, extra: Record<string, string> = {}, outer?: AbortSignal, beforeSend?: BeforeSend) {
     return this.bounded(ms, async (signal, wait) => {
       if (signal.aborted) throw new AiError('TIMEOUT');

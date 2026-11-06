@@ -351,3 +351,36 @@ Source only: the `outfit-generate` Edge function, `20261106090000_outfit_generat
   off. Pending suggestions are stored until the owner keeps or removes them.
 - **Evidence.** Engineering tests only; no provider call. Prompt quality, tokens per photo, latency and the quota question are
   verified only by the owner trial with real photos.
+
+## OUTFITGEN1b suggested outfits in the app (inactive until the owner consents) - 6 November 2026
+
+Source only, after OUTFITGEN1a. The app stays inert until the server answers that suggested outfits are set up for the account and
+the owner has consented: a backend without the functions, or an account that is not set up, shows no Settings card, no section and
+makes no call to `outfit-generate`.
+
+- **Triggers.** Only timers live in the initial chunk (`outfitgen-trigger.ts`); the store and runner load when one fires. A garment
+  Save (single or several) restarts a 90-second wait, so several Saves make one automatic run, and a Save never waits for it. The app
+  also makes one automatic run per owner session, 4 seconds after it opens. Returning to the app does not start a run. An automatic
+  run reads status first and needs consent, a supported policy, something new (`autoUnassessed`), no live batch, a free pending list,
+  no cooldown and calls left; it continues only while the server says more is left, at most 3 calls per session. Any failure, timeout
+  or refusal ends it and starts a 15-minute local cooldown (the server keeps its own); nothing is retried; offline, hidden or failed
+  automatic runs say nothing. "Find new outfits" is one manual call per tap. The client sends only `{requestId, mode auto|manual,
+  language}`.
+- **Consent.** A Settings card like the Stylist's (switch, consent sheet, Turn off whenever consent is on, status and limit lines).
+  The notice keys are in `OUTFITGEN_NOTICE_KEYS` and pinned with their sha256 in `tests/unit/outfitgen-notice.test.ts`; provider,
+  region, training and retention sentences are the wording already approved for the same Terra deployment (Stylist and photo
+  analysis). It says that a run can send many photos, that each run counts toward the monthly AI limit, that pending suggestions are
+  stored until kept or removed, and that Remove also marks the set as not wanted in Today. Spending joins the shared figure
+  (`SpendSource` `outfits`).
+- **Outfits tab.** A "Suggested outfits" section above the saved outfits (count in its heading): cards with the garment photos, the
+  title, occasion and reason, Keep and Remove, and Undo right after a Remove. Keep creates the normal outfit through
+  `outfitgen_keep`; STALE, IN_TRASH, CONFLICT and BUSY have plain messages. States: not shown, consent needed (with a link to
+  Settings), none, running, limit reached, load failed. No badge or nav dot (optional per the plan).
+- **Evidence.** Unit tests for the closed replies, the view per state, the automatic-run policy, the store (cooldown, no retry, call
+  cap, single flight, decisions) and the triggers; browser specs on all projects with the mock backend (inert states, consent, Keep,
+  Remove, Undo, refusals, manual run, automatic run at open, failure, limit, axe, 320 px at 200 % text, Finnish and Swedish).
+- **Owner acceptance (after the hosted rollout of 1a and 1b, and gate G1).** 1. Turn on Suggested outfits in Settings and read the
+  notice. 2. Add a garment, wait a couple of minutes or reopen the app, and see suggestions appear on Outfits. 3. Keep one: it appears
+  among the saved outfits as a normal outfit. 4. Remove one, then Undo; remove another and check it does not come back after a
+  new run and is not offered in Today. 5. Add another garment: only combinations that include it appear. 6. Judge the quality of the
+  suggestions with real photos; the score bar is a trial threshold, not evidence.

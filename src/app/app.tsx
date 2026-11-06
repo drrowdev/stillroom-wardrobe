@@ -36,6 +36,7 @@ import { UpdatePrompt } from '../pwa/update-prompt';
 import { lazyNamed, preloadChunks } from './lazy-load';
 import { WeatherStore, weatherKey } from '../features/today/use-weather';
 import { StylistStore } from '../features/stylist/stylist-store';
+import { OutfitGenTrigger } from '../features/outfitgen/outfitgen-trigger';
 import { weatherConfig } from '../domain/weather';
 import { ShellBoundary, ShellFallback } from './shell-fallback';
 import { restoreShellFocus, useShell } from './shell-focus';
@@ -161,6 +162,15 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
   // Memory only, for this owner scope: a new owner or epoch mounts a new OwnedWardrobe and so a new, empty store.
   const [stylist] = useState(() => new StylistStore(client, config, scope));
   useEffect(() => { stylist.setBusy(busy); }, [stylist, busy]);
+  // Suggested outfits: only timers live here. A Save never waits for them; the store and runner load when one fires.
+  const languageNow = useRef(language);
+  languageNow.current = language;
+  const [outfitTrigger] = useState(() => new OutfitGenTrigger(scope, async () => {
+    const { outfitGenStoreFor, runAuto } = await import('../features/outfitgen/outfitgen-store');
+    const store = outfitGenStoreFor(client, scope, config);
+    return store ? { run: (lang) => runAuto(store, lang) } : null;
+  }, () => languageNow.current));
+  useEffect(() => { outfitTrigger.appOpen(); }, [outfitTrigger]);
   const weather = weatherConfig(profile);
   const weatherId = weatherKey(weather);
   useEffect(() => { weatherStore.keep(weatherId); }, [weatherStore, weatherId]);
@@ -301,6 +311,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     setNotice(true);
     changeRoute('wardrobe');
     void refresh(); invalidateOutfits();
+    outfitTrigger.noteSaved();
   }
   const settle = useCallback(() => {
     dirty.current = { dirty: false, incomplete: false, busy: false };
@@ -330,7 +341,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
         <LazyBoundary key={route} t={t} onReady={focusRouteWhenReady}>{route === 'add'
           ? <AddItem client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online} onDirty={onDirty} onSaved={saved} onBack={() => changeRoute('wardrobe')} onSeveral={() => changeRoute('add-several')} />
           : route === 'add-several' ? <BulkAdd client={client} ai={ai} onBeforeDiscard={onBeforeDiscard} scope={scope} currency={profile.currency} language={language} t={t} online={online}
-            onDirty={onDirty} onSaved={() => { void refresh(); invalidateOutfits(); }} onBack={() => changeRoute('add')} />
+            onDirty={onDirty} onSaved={() => { void refresh(); invalidateOutfits(); outfitTrigger.noteSaved(); }} onBack={() => changeRoute('add')} />
           : route === 'settings' ? <ProfileScreen client={client} ai={ai} stylist={stylist} images={images} unresolved={unresolved} controller={controller} scope={scope} profile={profile} change={change} busy={busy} t={t} version={config.version} language={language} online={online} onDirty={onDirty} onBack={() => changeRoute('wardrobe')} onSignOut={onSignOut} />
           : route === 'trash' ? <Trash client={client} outfitLifecycle={outfitLifecycle} invalidation={outfitsInvalidation} lifecycle={lifecycle} scope={scope} online={online} t={t} language={language} images={images}
             onDeleting={itemId => { setUndo(current => current?.item.id === itemId ? null : current); bulk.forget(itemId); }}
@@ -339,7 +350,7 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
             lifecycle={lifecycle} onTrashed={trashed} ai={ai} onBeforeDiscard={onBeforeDiscard}
             t={t} language={language} currency={profile.currency} online={online} onDirty={onDirty} onSaved={() => { void refresh(); invalidateOutfits(); }} onBack={() => changeRoute('wardrobe')} />
           : route === 'outfits' ? <OutfitsScreen client={client} scope={scope} invalidation={outfitsInvalidation} images={images} online={online} language={language} t={t} lifecycle={outfitLifecycle}
-            onCreate={() => changeRoute('outfit-new')} onAddItem={() => changeRoute('add')} />
+            onCreate={() => changeRoute('outfit-new')} onAddItem={() => changeRoute('add')} onKept={invalidateOutfits} />
           : route === 'outfit-new' ? <NewOutfit key={outfitSeed ? outfitSeed.itemIds.join('|') : 'blank'} {...outfitProps} initial={outfitSeed ?? undefined} />
           : route.startsWith('outfit:') && route.endsWith(TRYON_ROUTE) ? <TryOnScreen key={route} client={client} scope={scope} id={outfitRouteId(route.slice(7, -TRYON_ROUTE.length))} armed={tryOnIntent === route} onArmUsed={tryOnUsed}
             online={online} language={language} t={t} onBack={() => changeRoute(route.slice(0, -TRYON_ROUTE.length) as WorkspaceRoute)} />

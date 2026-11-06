@@ -2150,3 +2150,20 @@ nothing here is applied, deployed, consented or activated, and no provider is ca
 - **Owner trial plan.** With real photos: one manual run, review of the first ~30 suggestions (kept against removed, any clash,
   any duplicate), tokens, cost and time per call from the ledger, any 429, then a second run after adding two garments (only
   sets with the new garments should appear). Tuning (score bar, garments per call, prompt wording) is a new manifest version.
+
+## OUTFITGEN1b suggested outfits in the app - 6 November 2026
+
+Source packet for the app side of ADR31, after OUTFITGEN1a (merged). Contract details are in `blueprint/20`; this records the
+engineering evidence and what stays open. Nothing here is deployed or activated; the hosted rollout order of 1a still applies
+(Azure quota gate G1, migration, expiry job active before the first trial, Edge deploy, then the owner's consent), and a Pages
+deploy of this packet is a separate owner step.
+
+- **Files.** `src/domain/outfitgen-app.ts` (closed replies, view per state, automatic-run policy), `src/data/outfitgen.ts`,
+  `src/features/outfitgen/{outfitgen-store,outfitgen-trigger,use-outfitgen}`, `src/features/settings/outfitgen-settings.tsx`,
+  `src/features/outfits/suggested-outfits.tsx`, the lazy catalogue `src/i18n/outfitgen.json` (registered like try-on's), wiring in
+  `app.tsx`, `outfits-screen.tsx` and `ai-features.tsx` (plus the `outfits` spend source).
+- **Validation.** Unit: `tests/unit/outfitgen-app.test.ts`, `tests/unit/outfitgen-notice.test.ts`. Browser: `tests/browser/outfitgen.spec.ts`
+  on the mock backend (`outfitgenControl`), with the writes counter of `outfits.spec.ts` ignoring the read-only status and list calls.
+  `npm run check:translations`, typecheck and lint.
+- **Not verified here.** Real Azure behaviour, how long a run takes on a phone, and whether a mobile browser keeps a 90-second
+  request alive while the app is in the background (a cut request ends as a quiet failure and the server expiry job settles it).

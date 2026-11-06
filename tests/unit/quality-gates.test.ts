@@ -98,6 +98,7 @@ describe('translation quality gate', () => {
     await put(root, 'src/example.tsx', 'export const element = <span>Stillroom</span>;');
     await put(root, 'src/i18n/phase-zero.json', '{}');
     await put(root, 'src/i18n/tryon.json', '{}');
+    await put(root, 'src/i18n/outfitgen.json', '{}');
     for (const invalid of [
       { hello: { en: 'Hello', fi: '', sv: 'Hej' } },
       { hello: { en: '{name}', fi: '{wrong}', sv: '{name}' } },

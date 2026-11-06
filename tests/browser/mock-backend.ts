@@ -14,6 +14,7 @@ import type { ImageChangeReceipt } from '../../src/domain/image-replacement';
 import type { DeletionOperation } from '../../src/domain/item-lifecycle';
 import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
 import { STYLIST_MANIFEST, STYLIST_MODEL } from '../../src/domain/stylist';
+import { OUTFITGEN_MANIFEST, OUTFITGEN_MODEL } from '../../src/domain/outfitgen';
 import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_MODEL } from '../../src/domain/enhancement';
 import { selectTryOnSteps, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, type TryOnCandidate, type TryOnStep } from '../../src/domain/tryon';
 
@@ -538,6 +539,21 @@ function stylistStatus(setup: StylistSetup, consent: number | null) {
     policy, budget: setup.configured ? budgetReply(setup.totalAllowanceMicro, setup.totalMicro) : null };
 }
 
+// OUTFITGEN1b suggested outfits: per-owner setup (not installed unless a spec says so), consent, scripted faults, the suggestions the
+// server holds, and the scripted replies of outfit-generate. A reply may add suggestions when it is answered.
+export type OutfitGenSetup = { configured: boolean; activated: boolean; noticeRevision: number; manifestId: string; modelId: string;
+  maxRequestMicro: string; totalAllowanceMicro: string; totalMicro: string };
+export type MockSuggestion = { id: string; owner: string; itemIds: string[]; title: string; reason: string; occasion: string; score: number;
+  state: 'suggested' | 'kept' | 'removed' };
+export type OutfitGenReply = { status: number; body: unknown; add?: Omit<MockSuggestion, 'owner' | 'state' | 'id'>[]; hold?: Promise<void> };
+const outfitGenDefaults: OutfitGenSetup = { configured: false, activated: false, noticeRevision: 1, manifestId: OUTFITGEN_MANIFEST, modelId: OUTFITGEN_MODEL,
+  maxRequestMicro: '373402', totalAllowanceMicro: '17940000', totalMicro: '0' };
+function outfitGenStatus(setup: OutfitGenSetup, consent: number | null, counts: { pending: number; unassessed: number; autoUnassessed: number;
+  autoCallsLeft: number; live: boolean; cooldownUntilMs: number | null }) {
+  const code = !setup.configured ? 'UNCONFIGURED' : !setup.activated ? 'INACTIVE' : consent !== setup.noticeRevision ? 'CONSENT_REQUIRED' : 'OK';
+  return { ...stylistStatus(setup, consent), code, ...counts };
+}
+
 // BG2b-2 photo enhancement (BG2c-2: the clean-up manifest and notice revision 2): per-owner setup (configured but not activated unless a spec says otherwise), consent,
 // scripted status/consent faults and scripted enhance-photo replies. `serverOffsetMs` skews the fixture server clock.
 export type EnhanceSetup = { configured: boolean; activated: boolean; providerAvailable: boolean; noticeRevision: number; manifestId: string;
@@ -704,6 +720,20 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     replies: [] as StylistReply[],
     chats: [] as { owner: string; body: unknown }[],
     statusReads: 0,
+  };
+  const outfitgenControl = {
+    missing: false,
+    setup: {} as Record<string, Partial<OutfitGenSetup>>,
+    consent: {} as Record<string, number | null>,
+    statusFaults: [] as ('fail' | 'abort')[],
+    consentFaults: [] as ('fail' | 'lost')[],
+    suggestions: [] as MockSuggestion[],
+    runs: [] as { owner: string; body: unknown }[],
+    replies: [] as OutfitGenReply[],
+    decisionCodes: [] as string[],
+    undoCodes: [] as string[],
+    unassessed: 0, autoUnassessed: 0, autoCallsLeft: 3, live: false, cooldownUntilMs: null as number | null,
+    statusReads: 0, listReads: 0,
   };
   const provenanceRows: JsonRow[] = options.provenance ?? [];
   const enhanceControl = {
@@ -1003,6 +1033,73 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         if (fault === 'abort') { await route.abort('failed'); return; }
       }
       await json(stylistStatus(setup, stylistControl.consent[owner] ?? null)); return;
+    }
+    if (url.pathname.startsWith('/rest/v1/rpc/outfitgen_')) {
+      if (outfitgenControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
+      if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }); return; }
+      const setup = { ...outfitGenDefaults, ...outfitgenControl.setup[owner] };
+      const mine = outfitgenControl.suggestions.filter(entry => entry.owner === owner);
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      const name = url.pathname.split('/').at(-1);
+      if (name === 'outfitgen_set_consent') {
+        const fault = outfitgenControl.consentFaults.shift();
+        if (fault === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
+        if (typeof body.p_enabled !== 'boolean') { await json({ code: 'INVALID_INPUT' }); return; }
+        if (!setup.configured) { await json({ code: 'UNCONFIGURED' }); return; }
+        if (body.p_enabled && body.p_notice_revision !== setup.noticeRevision) { await json({ code: 'CONFIG_CHANGED' }); return; }
+        outfitgenControl.consent[owner] = body.p_enabled ? setup.noticeRevision : null;
+        if (fault === 'lost') { await route.abort('failed'); return; }
+      }
+      if (name === 'outfitgen_status' || name === 'outfitgen_set_consent') {
+        if (name === 'outfitgen_status') {
+          outfitgenControl.statusReads++;
+          const fault = outfitgenControl.statusFaults.shift();
+          if (fault === 'fail') { await json({ message: 'Service unavailable' }, 503); return; }
+          if (fault === 'abort') { await route.abort('failed'); return; }
+        }
+        const { unassessed, autoUnassessed, autoCallsLeft, live, cooldownUntilMs } = outfitgenControl;
+        await json(outfitGenStatus(setup, outfitgenControl.consent[owner] ?? null, { pending: mine.filter(entry => entry.state === 'suggested').length,
+          unassessed, autoUnassessed, autoCallsLeft, live, cooldownUntilMs })); return;
+      }
+      if (name === 'outfitgen_list') {
+        outfitgenControl.listReads++;
+        await json({ code: 'OK', suggestions: mine.filter(entry => entry.state === 'suggested').map(entry => ({ id: entry.id, itemIds: entry.itemIds,
+          title: entry.title, reason: entry.reason, occasion: entry.occasion, score: entry.score, createdAt: '2026-11-06T10:00:00Z' })) }); return;
+      }
+      const target = mine.find(entry => entry.id === body.p_id);
+      if (!target) { await json({ code: 'NOT_FOUND' }); return; }
+      if (name === 'outfitgen_keep') {
+        const code = outfitgenControl.decisionCodes.shift() ?? 'OK';
+        if (code !== 'OK') { await json({ code }); return; }
+        target.state = 'kept';
+        const now = new Date().toISOString();
+        outfits.push({ id: body.p_outfit_id, owner_id: owner, title: target.title, occasion: target.occasion, notes: target.reason, favourite: false,
+          deleted_at: null, version: 1, created_at: now, updated_at: now });
+        target.itemIds.forEach((itemId, position) => outfitItems.push({ owner_id: owner, outfit_id: body.p_outfit_id, item_id: itemId, position }));
+        await json({ code: 'OK', outfitId: body.p_outfit_id }); return;
+      }
+      if (name === 'outfitgen_remove') {
+        const code = outfitgenControl.decisionCodes.shift() ?? 'OK';
+        if (code !== 'OK') { await json({ code }); return; }
+        target.state = 'removed';
+        await json({ code: 'OK' }); return;
+      }
+      if (name === 'outfitgen_undo_remove') {
+        const code = outfitgenControl.undoCodes.shift() ?? 'OK';
+        if (code === 'OK') target.state = 'suggested';
+        await json({ code }); return;
+      }
+      await json({ message: 'Unknown browser fixture route' }, 404); return;
+    }
+    if (url.pathname === '/functions/v1/outfit-generate') {
+      if (!budgetContract(request)) { await json({ code: 'UNAVAILABLE' }, 403); return; }
+      const body: unknown = request.postDataJSON();
+      outfitgenControl.runs.push({ owner, body });
+      const next = outfitgenControl.replies.shift() ?? { status: 200, body: { code: 'OK', suggested: 0, judged: 0, remaining: false } };
+      if (next.hold) await next.hold;
+      for (const entry of next.add ?? []) outfitgenControl.suggestions.push({ id: randomUUID(), owner, state: 'suggested', ...entry });
+      try { await json(next.body, next.status); } catch { /* The page may have gone away while the reply was held. */ }
+      return;
     }
     if (url.pathname === '/rest/v1/rpc/enhance_status' || url.pathname === '/rest/v1/rpc/enhance_set_consent') {
       if (enhanceControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
@@ -2239,7 +2336,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { provenance: provenanceRows, stylistControl, enhanceControl, tryonControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, trashControl, holdFeedbackReads, outfitControl, outfitLifecycleControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { provenance: provenanceRows, stylistControl, outfitgenControl, enhanceControl, tryonControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, trashControl, holdFeedbackReads, outfitControl, outfitLifecycleControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus, photoModelNotice, negotiatedStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

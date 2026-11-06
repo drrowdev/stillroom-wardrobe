@@ -11,6 +11,7 @@ import type { AppClient } from '../../data/client';
 import type { OutfitRecord } from '../../domain/outfits';
 import type { OutfitLifecycle } from './use-outfit-lifecycle';
 import { OutfitLifecycleDialog, OutfitWearCheck } from './lifecycle-controls';
+import { SuggestedOutfits } from './suggested-outfits';
 
 function LoadedThumb({ path, alt, images, t }: { path: string; alt: string; images: PrivateImages; t: Translate }) {
   const { ref, url, failed } = usePrivateImage(images, path);
@@ -41,10 +42,10 @@ export function ComponentText({ component, t }: { component: OutfitComponent; t:
 type Props = {
   client: AppClient; scope: OwnerScope; invalidation: number;
   images: PrivateImages; online: boolean; language: Language; t: Translate;
-  onCreate: () => void; onAddItem: () => void;
+  onCreate: () => void; onAddItem: () => void; onKept: () => void;
   lifecycle: OutfitLifecycle;
 };
-export function OutfitsScreen({ client, scope, invalidation, images, online, language, t, onCreate, onAddItem, lifecycle }: Props) {
+export function OutfitsScreen({ client, scope, invalidation, images, online, language, t, onCreate, onAddItem, onKept, lifecycle }: Props) {
   const list = useOutfitList(client, scope, online, invalidation);
   const data = list.data;
   const [selecting, setSelecting] = useState(false);
@@ -76,6 +77,7 @@ export function OutfitsScreen({ client, scope, invalidation, images, online, lan
         <button type="button" className="button button-secondary" disabled={lifecycle.busy} onClick={cancel}>{t('common.cancel')}</button>
       </div>
     </div>}
+    {!selecting && <SuggestedOutfits client={client} scope={scope} images={images} online={online} language={language} t={t} onKept={onKept} />}
     {list.error && <div className="notice notice-error" role="alert"><span>{t('outfits.loadFailed')}</span><button type="button" className="text-button" disabled={!online} onClick={list.reload}>{t('common.retry')}</button></div>}
     {!data ? !list.error && <div className="outfit-grid" aria-busy="true"><p role="status" className="sr-only">{t('common.loading')}</p>
       {Array.from({ length: 3 }, (_, index) => <div key={index} className="loading-card"><div className="loading-photo skeleton" /><div className="loading-line skeleton" /></div>)}</div>

@@ -12,6 +12,8 @@ import { AiSettings } from './ai-settings';
 import { EnhanceSettings } from './enhance-settings';
 import { enhanceStoreFor, type EnhanceStore } from './enhance-store';
 import { StylistSettings } from './stylist-settings';
+import { OutfitGenSettings } from './outfitgen-settings';
+import { outfitGenStoreFor, type OutfitGenStore } from '../outfitgen/outfitgen-store';
 import { TryOnSettings } from './tryon-settings';
 import { tryOnStoreFor, type TryOnStore } from './tryon-store';
 import {
@@ -24,7 +26,8 @@ type Props = { client: AppClient; ai: AiClient; controller: SessionController; s
 /** The AI features card: the shared spending summary, the admin entry and one row per feature. */
 export function AiFeatures({ client, ai, controller, scope, profile, stylist, busy, unresolved, language, online, t }: Props) {
   const enhance = enhanceStoreFor(client, scope), tryOn = tryOnStoreFor(client, scope);
-  const spend = useSpend(scope, stylist, enhance, tryOn);
+  const outfits = outfitGenStoreFor(client, scope);
+  const spend = useSpend(scope, stylist, enhance, tryOn, outfits);
   return <div className="settings-group-card ai-features">
     <div className="ai-spend-header">
       {spend.snapshot && <SpendSummary snapshot={spend.snapshot} language={language} t={t} />}
@@ -35,6 +38,7 @@ export function AiFeatures({ client, ai, controller, scope, profile, stylist, bu
     <EnhanceSettings store={enhance} busy={busy} online={online} t={t} />
     <TryOnSettings store={tryOn} busy={busy} online={online} t={t} />
     <StylistSettings store={stylist} busy={busy} language={language} online={online} t={t} />
+    {outfits && <OutfitGenSettings store={outfits} busy={busy} online={online} t={t} />}
   </div>;
 }
 
@@ -47,10 +51,10 @@ const readyStatus = <S,>(read: { kind: string; status?: S }): S | null => read.k
  * reply, and the analysis card's, is stamped with `performance.now()` when it arrives. One timer (at most a day)
  * re-checks the month boundary, and so does returning to the page.
  */
-function useSpend(scope: OwnerScope, stylist: StylistStore, enhance: EnhanceStore | null, tryOn: TryOnStore | null) {
+function useSpend(scope: OwnerScope, stylist: StylistStore, enhance: EnhanceStore | null, tryOn: TryOnStore | null, outfits: OutfitGenStore | null) {
   const [tracker] = useState(() => new SpendTracker(scope.epoch, {
     stylist: readyStatus(stylist.get().read), enhance: enhance ? readyStatus(enhance.get().read) : null,
-    tryOn: tryOn ? readyStatus(tryOn.get().read) : null, analysis: null,
+    tryOn: tryOn ? readyStatus(tryOn.get().read) : null, outfits: outfits ? readyStatus(outfits.get().read) : null, analysis: null,
   }));
   const [, setTick] = useState(0);
   const bump = useCallback(() => setTick((tick) => tick + 1), []);
@@ -64,9 +68,9 @@ function useSpend(scope: OwnerScope, stylist: StylistStore, enhance: EnhanceStor
       check();
       return store.subscribe(check);
     };
-    const stops = [watch('stylist', stylist), watch('enhance', enhance), watch('tryOn', tryOn)];
+    const stops = [watch('stylist', stylist), watch('enhance', enhance), watch('tryOn', tryOn), watch('outfits', outfits)];
     return () => { for (const stop of stops) stop(); };
-  }, [tracker, scope, stylist, enhance, tryOn, bump]);
+  }, [tracker, scope, stylist, enhance, tryOn, outfits, bump]);
   const analysis = useCallback((status: AiStatus | null, loadFailed: boolean) => {
     const current = loadFailed ? null : status;
     if (tracker.observe('analysis', scope.epoch, current, current ? analysisFigures(current) : null, performance.now())) bump();
