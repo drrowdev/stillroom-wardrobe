@@ -25,6 +25,10 @@ const env = process.env;
 const base = assertLocalApi(env.SUPABASE_URL), key = env.SUPABASE_PUBLISHABLE_KEY;
 const client = normalClient(env);
 const TABLES = Object.keys(PUBLIC_TABLES);
+// Suggestions are owner-readable but neither exported nor seeded here: Keep becomes an outfit and Remove a Today vote, both exported.
+// Their owner reads and writes are proven by the OUTFITGEN1a probes.
+const NOT_EXPORTED = ['suggested_outfits'];
+const EXPORTED = TABLES.filter((table) => !NOT_EXPORTED.includes(table));
 const ORDER = { profiles: 'owner_id', style_preferences: 'owner_id', outfit_items: 'outfit_id,item_id' };
 const HEX = 'a'.repeat(64);
 const uuidPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
@@ -793,8 +797,8 @@ function exportShape(owner, result) {
   if (!need(result.ok && data && typeof data === 'object' && !Array.isArray(data), `${stage}: export ${describe(result)}`)) return false;
   let ok = need(isDeepStrictEqual(Object.keys(data).sort(), ['created_at', 'export_id', 'owner_id', 'schema_version', 'tables']), `${stage}: export keys`);
   ok = need(data.owner_id === owner.uid && data.schema_version === 2, `${stage}: export owner/schema`) && ok;
-  ok = need(isDeepStrictEqual(Object.keys(data.tables ?? {}).sort(), [...TABLES].sort()), `${stage}: export table keys`) && ok;
-  for (const table of TABLES) {
+  ok = need(isDeepStrictEqual(Object.keys(data.tables ?? {}).sort(), [...EXPORTED].sort()), `${stage}: export table keys`) && ok;
+  for (const table of EXPORTED) {
     const rows = data.tables?.[table];
     ok = need(Array.isArray(rows) && rows.every((row) => row.owner_id === owner.uid), `${stage}: export ${table} ownership`) && ok;
   }
@@ -999,10 +1003,10 @@ async function restIsolation(attacker, victim) {
   for (const table of TABLES) {
     stage = `rest-${direction}-${table}`;
     const rows = await readAll(attacker, table);
-    need(rows.length > 0 && rows.every((row) => row.owner_id === attacker.uid), `${stage}: rows outside the owner`);
+    need((rows.length > 0 || NOT_EXPORTED.includes(table)) && rows.every((row) => row.owner_id === attacker.uid), `${stage}: rows outside the owner`);
     need(scanLeaks(JSON.stringify(rows), v.tokens).length === 0, `${stage}: peer values in own rows`);
     const field = table === 'outfit_items' ? 'outfit_id' : ['profiles', 'style_preferences'].includes(table) ? 'owner_id' : 'id';
-    for (const id of present[table] ?? (table === 'outfit_items' ? [a.outfit] : [attacker.uid])) {
+    for (const id of NOT_EXPORTED.includes(table) ? [] : present[table] ?? (table === 'outfit_items' ? [a.outfit] : [attacker.uid])) {
       need(rows.some((row) => row[field] === id), `${stage}: own fixture missing (positive control)`);
     }
     const filtered = await probe(attacker, victim, `/rest/v1/${table}?owner_id=eq.${victim.uid}&select=*`);
