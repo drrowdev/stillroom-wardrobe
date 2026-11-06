@@ -504,6 +504,13 @@ export type Database = {
             referencedRelation: "profiles"
             referencedColumns: ["owner_id"]
           },
+          {
+            foreignKeyName: "suggested_outfits_owner_id_kept_outfit_id_fkey"
+            columns: ["owner_id", "kept_outfit_id"]
+            isOneToOne: false
+            referencedRelation: "outfits"
+            referencedColumns: ["owner_id", "id"]
+          },
         ]
       }
       suggestion_feedback: {
