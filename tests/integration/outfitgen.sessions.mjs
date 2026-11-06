@@ -116,11 +116,14 @@ function helpers(snapshot, sql) {
     note(`garment-${category}`);
     const value = sh.track(intent());
     value.p_item.category = category;
-    value.p_item.colours = colours;
     value.p_item.title = `Fictional outfit ${category}`;
     const row = await sh.reserve(value);
+    note(`garment-${category}-upload`);
     await sh.upload(value);
+    note(`garment-${category}-finalize`);
     await sh.finalize(value, row);
+    note(`garment-${category}-colours`);
+    await sql(`update public.items set colours=${texts(colours)} where owner_id=${literal(a.uid)} and id=${literal(value.p_item.id)};`);
     return value.p_item.id;
   };
   const controls = (owner) => one(`select to_jsonb(c) from private.ai_controls c where owner_id=${literal(owner.uid)};`);
