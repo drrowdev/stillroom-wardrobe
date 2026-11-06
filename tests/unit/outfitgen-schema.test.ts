@@ -91,7 +91,24 @@ describe('outfit generation migration (source proofs; the SQL itself runs in the
     expect(keep.indexOf('outfitgen_valid_set')).toBeLessThan(keep.indexOf('public.save_outfit('));
     expect(keep.indexOf('outfitgen_signature(array(')).toBeLessThan(keep.indexOf('public.save_outfit('));
     const undo = sql.slice(sql.indexOf('create function public.outfitgen_undo_remove'));
-    expect(undo).toContain('f.vote=-1 and f.created_at is not distinct from s.vote_set_at');
+    expect(undo).toContain("if s.vote_before is null or not found or f.vote<>-1 then return jsonb_build_object('code','CONFLICT')");
+    // Any later vote write voids the ticket, including the Today writer's upsert that keeps created_at.
+    const voided = sql.slice(sql.indexOf('create function private.outfitgen_vote_changed'), sql.indexOf('create function private.outfitgen_eligible'));
+    expect(voided).toContain('after insert or update or delete on public.suggestion_feedback');
+    expect(voided).toContain('set vote_before=null,vote_set_at=null');
+    // The garments are locked (photos, then garment, as set_item_trashed does) before the suggestion row and the eligibility recheck;
+    // an outfit with the same set in Trash is refused rather than duplicated.
+    expect(keep.indexOf('for share')).toBeLessThan(keep.indexOf('for update'));
+    expect(keep.indexOf('from public.item_images im')).toBeLessThan(keep.indexOf('from public.items i where i.owner_id=v_owner and i.id=any(v_ids)'));
+    expect(keep.indexOf('for update')).toBeLessThan(keep.indexOf('outfitgen_valid_set'));
+    expect(keep).not.toContain('o.deleted_at is null\n');
+    expect(keep).toContain("'IN_TRASH'");
+    expect(keep).toContain("exception when lock_not_available then");
+    // Planning puts garments waiting for assessment first and rotates the partner pool, so no garment is hidden by a fixed prefix.
+    const plan = sql.slice(sql.indexOf('create function public.outfitgen_plan'), sql.indexOf('-- Marks items assessed'));
+    expect(plan).toContain('r.pending and r.rn<=100');
+    expect(plan).toContain('md5(pool.id::text||current_date::text)');
+    expect(plan).not.toContain('order by i.id limit 500');
     const valid = sql.slice(sql.indexOf('create function private.outfitgen_valid_set'), sql.indexOf('-- Already judged'));
     for (const rule of ['public.combination_rules', 'public.suggestion_feedback', 'c.f=1', 'outfitgen_eligible']) expect(valid).toContain(rule);
   });

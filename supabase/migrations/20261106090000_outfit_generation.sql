@@ -157,6 +157,23 @@ end;
 $$;
 create trigger outfitgen_remove_item_rows after delete on public.items
 for each row execute function private.outfitgen_remove_item_rows();
+-- Any later write of a set's Today vote (another device, the vote writer, a delete) voids the Undo ticket of its removed suggestion,
+-- so Undo can never restore an older vote over a newer one. The Remove call sets the ticket after its own vote write.
+create function private.outfitgen_vote_changed() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if tg_op='DELETE' then
+    update public.suggested_outfits set vote_before=null,vote_set_at=null
+      where owner_id=old.owner_id and signature=old.signature and vote_before is not null;
+  else
+    update public.suggested_outfits set vote_before=null,vote_set_at=null
+      where owner_id=new.owner_id and signature=new.signature and vote_before is not null;
+  end if;
+  return null;
+end;
+$$;
+create trigger outfitgen_vote_changed after insert or update or delete on public.suggestion_feedback
+for each row execute function private.outfitgen_vote_changed();
 
 -- The one eligibility contract: saved, active, ready, not excluded, not an accessory, a ready photo, no deletion in progress.
 create function private.outfitgen_eligible(p_owner uuid,p_id uuid) returns boolean
@@ -340,6 +357,8 @@ begin
         and im.state='ready' and im.created_at>s.created_at))
       and s.fingerprint is distinct from private.outfitgen_fingerprint(s.owner_id,s.item_ids)
       or s.state='declined' and s.prompt_version<(select m.prompt_version from private.ai_execution_manifests m where m.id=c.outfitgen_manifest_id));
+  -- Garments still waiting for assessment come first (oldest first, at most 100 per plan, so coverage is eventual however many
+  -- garments exist); the rest of the 500 is a partner pool that rotates daily rather than a fixed prefix.
   select coalesce(jsonb_agg(x.j order by x.id),'[]'::jsonb) into v_items from (
     select i.id,jsonb_build_object('id',i.id,'category',i.category,'colours',to_jsonb(i.colours),'pattern',i.pattern,
       'sleeve_length',i.sleeve_length,'garment_length',i.garment_length,'seasons',to_jsonb(i.seasons),'formality',i.formality,
@@ -355,8 +374,16 @@ begin
       'image',jsonb_build_object('path',im.main_path,'sha256',im.main_sha256,'bytes',im.main_bytes)) j
     from public.items i
       join public.item_images im on im.owner_id=i.owner_id and im.item_id=i.id and im.state='ready' and im.retired_at is null
-    where i.owner_id=p_owner_id and private.outfitgen_eligible(i.owner_id,i.id)
-    order by i.id limit 500) x;
+    where i.owner_id=p_owner_id and i.id in (
+      with pool as (
+        select ei.id,ei.created_at,not exists(select 1 from private.outfit_assessed_items a where a.owner_id=ei.owner_id and a.item_id=ei.id) pending
+        from public.items ei where ei.owner_id=p_owner_id and private.outfitgen_eligible(ei.owner_id,ei.id)),
+      ranked as (
+        select pool.id,pool.pending,row_number() over (partition by pool.pending
+          order by case when pool.pending then pool.created_at end,md5(pool.id::text||current_date::text),pool.id) rn from pool)
+      select r.id from ranked r where (r.pending and r.rn<=100)
+        or (not r.pending and r.rn<=500-least(100,(select count(*) from pool where pool.pending)))
+    )) x;
   select coalesce(jsonb_agg(jsonb_build_array(r.item_low,r.item_high)),'[]'::jsonb) into v_pairs
     from public.combination_rules r where r.owner_id=p_owner_id;
   select coalesce(jsonb_agg(to_jsonb(f.item_ids)),'[]'::jsonb) into v_disliked from (
@@ -634,10 +661,16 @@ $$;
 -- transaction. The outfit id is chosen by the client, so a retry with the same id is a replay.
 create function public.outfitgen_keep(p_id uuid,p_outfit_id uuid) returns jsonb
 language plpgsql security definer set search_path = '' set lock_timeout = '2s' as $$
-declare v_owner uuid := auth.uid(); s public.suggested_outfits; v_ordered uuid[]; v_existing uuid;
+declare v_owner uuid := auth.uid(); s public.suggested_outfits; v_ordered uuid[]; v_existing uuid; v_existing_deleted timestamptz; v_ids uuid[];
 begin
   if v_owner is null or not private.is_approved() then return jsonb_build_object('code','UNAVAILABLE'); end if;
   if p_id is null or p_outfit_id is null then return jsonb_build_object('code','INVALID_INPUT'); end if;
+  select item_ids into v_ids from public.suggested_outfits where id=p_id and owner_id=v_owner;
+  if not found then return jsonb_build_object('code','NOT_FOUND'); end if;
+  -- The garments are locked in the order set_item_trashed uses (photos, then the garment), so a trash that has not committed
+  -- either finishes first (and the recheck below sees it) or is refused; the suggestion row is locked afterwards.
+  perform 1 from public.item_images im where im.owner_id=v_owner and im.item_id=any(v_ids) order by im.item_id,im.id for share;
+  perform 1 from public.items i where i.owner_id=v_owner and i.id=any(v_ids) order by i.id for share;
   select * into s from public.suggested_outfits where id=p_id and owner_id=v_owner for update;
   if not found then return jsonb_build_object('code','NOT_FOUND'); end if;
   if s.state='kept' then
@@ -646,11 +679,16 @@ begin
   end if;
   if s.state<>'suggested' then return jsonb_build_object('code','CONFLICT'); end if;
   if not private.outfitgen_valid_set(v_owner,s.item_ids) then return jsonb_build_object('code','STALE'); end if;
-  select o.id into v_existing from public.outfits o where o.owner_id=v_owner and o.deleted_at is null
-    and private.outfitgen_signature(array(select oi.item_id from public.outfit_items oi where oi.outfit_id=o.id))=s.signature limit 1;
-  if v_existing is not null then
+  select o.id,o.deleted_at into v_existing,v_existing_deleted from public.outfits o where o.owner_id=v_owner
+    and private.outfitgen_signature(array(select oi.item_id from public.outfit_items oi where oi.outfit_id=o.id))=s.signature
+    order by o.deleted_at nulls first limit 1;
+  if v_existing is not null and v_existing_deleted is null then
     update public.suggested_outfits set state='kept',kept_outfit_id=v_existing,decided_at=clock_timestamp() where id=s.id;
     return jsonb_build_object('code','OK','outfitId',v_existing,'duplicate',true);
+  elsif v_existing is not null then
+    -- The same set is already saved and sits in Trash: no second outfit; the suggestion becomes a judged set that is never offered again.
+    update public.suggested_outfits set state='declined',title=null,reason=null,occasion=null,decided_at=null where id=s.id;
+    return jsonb_build_object('code','IN_TRASH');
   end if;
   select array_agg(i.id order by array_position(array['top','bottom','one_piece','layer','outerwear','footwear'],i.category),i.id)
     into v_ordered from public.items i where i.owner_id=v_owner and i.id=any(s.item_ids);
@@ -660,6 +698,8 @@ begin
   end;
   update public.suggested_outfits set state='kept',kept_outfit_id=p_outfit_id,decided_at=clock_timestamp() where id=s.id;
   return jsonb_build_object('code','OK','outfitId',p_outfit_id);
+exception when lock_not_available then
+  return jsonb_build_object('code','BUSY');
 end;
 $$;
 
@@ -694,10 +734,11 @@ begin
   if s.state='suggested' then return jsonb_build_object('code','OK','replayed',true); end if;
   if s.state<>'removed' then return jsonb_build_object('code','CONFLICT'); end if;
   select * into f from public.suggestion_feedback where owner_id=v_owner and signature=s.signature for update;
-  if found and f.vote=-1 and f.created_at is not distinct from s.vote_set_at then
-    if s.vote_before='none' then delete from public.suggestion_feedback where id=f.id;
-    elsif s.vote_before='like' then update public.suggestion_feedback set vote=1 where id=f.id; end if;
-  end if;
+  -- The ticket (vote_before) is cleared by outfitgen_vote_changed whenever anyone writes this set's vote after the Remove,
+  -- so a surviving ticket proves the dislike is still the one this Remove wrote.
+  if s.vote_before is null or not found or f.vote<>-1 then return jsonb_build_object('code','CONFLICT'); end if;
+  if s.vote_before='none' then delete from public.suggestion_feedback where id=f.id;
+  elsif s.vote_before='like' then update public.suggestion_feedback set vote=1 where id=f.id; end if;
   update public.suggested_outfits set state='suggested',decided_at=null,vote_before=null,vote_set_at=null where id=s.id;
   return jsonb_build_object('code','OK');
 end;

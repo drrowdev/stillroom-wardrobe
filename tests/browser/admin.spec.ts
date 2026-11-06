@@ -134,6 +134,7 @@ test.describe('AD1b admin spending and limits', () => {
     await expect(row(page, 1, 'admin.stylist').locator('td')).toHaveText(['$0.00', '$0.00484', '$0.12936', '$0.1342', '2']);
     await expect(row(page, 1, 'admin.enhancement').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
     await expect(row(page, 1, 'admin.tryOn').locator('td')).toHaveText(['$0.24', '$0.00', '$0.36', '$0.60', '2']);
+    await expect(row(page, 1, 'admin.outfitGen').locator('td')).toHaveText(['$0.00', '$0.00', '$0.00', '$0.00', '0']);
     await expect(row(page, 1, 'admin.total').locator('td')).toHaveText(['$1.474567', '$0.30484', '$4.586711', '$6.366118', '9']);
     await expect(account(page, 1)).toContainText(text('admin.usedOf', { used: '$6.37', limit: '$20.00' }));
     await details(page, 1).locator('summary').click();

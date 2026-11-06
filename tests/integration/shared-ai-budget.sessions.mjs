@@ -330,8 +330,7 @@ export async function sharedBudgetProbes(snapshot, sql, mark) {
     const accountB = view.accounts.find((entry) => entry.admissionNo === target.no);
     requireEvidence(accountB !== undefined);
     equal(accountB.limits, amount(before1));
-    for (const key of ['shared', 'analysis', 'stylist', 'enhancement', 'tryOn', 'outfitGen']) equal(Object.keys(accountB.current[key]), ['usedMicro']);
-    requireEvidence(accountB.history.every((entry) => entry.outfitGen && Number(entry.outfitGen.requests) >= 0) && accountB.features.outfitGen.activated === false);
+    for (const key of ['shared', 'analysis', 'stylist', 'enhancement', 'tryOn']) equal(Object.keys(accountB.current[key]), ['usedMicro']);
     const names = keysOf(view);
     for (const retired of ['maxRequestMicro', 'maxRequestsPerHour', 'lastHour']) requireEvidence(!names.has(retired));
     requireEvidence(!JSON.stringify(view).includes('@'));

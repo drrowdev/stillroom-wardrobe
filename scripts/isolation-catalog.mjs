@@ -211,7 +211,7 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'ai_budget_contract()', 'ai_budget_used(uuid, timestamp with time zone)', 'ai_budget_json(bigint, numeric)',
   'admin_account_v3(private.approved_accounts, timestamp with time zone, text[])', 'admin_budget_shape(jsonb)',
   'admin_set_budget(smallint, text, jsonb, jsonb, text)',
-  'outfitgen_signature(uuid[])', 'outfitgen_fingerprint(uuid, uuid[])', 'outfitgen_row_guard()', 'outfitgen_remove_item_rows()',
+  'outfitgen_signature(uuid[])', 'outfitgen_fingerprint(uuid, uuid[])', 'outfitgen_row_guard()', 'outfitgen_remove_item_rows()', 'outfitgen_vote_changed()',
   'outfitgen_eligible(uuid, uuid)', 'outfitgen_valid_set(uuid, uuid[])', 'outfitgen_known(uuid, text)',
   'outfitgen_permission(public.profiles, private.ai_controls)', 'outfitgen_expire(uuid, timestamp with time zone, integer)',
   'outfitgen_record(uuid, uuid, jsonb, uuid[], private.ai_execution_manifests)',

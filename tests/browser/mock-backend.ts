@@ -617,7 +617,7 @@ export function adminSpending(count: number, limits: Record<1 | 2, AdminLimits |
       stylist: index === 0 ? adminSpend(0, 4_840, admissionNo === 1 ? 129_360 : 0, 2) : adminSpend(index * 12_345, 0, 0, index),
       enhancement: admissionNo === 1 && index === 1 ? adminSpend(120_000, 0, 0, 1) : adminSpend(0, 0, 0, 0),
       tryOn: admissionNo === 1 && index === 0 ? adminSpend(240_000, 0, 360_000, 2) : adminSpend(0, 0, 0, 0),
-      outfitGen: admissionNo === 1 && index === 0 ? adminSpend(0, 92_400, 0, 1) : adminSpend(0, 0, 0, 0) }));
+      outfitGen: adminSpend(0, 0, 0, 0) }));
     const current = history[0]!;
     const more = extra[admissionNo] ?? {};
     const used = (spend: { totalMicro: string }, feature?: 'stylist' | 'enhancement' | 'tryOn') => String(BigInt(spend.totalMicro) + BigInt(feature ? more[feature] ?? 0 : 0));

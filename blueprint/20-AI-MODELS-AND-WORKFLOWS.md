@@ -341,7 +341,11 @@ Source only: the `outfit-generate` Edge function, `20261106090000_outfit_generat
   calls are needed), never silently replaced by thumbnails.
 - **Data.** `suggested_outfits` (owner-readable, written only by definer functions), `outfit_assessed_items`, `outfitgen_requests`.
   Keep, Remove and Undo are `outfitgen_keep`, `outfitgen_remove`, `outfitgen_undo_remove`. Not exported or restored; deleted with
-  the account.
+  the account. Keep locks the garments in the order `set_item_trashed` uses, rechecks eligibility and bans, and refuses a set that is
+  already saved (also one in Trash, `IN_TRASH`) instead of saving it twice. Remove writes the existing dislike vote; Undo restores the
+  earlier vote only while nothing has written that set's vote since (any later vote write voids the Undo, `CONFLICT`).
+  Planning returns at most 500 garments: those still waiting for assessment first (at most 100 per plan, oldest first), then a
+  partner pool that rotates daily, so every new garment is planned whatever the wardrobe size.
 - **Consent.** Notice revision 1 (the app text arrives with OUTFITGEN1b) says that photos and details of the clothes are sent to
   Azure, that this also happens automatically after Save and when the app opens, what is kept and for how long, and how to turn it
   off. Pending suggestions are stored until the owner keeps or removes them.

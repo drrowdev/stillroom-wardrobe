@@ -28,6 +28,27 @@ const USAGE = Object.freeze({ modelObservation: 'expected_snapshot', controlObse
   total: 32000, reasoning: 500, cacheRead: 0, cacheWrite: 0 });
 const BODIES = ['private.admin_account_v3(private.approved_accounts,timestamptz,text[])', 'private.deletion_owner_rows_absent(uuid)'];
 
+function bulkSql(owner, newest, direction) {
+  const ids = "select md5('outfitgen-bulk-'||n)::uuid id from generate_series(1,520) n";
+  const where = `owner_id=${literal(owner)} and title like 'Fictional bulk %'`;
+  if (direction === 'remove') {
+    return `begin;
+set local session_replication_role = replica;
+delete from private.outfit_assessed_items where owner_id=${literal(owner)} and item_id in (${ids});
+delete from public.item_images where owner_id=${literal(owner)} and item_id in (select id from public.items where ${where});
+delete from public.items where ${where};
+commit;`;
+  }
+  return `begin;
+set local session_replication_role = replica;
+insert into public.items(id,owner_id,title,category,colours) select b.id,${literal(owner)},'Fictional bulk '||b.id,'top','{navy}' from (${ids}) b;
+insert into public.items(id,owner_id,title,category,colours) values (${literal(newest)},${literal(owner)},'Fictional bulk newest','top','{navy}');
+insert into public.item_images(id,owner_id,item_id,state,main_bytes,thumb_bytes,main_sha256,thumb_sha256,width,height,alt_text)
+  select gen_random_uuid(),i.owner_id,i.id,'ready',100000,10000,repeat('a',64),repeat('b',64),800,1000,'photo' from public.items i where i.${where};
+insert into private.outfit_assessed_items(owner_id,item_id) select ${literal(owner)},b.id from (${ids}) b;
+commit;`;
+}
+
 export async function outfitgenUpgradeSeed(snapshot, sql) {
   const { owners: [a, b] } = snapshot;
   const bodies = {};
@@ -162,6 +183,21 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal(done.recorded, { suggested: 2, declined: 1, assessed: 2 });
     equal(done.accounting.basis, 'estimated');
     equal(await scalar(`select accounted_micro::text from private.ai_usage where request_id=${literal(R1)};`), String(30000 * 220 / 100 + 2000 * 1320 / 100));
+    // The admin spending view counts this purpose in the month and in its total (the historical shared-budget probe runs earlier and
+    // is left as it was).
+    await sql(`insert into private.app_admins(owner_id,admission_no,admission_generation)
+      select user_id,admission_no,generation from private.approved_accounts where user_id=${literal(a.uid)};`);
+    try {
+      const spending = await rpc(a, 'admin_ai_spending_v2', {});
+      equal(spending.code, 'OK');
+      const no = Number(await scalar(`select admission_no from private.approved_accounts where user_id=${literal(a.uid)};`));
+      const mine = spending.accounts.find((entry) => entry.admissionNo === no);
+      requireEvidence(mine !== undefined && mine.features.outfitGen.activated === true && Number(mine.history[0].outfitGen.requests) >= 1);
+      equal(mine.current.outfitGen, { usedMicro: '92400' });
+      requireEvidence(BigInt(mine.current.shared.usedMicro) >= 92400n);
+    } finally {
+      await sql('delete from private.app_admins;');
+    }
     equal((await finish(R1, 'OK', USAGE, results, [top, bottom])).replayed, true);
     equal((await finish(R1, 'OK', { ...USAGE, input: 31000, total: 33000 }, results, [top, bottom])).code, 'USAGE_CONFLICT');
     equal(await scalar(`select count(*) from private.outfit_assessed_items where owner_id=${literal(a.uid)};`), '2');
@@ -208,11 +244,14 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal(await scalar(`select vote from public.suggestion_feedback where owner_id=${literal(a.uid)} and signature=${literal(s3)};`), '1');
     equal((await rpc(a, 'outfitgen_list')).suggestions.length, 1);
     equal((await rpc(a, 'outfitgen_remove', { p_id: four.id })).code, 'OK');
-    await sql(`update public.suggestion_feedback set vote=-1,created_at=created_at+interval '1 second' where owner_id=${literal(a.uid)} and signature=${literal(s3)};`);
-    equal((await rpc(a, 'outfitgen_undo_remove', { p_id: four.id })).code, 'OK');
+    // Another device changes the vote through the real Today vote writer (an upsert that keeps created_at): like, then dislike again.
+    // Undo must not restore the older like over it, and must not delete the newer dislike.
+    const vote = (value) => client.request(a.token, '/rest/v1/suggestion_feedback?on_conflict=owner_id,signature',
+      { method: 'POST', body: { owner_id: a.uid, item_ids: [top, bottom, shoes, layer], vote: value }, headers: { Prefer: 'resolution=merge-duplicates,return=minimal' } });
+    requireEvidence((await vote(1)).ok && (await vote(-1)).ok);
+    equal((await rpc(a, 'outfitgen_undo_remove', { p_id: four.id })).code, 'CONFLICT');
     equal(await scalar(`select vote from public.suggestion_feedback where owner_id=${literal(a.uid)} and signature=${literal(s3)};`), '-1');
-    equal(await scalar(`select state from public.suggested_outfits where id=${literal(four.id)};`), 'suggested');
-    equal((await rpc(a, 'outfitgen_remove', { p_id: four.id })).code, 'OK');
+    equal(await scalar(`select state from public.suggested_outfits where id=${literal(four.id)};`), 'removed');
     equal((await claim(randomUUID(), [s3])).code, 'CONFLICT');
 
     mark('failure-cooldown');
@@ -290,6 +329,39 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     requireEvidence((await rpc(a, 'outfitgen_list')).suggestions.every((s) => !s.itemIds.includes(fresh[0])));
     requireEvidence(Number(await scalar(`select count(*) from public.suggested_outfits where ${literal(fresh[0])}=any(item_ids);`)) >= 0);
     await sql(`update public.items set exclude_suggestions=false where id=${literal(fresh[0])};`);
+
+    mark('keep-recheck');
+    const suggestion = (ids) => sql(`insert into public.suggested_outfits(owner_id,item_ids,state,title,reason,occasion,score,fingerprint,manifest_id,prompt_version,request_id)
+      values (${literal(a.uid)},${uuids(ids)},'suggested','Fictional set','Calm colours.','smart',9,repeat('e',64),${literal(MANIFEST)},1,${literal(R1)});`);
+    const rowOf = (ids) => scalar(`select id from public.suggested_outfits where signature=private.outfitgen_signature(${uuids(ids)});`);
+    // A garment moved to Trash after the suggestion was made: Keep refuses and creates nothing.
+    const trashed = [fresh[1], bottom, shoes];
+    await suggestion(trashed);
+    await sql(`update public.items set deleted_at=clock_timestamp() where id=${literal(fresh[1])};`);
+    equal((await rpc(a, 'outfitgen_keep', { p_id: await rowOf(trashed), p_outfit_id: randomUUID() })).code, 'STALE');
+    await sql(`update public.items set deleted_at=null where id=${literal(fresh[1])};`);
+    // The same set is already a saved outfit that sits in Trash: no second outfit is created.
+    const dup = [fresh[2], bottom, shoes], O2 = randomUUID();
+    await sql(`insert into public.outfits(id,owner_id,title,occasion,notes,favourite,deleted_at) values (${literal(O2)},${literal(a.uid)},'Fictional saved','smart','',false,clock_timestamp());
+      insert into public.outfit_items(owner_id,outfit_id,item_id,position) select ${literal(a.uid)},${literal(O2)},x.id,(x.ord-1)::smallint from unnest(${uuids(dup)}) with ordinality x(id,ord);`);
+    await suggestion(dup);
+    equal((await rpc(a, 'outfitgen_keep', { p_id: await rowOf(dup), p_outfit_id: randomUUID() })).code, 'IN_TRASH');
+    equal(await scalar(`select count(*) from public.outfits o where o.owner_id=${literal(a.uid)} and o.id in (select outfit_id from public.outfit_items where item_id=${literal(fresh[2])});`), '1');
+    equal(await scalar(`select state from public.suggested_outfits where signature=private.outfitgen_signature(${uuids(dup)});`), 'declined');
+
+    mark('many-garments');
+    // With more than 500 eligible garments a new garment must still be planned, however its id sorts. The bulk rows stand for already
+    // assessed garments; they are written and removed with triggers off.
+    const newest = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    await sql(bulkSql(a.uid, newest, 'add'));
+    try {
+      const big = await plan();
+      equal(big.code, 'OK');
+      requireEvidence(big.items.length <= 500 && big.items.some((item) => item.id === newest && item.unassessed === true));
+      requireEvidence(big.items.filter((item) => item.unassessed).length <= 100 + made.length);
+    } finally {
+      await sql(bulkSql(a.uid, newest, 'remove'));
+    }
   } finally {
     await h.restore(before, made);
   }
