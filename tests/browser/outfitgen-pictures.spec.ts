@@ -725,6 +725,43 @@ test.describe('PICTURES-WAIT1 pictures wait, lines and progress', () => {
     expect(chains(api).length).toBeGreaterThan(1);
   });
 
+  test('a given-up chain that finishes while it is being reconciled leaves no duplicate chain for the same outfit', async ({ page }) => {
+    const foreign: Chain = { id: randomUUID(), owner: owners.a, outfitId: null, steps: [], nextStep: 1, state: 'running', resultId: null, expiresAtMs: Date.now() + 1_800_000 };
+    let lookups = 0;
+    const existing = await newApi(page);
+    const { clothes } = existing;
+    // The second outfit already has its picture, so the first one is the only candidate: after the lost step it is the retry.
+    stored(existing.api, null, sets(clothes)[1]!.itemIds);
+    const { api } = await start(page, { replies: [{ abort: true, commit: true }], beforeSignIn: async (backend) => {
+      backend.tryonControl.chains.push(foreign);
+      await page.route('**/rest/v1/rpc/tryon_cancel', (route) => route.abort('failed'));
+      await page.route('**/rest/v1/rpc/tryon_chain_status', async (route) => {
+        const chain = backend.tryonControl.chains.find((entry) => entry.id !== foreign.id && entry.id === (route.request().postDataJSON() as { p_chain_id?: string }).p_chain_id);
+        lookups += chain ? 1 : 0;
+        if (chain && lookups === 1) {
+          // The run's own check still sees its chain running. Meanwhile the other device's chain finishes with a picture of its own.
+          foreign.state = 'complete';
+          stored(backend, null, [clothes.shirt.id, clothes.top2.id]);
+        }
+        if (chain && lookups === 2) {
+          // The queue's check of the given-up chain: its last step went through after all, and the picture is stored.
+          chain.state = 'complete';
+          const itemIds = chain.steps.map((step) => step.itemId);
+          const id = randomUUID();
+          backend.tryonControl.results.push({ id, owner: owners.a, outfitId: null, itemIds, image: backend.fixture, completedAtMs: Date.now() });
+          chain.resultId = id;
+        }
+        await route.fallback();
+      });
+    } }, existing);
+    await picturesShown(page, 2);
+    await quiet(page, 2_000);
+    // The outfit's garments were asked for once: the finished picture was not made again.
+    const firsts = requestsOf(api).filter((entry) => entry.step === 1);
+    expect(firsts).toHaveLength(1);
+    expect(lookups).toBeGreaterThanOrEqual(2);
+  });
+
   test('says when no picture could be made for some outfits', async ({ page }) => {
     const { api } = await start(page, { replies: [{ code: 'FILTERED', status: 422 }, { code: 'FILTERED', status: 422 }] });
     await expect(statusLine(page)).toHaveText(text('outfitgen.pictureMissing_other', 'en', { count: 2 }), { timeout: 30_000 });

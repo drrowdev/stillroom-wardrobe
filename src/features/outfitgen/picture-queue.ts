@@ -445,6 +445,10 @@ ull for a plan too short to get a picture, or 'unresolved' when the garments cou
 
   private async underLock(): Promise<'ran' | 'idle'> {
     const t = this.tryOn, o = this.outfit;
+    // First, this queue's own given-up chains must be shown to be over (their cancel was only sent). One of them may finish its picture
+    // meanwhile, so everything below is read and decided after this, never before. Kept apart from the best-effort foreign-count gate.
+    if (this.abandoned.size > 0 && !await this.settleAbandoned()) return this.disposed ? 'idle' : this.idle('stopping', PICTURE_LIMITS.pollMs);
+    if (this.disposed) return 'idle';
     // Consent is read again before every chain, so a withdrawal in another window is seen; unknown or failed means nothing is made.
     const consent = await readStatus(o, 'fresh');
     if (this.disposed) return 'idle';
@@ -462,8 +466,6 @@ ull for a plan too short to get a picture, or 'unresolved' when the garments cou
     if (status.results >= PICTURE_LIMITS.resultsStop) return this.idle('full', PICTURE_LIMITS.stopMs / 6);
     // A removed suggestion's chain that is not shown to be over may still claim: nothing new starts until it is.
     if (this.openChains.size > 0) return this.idle('cleanup', PICTURE_LIMITS.pollMs);
-    // The same for this queue's own given-up chains: their cancel was only sent. Kept apart from the best-effort count below.
-    if (this.abandoned.size > 0 && !await this.settleAbandoned()) return this.disposed ? 'idle' : this.idle('stopping', PICTURE_LIMITS.pollMs);
     const gate = reservedGate(this.reserved, status.results, ready.length, Date.now());
     this.reserved = gate.memory;
     if (gate.wait) return this.idle('otherPicture', PICTURE_LIMITS.pollMs);
