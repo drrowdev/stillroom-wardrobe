@@ -59,6 +59,18 @@ test.describe('AI-GUARD1 spending guard notice', () => {
     });
   }
 
+  test('a Resume whose reply is lost still clears the notice and tells automatic work it may start again', async ({ page }) => {
+    const api = await start(page, { paused: true });
+    await expect(notice(page)).toBeVisible();
+    api.guardControl.lostResume = true;
+    await page.evaluate(() => { (window as unknown as { resumed: number }).resumed = 0;
+      window.addEventListener('stillroom-ai-guard-resumed', () => { (window as unknown as { resumed: number }).resumed++; }); });
+    await notice(page).getByRole('button', { name: text('aiGuard.resume'), exact: true }).click();
+    await expect(notice(page)).toHaveCount(0);
+    expect(api.guardControl.resumes).toBe(1);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { resumed: number }).resumed)).toBeGreaterThan(0);
+  });
+
   test('a Stylist message refused as paused says so and is not offered again', async ({ page }) => {
     const api = await mockBackend(page);
     api.stylistControl.setup[owners.a] = { configured: true, activated: true };

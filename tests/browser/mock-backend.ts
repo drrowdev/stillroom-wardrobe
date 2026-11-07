@@ -722,7 +722,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     statusReads: 0,
   };
   // AI-GUARD1: which owners the spending guard has paused; Resume clears it.
-  const guardControl = { missing: false, paused: {} as Record<string, boolean>, statusReads: 0, resumes: 0 };
+  const guardControl = { missing: false, lostResume: false, paused: {} as Record<string, boolean>, statusReads: 0, resumes: 0 };
   const outfitgenControl = {
     missing: false,
     setup: {} as Record<string, Partial<OutfitGenSetup>>,
@@ -1021,6 +1021,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         guardControl.resumes++;
         const was = guardControl.paused[owner] === true;
         guardControl.paused[owner] = false;
+        if (guardControl.lostResume) { await route.abort('failed'); return; }
         await json({ code: 'OK', replayed: !was }); return;
       }
       guardControl.statusReads++;

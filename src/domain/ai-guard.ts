@@ -4,7 +4,7 @@
 
 export const AI_GUARD_SQLSTATE = 'AG001';
 export const AI_GUARD_CODE = 'PAUSED';
-/** Dispatched on window after a successful Resume, so automatic queues that stopped on PAUSED may start again. */
+/** Dispatched on window whenever a fresh status read confirms the account is not paused (including after a Resume whose reply was lost), so automatic queues that stopped on PAUSED may start again. */
 export const AI_GUARD_RESUMED_EVENT = 'stillroom-ai-guard-resumed';
 
 /** True when a failed RPC reply is the spending guard's refusal. A successful reply is never one. */
