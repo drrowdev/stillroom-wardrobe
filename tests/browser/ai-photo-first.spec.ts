@@ -450,7 +450,7 @@ test('status admission proves the issued bearer separately from legacy decoded-o
     }, { authorization: api.issuedWireAuthorization('a'), kind });
     expect(status).toBe(kind === 'valid' ? 200 : 401);
   }
-  expect(api.requests.slice(before)).toEqual(Array.from({ length: 4 }, () => ({
+  expect(api.requests.slice(before).filter((request) => request.path !== '/rest/v1/rpc/outfitgen_status')).toEqual(Array.from({ length: 4 }, () => ({
     method: 'POST', path: '/rest/v1/rpc/ai_status', owner: owners.a, ownerFilter: null,
   })));
   expect(api.statusProofs()).toEqual([

@@ -80,7 +80,7 @@ const READ_ONLY_RPCS = new Set(['admin_status', 'analyzed_item_save_preflight', 
   'image_change_requests', 'image_change_status', 'image_recovery_preflight', 'image_recovery_versions', 'item_attribution_history',
   'item_attribution_history_v2', 'attribution_digest',
   'item_deletion_operation_status', 'item_deletion_operations', 'item_deletion_status', 'restore_image_change_status',
-  'restore_item_save_status', 'tryon_person_photo_status_v1']);
+  'restore_item_save_status', 'tryon_person_photo_status_v1', 'outfitgen_list']);
 
 // Every row of the ten owner tables (paged until exhausted) and every stored object with its SHA-256, read as the owner.
 async function snapshot({ client, scope }: Owner): Promise<Snapshot> {
@@ -153,12 +153,12 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
   const storageWrites = (from: number) => requests.slice(from).filter(({ method, url }) =>
     method !== 'GET' && method !== 'HEAD' && new URL(url).pathname.startsWith('/storage/v1/object/'));
   const reservations = (from: number) => requests.slice(from).filter(({ url }) => /\/rest\/v1\/rpc\/reserve_/.test(new URL(url).pathname));
-  // ai_status, stylist_status, enhance_status and tryon_status expire and close the owner's old AI requests and try-on chains
+  // ai_status, stylist_status, enhance_status, tryon_status and outfitgen_status expire and close the owner's old AI requests and try-on chains
   // (private state the snapshots can't see), so none of them is a read-only RPC.
   // The app's Settings initialization may call them; they must finish before the restore baseline, and any later call is
   // refused and fails.
   const STATUS_RPC_PATHS = new Set(['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status',
-    '/rest/v1/rpc/tryon_status']);
+    '/rest/v1/rpc/tryon_status', '/rest/v1/rpc/outfitgen_status']);
   const isAiStatus = (request: import('@playwright/test').Request) =>
     request.method() === 'POST' && STATUS_RPC_PATHS.has(new URL(request.url()).pathname);
   const aiInFlight = new Set<import('@playwright/test').Request>();
@@ -343,7 +343,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     aiLocked = true;
     // Negative control: a query-bearing POST to each status RPC from the page must be refused by the route and counted by both.
     check(lateAiStatus === 0 && postLockAiStatus === 0);
-    for (const name of ['ai_status', 'stylist_status', 'enhance_status', 'tryon_status']) {
+    for (const name of ['ai_status', 'stylist_status', 'enhance_status', 'tryon_status', 'outfitgen_status']) {
       aiProbes++;
       const probe = await page.evaluate(async url => {
         try { await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' }); return 'reached'; } catch { return 'refused'; }
