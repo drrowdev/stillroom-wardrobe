@@ -99,7 +99,7 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
   const accounting = { basis: 'estimated', amountMicro: '71200', currency: 'USD' };
   type Call = { url: string; body: Record<string, unknown> | null; auth: string | null; at: number; contract: string | null };
   let clock = 0;
-  function backend(options: { status?: unknown; claim?: Record<string, unknown>; finish?: Record<string, unknown>;
+  function backend(options: { status?: unknown; claim?: Record<string, unknown>; claimStatus?: number; finish?: Record<string, unknown>;
     finishGate?: Promise<void> } = {}) {
     const calls: Call[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
@@ -109,7 +109,8 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
       if (url.endsWith('/auth/v1/user')) return Response.json({ id: OWNER, role: 'authenticated', is_anonymous: false });
       if (url.endsWith('/rpc/enhance_status')) return Response.json(options.status ?? status);
       if (url.endsWith('/rpc/enhance_claim')) return Response.json(options.claim ?? { code: 'OK', claimed: true,
-        manifestId: CLEANUP_MANIFEST, dispatchBeforeMs: Date.now() + 5000, requestSeconds: 85 });
+        manifestId: CLEANUP_MANIFEST, dispatchBeforeMs: Date.now() + 5000, requestSeconds: 85 },
+      options.claimStatus === undefined ? undefined : { status: options.claimStatus });
       if (url.endsWith('/rpc/enhance_finish')) {
         // Like a real fetch, an aborted signal fails the settlement: this proves which lifetime finish runs on.
         if (options.finishGate) await options.finishGate;
@@ -129,6 +130,15 @@ describe('enhance-photo handler (mocked Auth, RPC and image provider)', () => {
     method: 'POST', headers: { Authorization: 'Bearer fictional-user', 'Content-Type': 'image/jpeg', 'X-Stillroom-Request-Id': REQUEST, 'X-Stillroom-AI-Budget-Contract': '2', ...extra },
     body: bytes as BodyInit });
   const finishBody = (calls: Call[]) => calls.find((call) => call.url.endsWith('/rpc/enhance_finish'))?.body;
+
+  it('answers PAUSED, with no provider call and no finish, when the spending guard refuses the claim (AI-GUARD1)', async () => {
+    const calls = backend({ claim: { code: 'AG001', message: 'AI spending guard is paused', details: null, hint: null }, claimStatus: 400 });
+    const { transport } = provider(() => Response.json(imageBody()));
+    const response = await createEnhanceHandler(config, register, transport)(post());
+    expect([response.status, await response.json()]).toEqual([403, { code: 'PAUSED' }]);
+    expect(transport).not.toHaveBeenCalled();
+    expect(calls.map((call) => call.url.split('/').pop())).toEqual(['user', 'enhance_status', 'enhance_claim']);
+  });
 
   it('uses only the three enhancement RPCs', () => { expect(ENHANCE_RPCS).toEqual(['enhance_status', 'enhance_claim', 'enhance_finish']); });
 

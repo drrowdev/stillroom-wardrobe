@@ -721,6 +721,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     chats: [] as { owner: string; body: unknown }[],
     statusReads: 0,
   };
+  // AI-GUARD1: which owners the spending guard has paused; Resume clears it.
+  const guardControl = { missing: false, lostResume: false, paused: {} as Record<string, boolean>, statusReads: 0, resumes: 0 };
   const outfitgenControl = {
     missing: false,
     setup: {} as Record<string, Partial<OutfitGenSetup>>,
@@ -1012,6 +1014,19 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       // Like PostgREST, a profile reply holds only the selected columns.
       const select = url.pathname === '/rest/v1/profiles' ? url.searchParams.get('select') : null;
       await json(select ? Object.fromEntries(select.split(',').filter(column => column in profile).map(column => [column, profile[column]])) : profile); return;
+    }
+    if (url.pathname === '/rest/v1/rpc/ai_guard_status_v1' || url.pathname === '/rest/v1/rpc/ai_guard_resume_v1') {
+      if (guardControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
+      if (url.pathname.endsWith('ai_guard_resume_v1')) {
+        guardControl.resumes++;
+        const was = guardControl.paused[owner] === true;
+        guardControl.paused[owner] = false;
+        if (guardControl.lostResume) { await route.abort('failed'); return; }
+        await json({ code: 'OK', replayed: !was }); return;
+      }
+      guardControl.statusReads++;
+      await json(guardControl.paused[owner] ? { code: 'OK', paused: true, pausedAtMs: Date.now(), spentMicro: '26138140', limitMicro: '25000000' }
+        : { code: 'OK', paused: false }); return;
     }
     if (url.pathname === '/rest/v1/rpc/stylist_status' || url.pathname === '/rest/v1/rpc/stylist_set_consent') {
       if (stylistControl.missing) { await json({ code: 'PGRST202', details: null, hint: null, message: 'Could not find the function' }, 404); return; }
@@ -2338,7 +2353,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     }
     await json({ message: 'Unknown browser fixture route' }, 404);
   }).catch(async () => { await receiver.close(); throw new Error('Fixture routing unavailable.'); });
-  return { provenance: provenanceRows, stylistControl, outfitgenControl, enhanceControl, tryonControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, trashControl, holdFeedbackReads, outfitControl, outfitLifecycleControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
+  return { provenance: provenanceRows, stylistControl, guardControl, outfitgenControl, enhanceControl, tryonControl, adminControl, restoreControl, profiles, preferences, items, images, wearEvents, wearLinks, outfits, outfitItems, combinationRules, suggestionFeedback, exportControl, feedbackControl, pairControl, trashControl, holdFeedbackReads, outfitControl, outfitLifecycleControl, wearControl, files, requests, fixture, deletionClaims, imageChanges, deletionOperations, uploadWire: receiver.state, wireDiagnostic,
     uploadWireUrl: receiver.url,
     analysisWire: receiver.analysisState, rawAnalysisObservation, admitAiStatus, photoModelNotice, negotiatedStatus,
     statusProofs: (): readonly StatusProof[] => statusProofs.map((proof) => ({ ...proof })),

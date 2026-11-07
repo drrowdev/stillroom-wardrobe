@@ -126,7 +126,7 @@ describe('outfit generation handler (mocked Auth, RPC, Storage and provider)', (
   const accounting = { basis: 'estimated', amountMicro: '90000', currency: 'USD' };
   const plan = (items: OutfitGenItem[] = wardrobe(), over: Record<string, unknown> = {}) => ({ code: 'OK', items, pairs: [], disliked: [], known: [], pendingRoom: 40, ...over });
   type Call = { url: string; body: Record<string, unknown> | null; auth: string | null };
-  function backend(options: { status?: unknown; plan?: unknown; claim?: Record<string, unknown>; finish?: Record<string, unknown>; image?: (n: number) => Response | null } = {}) {
+  function backend(options: { status?: unknown; plan?: unknown; claim?: Record<string, unknown>; claimStatus?: number; finish?: Record<string, unknown>; image?: (n: number) => Response | null } = {}) {
     const calls: Call[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const parsed = typeof init.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null;
@@ -135,7 +135,8 @@ describe('outfit generation handler (mocked Auth, RPC, Storage and provider)', (
       if (url.endsWith('/rpc/outfitgen_status')) return Response.json(options.status ?? status);
       if (url.endsWith('/rpc/outfitgen_plan')) return Response.json(options.plan ?? plan());
       if (url.endsWith('/rpc/outfitgen_assess')) return Response.json({ code: 'OK', assessed: 1 });
-      if (url.endsWith('/rpc/outfitgen_claim')) return Response.json(options.claim ?? { code: 'OK', claimed: true, manifestId: OUTFITGEN_MANIFEST, dispatchBeforeMs: Date.now() + 60000 });
+      if (url.endsWith('/rpc/outfitgen_claim')) return Response.json(options.claim ?? { code: 'OK', claimed: true, manifestId: OUTFITGEN_MANIFEST, dispatchBeforeMs: Date.now() + 60000 },
+        options.claimStatus === undefined ? undefined : { status: options.claimStatus });
       if (url.endsWith('/rpc/outfitgen_finish')) return Response.json(options.finish ?? { code: 'OK', accounting, recorded: { suggested: 2, declined: 1, assessed: 3 } });
       if (url.includes('/storage/v1/object/wardrobe/')) {
         const n = Number(/\/wardrobe\/[^/]+\/00000000-0000-4000-8000-(\d{12})\//.exec(url)?.[1] ?? 0);
@@ -167,6 +168,16 @@ describe('outfit generation handler (mocked Auth, RPC, Storage and provider)', (
     body: JSON.stringify(value) });
   const body = (over: Record<string, unknown> = {}) => ({ requestId: REQUEST, mode: 'manual', language: 'en', ...over });
   const names = (calls: Call[]) => calls.map((call) => call.url.split('/').pop());
+
+  it('answers PAUSED, with no provider call and no finish, when the spending guard refuses the claim (AI-GUARD1)', async () => {
+    const calls = backend({ claim: { code: 'AG001', message: 'AI spending guard is paused', details: null, hint: null }, claimStatus: 400 });
+    const { transport } = provider();
+    const response = await createOutfitGenHandler(config, registrar().register, transport)(post(body()));
+    expect([response.status, await response.json()]).toEqual([403, { code: 'PAUSED' }]);
+    expect(transport).not.toHaveBeenCalled();
+    expect(names(calls).at(-1)).toBe('outfitgen_claim');
+    expect(names(calls)).not.toContain('outfitgen_finish');
+  });
 
   it('uses only the five outfit generation RPCs', () => {
     expect(OUTFITGEN_RPCS).toEqual(['outfitgen_status', 'outfitgen_plan', 'outfitgen_assess', 'outfitgen_claim', 'outfitgen_finish']);

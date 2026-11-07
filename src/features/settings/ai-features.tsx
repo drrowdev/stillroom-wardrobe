@@ -9,6 +9,7 @@ import type { Language, Translate } from '../../i18n';
 import { AdminEntry } from '../admin/admin-entry';
 import type { StylistStore } from '../stylist/stylist-store';
 import { AiSettings } from './ai-settings';
+import { AiGuardNotice } from './ai-guard-notice';
 import { EnhanceSettings } from './enhance-settings';
 import { enhanceStoreFor, type EnhanceStore } from './enhance-store';
 import { StylistSettings } from './stylist-settings';
@@ -29,6 +30,7 @@ export function AiFeatures({ client, ai, controller, scope, profile, stylist, bu
   const outfits = outfitGenStoreFor(client, scope);
   const spend = useSpend(scope, stylist, enhance, tryOn, outfits);
   return <div className="settings-group-card ai-features">
+    <AiGuardNotice ai={ai} language={language} online={online} t={t} />
     <div className="ai-spend-header">
       {spend.snapshot && <SpendSummary snapshot={spend.snapshot} language={language} t={t} />}
       <AdminEntry client={client} scope={scope} t={t} />

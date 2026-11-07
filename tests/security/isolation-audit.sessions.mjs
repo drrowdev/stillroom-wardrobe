@@ -697,6 +697,17 @@ async function foreignMatrix(attacker, victim) {
   const outfitgenList = await probeRpc(attacker, victim, 'outfitgen_list', {});
   if (control(attacker, 'outfitgen_list', outfitgenList.ok && isDeepStrictEqual(outfitgenList.data, { code: 'OK', suggestions: [] }),
     describe(outfitgenList))) tag('outfitgen_list', `${d}:owner-only`);
+  // AI-GUARD1: status and Resume act only on the caller's own controls row. Neither fixture is paused here, so status reads
+  // unpaused, Resume is a replayed no-op, and the peer's own status is unchanged afterwards. A real pause, its refusal of every
+  // admission and its Resume are in tests/integration/aiguard.sessions.mjs.
+  const guardStatus = await probeRpc(attacker, victim, 'ai_guard_status_v1', {});
+  if (control(attacker, 'ai_guard_status_v1', matchOutcome({ status: 200, data: { code: 'OK', paused: false } }, guardStatus),
+    describe(guardStatus))) tag('ai_guard_status_v1', `${d}:owner-only`);
+  const guardResume = await probeRpc(attacker, victim, 'ai_guard_resume_v1', {});
+  if (control(attacker, 'ai_guard_resume_v1', matchOutcome({ status: 200, data: { code: 'OK', replayed: true } }, guardResume),
+    describe(guardResume))) tag('ai_guard_resume_v1', `${d}:owner-only`);
+  const peerGuard = await call(victim, 'ai_guard_status_v1', {});
+  need(matchOutcome({ status: 200, data: { code: 'OK', paused: false } }, peerGuard), `${stage}: peer guard status after the caller's Resume ${describe(peerGuard)}`);
   // Enhancement status and consent act only on the caller's own controls, like the stylist pair.
   const enhance = await probeRpc(attacker, victim, 'enhance_status', {});
   if (control(attacker, 'enhance_status', enhance.ok && typeof enhance.data?.code === 'string'
@@ -1239,6 +1250,8 @@ async function freezeCase(frozen, other) {
       ['tryon_person_photo_get_v1', {}, UNAVAILABLE],
       ['tryon_person_photo_delete_v1', {}, UNAVAILABLE],
       ['tryon_person_photo_put_v1', { p_jpeg_base64: null, p_sha256: null }, UNAVAILABLE],
+      ['ai_guard_status_v1', {}, UNAVAILABLE],
+      ['ai_guard_resume_v1', {}, UNAVAILABLE],
       ['admin_status', {}, UNAVAILABLE],
       ['admin_ai_spending', { p_months: 6 }, UNAVAILABLE],
       ['image_provenance_v1', {}, { status: 403, code: '42501' }],

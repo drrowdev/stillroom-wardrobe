@@ -98,6 +98,8 @@ export const EXPOSED_RPCS = Object.freeze([
   fn('outfitgen_keep', 'uuid, uuid', ['p_id', 'p_outfit_id']),
   fn('outfitgen_remove', 'uuid', ['p_id']),
   fn('outfitgen_undo_remove', 'uuid', ['p_id']),
+  fn('ai_guard_status_v1', '', []),
+  fn('ai_guard_resume_v1', '', []),
 ]);
 
 // Public functions reachable only with service credentials (Edge/operator) or only by the database owner (scheduled
@@ -146,6 +148,7 @@ export const SERVICE_ONLY_RPCS = Object.freeze([
   fn('outfitgen_finish', 'uuid, uuid, text, jsonb, jsonb, uuid[]',
     ['p_owner_id', 'p_request_id', 'p_code', 'p_usage', 'p_results', 'p_assessed']),
   fn('outfitgen_expire_due', 'integer', ['p_limit']),
+  fn('ai_guard_sweep', 'integer', ['p_limit']),
 ]);
 
 // Private helpers that RLS/Storage policies evaluate as `authenticated`; their bodies are pinned to migrations.
@@ -216,6 +219,7 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'outfitgen_permission(public.profiles, private.ai_controls)', 'outfitgen_expire(uuid, timestamp with time zone, integer)',
   'outfitgen_record(uuid, uuid, jsonb, uuid[], private.ai_execution_manifests)',
   'outfitgen_replay(private.ai_usage_evidence, private.ai_usage, public.profiles, private.ai_controls)',
+  'ai_guard_enforce()',
 ]);
 
 // Supabase-provided GraphQL entrypoint; its privileges are provider-managed and recorded, not asserted.
@@ -580,6 +584,8 @@ export const COVERAGE_REQUIREMENTS = Object.freeze({
   outfitgen_keep: req([], { unverified: UNREACHABLE_OUTFITGEN }),
   outfitgen_remove: req([], { unverified: UNREACHABLE_OUTFITGEN }),
   outfitgen_undo_remove: req([], { unverified: UNREACHABLE_OUTFITGEN }),
+  ai_guard_status_v1: req([], { ownerOnly: true }),
+  ai_guard_resume_v1: req([], { ownerOnly: true }),
 });
 const DIRECTIONS = [['A', 'B'], ['B', 'A']];
 const TAG = /^(?:anon|normal-[AB]|[AB]:control|[AB]>[AB]:(?:owner-only|admin-denied|mixed|collision|unverified|tuple|ref:[A-Za-z]+))$/;

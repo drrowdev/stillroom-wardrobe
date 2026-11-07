@@ -58,14 +58,14 @@ export function browserEnvironment(): RunEnvironment {
 }
 
 export type FailureKind = 'filtered' | 'busy' | 'allowance' | 'failed' | 'lost' | 'mismatch'
-  | 'turnedOff' | 'resultsFull' | 'unavailable';
+  | 'turnedOff' | 'resultsFull' | 'unavailable' | 'paused';
 /**
  * What each failure offers first; Close is always offered as well. A block can't be attributed to the photo, a garment
  * or the output, and resending the same step would likely be blocked again, so a block offers another photo, not a retry.
  */
 export const failureAction: Readonly<Record<FailureKind, 'retry' | 'photo' | 'restart' | null>> = Object.freeze({
   filtered: 'photo', busy: 'retry', allowance: null, failed: 'retry', lost: 'restart',
-  mismatch: 'restart', turnedOff: null, resultsFull: null, unavailable: null,
+  mismatch: 'restart', turnedOff: null, resultsFull: null, unavailable: null, paused: null,
 });
 
 export type RunPhase =
@@ -97,6 +97,7 @@ const failureOf = (code: Exclude<TryOnCode, 'OK'>): FailureKind => {
     case 'CHAIN_MISMATCH': return 'mismatch';
     case 'WITHDRAWN': case 'CONSENT_REQUIRED': return 'turnedOff';
     case 'RESULTS_FULL': return 'resultsFull';
+    case 'PAUSED': return 'paused';
     default: return 'unavailable';
   }
 };

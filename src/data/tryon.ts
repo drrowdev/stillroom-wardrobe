@@ -16,7 +16,7 @@ import { sessionOwner } from '../auth/auth-storage';
 export const tryOnCodes = ['OK', 'INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'NOT_FOUND', 'TERMINAL',
   'CONFLICT', 'CHAIN_MISMATCH', 'WITHDRAWN', 'CANCELLED', 'EXPIRED', 'RESULTS_FULL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA',
   'NO_GARMENTS', 'FILTERED', 'OUTPUT_REJECTED', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE',
-  'CONFIG_CHANGED', 'BUSY', 'TIMEOUT'] as const;
+  'CONFIG_CHANGED', 'BUSY', 'TIMEOUT', 'PAUSED'] as const;
 export type TryOnCode = (typeof tryOnCodes)[number];
 export class TryOnError extends Error {
   constructor(readonly code: TryOnCode) { super(code); this.name = 'TryOnError'; }

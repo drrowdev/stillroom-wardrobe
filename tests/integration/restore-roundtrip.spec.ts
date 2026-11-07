@@ -80,7 +80,7 @@ const READ_ONLY_RPCS = new Set(['admin_status', 'analyzed_item_save_preflight', 
   'image_change_requests', 'image_change_status', 'image_recovery_preflight', 'image_recovery_versions', 'item_attribution_history',
   'item_attribution_history_v2', 'attribution_digest',
   'item_deletion_operation_status', 'item_deletion_operations', 'item_deletion_status', 'restore_image_change_status',
-  'restore_item_save_status', 'tryon_person_photo_status_v1', 'outfitgen_list']);
+  'restore_item_save_status', 'tryon_person_photo_status_v1', 'outfitgen_list', 'ai_guard_status_v1']);
 
 // Every row of the ten owner tables (paged until exhausted) and every stored object with its SHA-256, read as the owner.
 async function snapshot({ client, scope }: Owner): Promise<Snapshot> {
@@ -532,7 +532,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     if (lateAiStatus !== aiProbes || postLockAiStatus !== aiProbes) {
       throw new Error(`A status RPC called after the restore baseline: ${postLockAiStatus - aiProbes} seen, ${lateAiStatus - aiProbes} refused beyond the probe.`);
     }
-    tripped('Save or AI RPCs', paths(requests).filter(path => /\/rpc\/(reserve_item_save|reserve_analyzed_item_save|ai_|stylist_|enhance_)/.test(path)
+    tripped('Save or AI RPCs', paths(requests).filter(path => /\/rpc\/(reserve_item_save|reserve_analyzed_item_save|ai_(?!guard_status_v1$)|stylist_|enhance_)/.test(path)
       && !STATUS_RPC_PATHS.has(path)));
     unchanged('B', await snapshot(owner), bBefore);
   } catch (problem) {

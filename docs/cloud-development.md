@@ -2168,3 +2168,62 @@ deploy of this packet is a separate owner step.
 - **Review fixes (Sol, PR #210).** A run is gated again right before the request is sent (consent change pending, consent off, limit, offline, newer Save), so Turn off can't race a run; a newer Save supersedes an older trigger even while it loads; a list read that began before a decision can't bring a decided card back; status and list parsers read counts above the server cap instead of refusing them; Undo answers PENDING_FULL when 40 suggestions are pending (forward migration `20261107090000_outfitgen_undo_capacity.sql`, its exact-body proof in `tests/unit/outfitgen-schema.test.ts` and a probe in `tests/integration/outfitgen.sessions.mjs`). Accepted residual (lean mode, one owner): two Undos, or an Undo racing a run's recording, at exactly the cap can overshoot to 41 pending; the parsers read such counts and nothing breaks. The notice now says that kept, removed and judged-but-not-suggested sets stay stored (reason and garment list; nothing expires on time) until one of their garments is permanently deleted or the account is.
 - **Not verified here.** Real Azure behaviour, how long a run takes on a phone, and whether a mobile browser keeps a 90-second
   request alive while the app is in the background (a cut request ends as a quiet failure and the server expiry job settles it).
+
+## AI-GUARD1 backend runaway protection - 7 November 2026
+
+Owner request of 7 November 2026: a bug, a loop or a stuck AI function must not be able to burn the whole monthly allowance. This is an
+emergency stop, not a quota: the earlier decision to remove pacing limits and keep integrity bounds stands, and nothing here throttles
+ordinary use. It protects every AI purpose through the one place they share.
+
+- **What it does.** If one account's spending in the trailing 60 minutes, across every purpose, passes a threshold, the account is
+  **paused**: every new AI admission is refused until the owner presses Resume in Settings. Settlement of work already started, the
+  expiry jobs, consent withdrawal and account deletion are not admissions and keep working.
+- **Where it sits.** Every admission (analysis `ai_begin_owner`, `stylist_claim`, `enhance_claim`, every `tryon_claim` step,
+  `outfitgen_claim`) inserts one `reserved` or `held` row into `private.ai_usage` in the same transaction as its checks. One
+  `BEFORE INSERT` trigger on exactly those rows (`ai_usage_pause_guard`) looks the owner's pause up by primary key and raises the dedicated
+  SQLSTATE `AG001`; the claim rolls back, so no usage row exists and no provider call can follow. No claim, settlement, expiry or consent
+  body is replaced (no exact-body proof changes). A trigger cannot latch (its transaction rolls back), so a once-a-minute sweep
+  (`public.ai_guard_sweep`, cron job `stillroom-ai-guard`, created **inactive** by its own migration like the expiry jobs) sets the pause.
+  The sweep is best effort and skips a controls row a claim holds; a missed minute only delays a pause by a minute (the image purposes
+  are capped by provider capacity at about 2 calls a minute anyway).
+- **Measure and threshold.** The sum of `accounted_micro` over rows created in the last 60 minutes and after the last Resume, all
+  purposes together: settled rows at their recorded cost, held rows at their reserved amount (conservative), analysis holds at 1 micro (so
+  an in-flight analysis is understated until it settles). The threshold is `private.ai_controls.ai_guard_hour_micro` when set, otherwise
+  **half of the monthly allowance** (USD 25 at the current USD 50). Sol's legitimate extremes: 50 clean-ups reserve USD 15, 50 analyses
+  cost up to USD 5.63 (USD 20.63 together), a six-step try-on USD 2.16, six outfit batches USD 2.24; with a chain on top the legitimate peak is
+  USD 22.79, below the threshold. **Honest bound:** this limits a runaway to about half a month of spending, not to a few dollars. The
+  independent net is an Azure budget and cost alert on the resource (owner action, outside the app's ledger, which records the app's
+  view and not the invoice).
+- **Resume.** `ai_guard_resume_v1` (approved owner only) clears the pause and restarts the window at that moment, so the spending that caused
+  the pause is not counted again. `ai_guard_status_v1` (owner only) tells Settings whether the account is paused and with which amounts.
+  Settings shows a plain notice with Resume at the top of the AI features card while paused (EN/FI/SV, `aiGuard.*`).
+- **PAUSED in the Edge functions and clients.** PostgREST answers `AG001` as a non-2xx reply whose `code` is the SQLSTATE. All five admission
+  handlers (`analyze-clothing`, `stylist-chat`, `enhance-photo`, `try-on`, `outfit-generate`) read it through `guardRefusal`
+  (`src/domain/ai-guard.ts`) and answer the closed code `PAUSED` (HTTP 403), never the generic failure. Every client treats it as
+  terminal: analysis and the bulk queue stop (`guard` halt), clean-up shows the paused line, the Stylist says it is paused and offers no
+  retry, a try-on step ends as `paused` with no retry, and automatic outfit runs stay off until Resume (a manual run may try again).
+- **Owner adjustment.** `update private.ai_controls set ai_guard_hour_micro = <micro> where owner_id = '<owner>';` (null restores half the
+  allowance). The pause itself is data, not configuration: `select owner_id, ai_guard_paused_at, ai_guard_limit_micro,
+  ai_guard_window_micro from private.ai_controls where ai_guard_paused_at is not null;` shows who is paused and why.
+- **Files.** `20261107100000_ai_guard.sql` (five nullable columns and a pair check, the trigger function and trigger, the sweep and the two
+  owner functions, grants), `20261107100100_ai_guard_schedule.sql` (the inactive job), `src/domain/ai-guard.ts`, the five handlers,
+  `src/data/ai.ts` (`guardStatus`, `resumeGuard`), `src/features/settings/ai-guard-notice.tsx`, and the PAUSED mapping in each client.
+  The migration is `begin; ... commit;` with no wrapper dollar-quote tag, so the guarded hosted install can run it inside its `DO` block.
+- **Validation.** Unit: `tests/unit/ai-guard.test.ts` (replies, migration source, grants), a PAUSED case in each handler test (no provider
+  call, no finish), the client mappings, the registries (`preservation`, `ci-storage-guard`, `ai-purge-schedule`). Browser:
+  `tests/browser/ai-guard.spec.ts` (notice, Resume, 320 px and 200 % text in three languages, a paused Stylist message). CI-only:
+  `tests/integration/aiguard.sessions.mjs` from the preservation rehearsal (a legitimate peak of 50 clean-ups, 50 analyses and a six-step
+  chain does not latch; a burst latches one owner only; every purpose is refused with `AG001` and no row while paused; settlement, expiry and
+  withdrawal still work; Resume re-opens admission; a second burst and an owner threshold latch again). The SQL was also smoke-run once on a
+  scratch in-process PostgreSQL (PGlite) with stubs; that is not the CI rehearsal.
+- **Rollout (each step a separate owner or coordinator gate).** 1. Apply `20261107100000` and `20261107100100` (the job stays inactive).
+  2. Redeploy the five Edge functions. 3. Pages. 4. Verify: `select jobname, active from cron.job where jobname = 'stillroom-ai-guard';`
+  shows `f`, and a normal AI call still works. 5. Activate the job (`select cron.alter_job(<jobid>, active := true);`). 6. Check
+  `cron.job_run_details` shows a successful run each minute. A dead job means no new pause is latched (a pause already set keeps
+  enforcing); the runbook check is the run history. Old app on a new database: nothing changes until a pause; a paused account then shows
+  the old generic failure line. Backout: `update private.ai_controls set ai_guard_paused_at = null, ai_guard_limit_micro = null,
+  ai_guard_window_micro = null;` and deactivate the job. **The owner-run notice SQL that activates automatic outfit pictures
+  (OUTFITGEN2) waits for this guard to be active.**
+- **Does not catch.** A call that costs more than its reservation (the envelope checks and anomaly shutdown remain the control), a slow loop
+  that stays under the threshold (the monthly allowance bounds it), spending outside the ledger, a dead sweep job, and a cheap analysis loop
+  below the threshold. A same-input loop detector and per-purpose ceilings were deliberately left out (lean mode).

@@ -2,6 +2,7 @@ import type { OwnerScope } from '../auth/session';
 import type { AiContext } from '../domain/ai-draft';
 import { hasOnlyDataKeys, isAiCounter, isImageSha256 } from '../domain/ai-analysis';
 import { aiBudgetHeaders } from '../domain/ai-budget';
+import { parseAiGuardResume, parseAiGuardStatus, type AiGuardResume, type AiGuardStatus } from '../domain/ai-guard';
 import { canAnalyze, isAiCode, isProfileVersion, parseAiStatus, parseAnalysisReply, type AiCode } from '../domain/ai-controls';
 import { isUuid } from '../domain/wardrobe';
 import type { AnalyzedSaveAttempt } from '../domain/analyzed-save';
@@ -57,7 +58,8 @@ export class AiClient {
     | '/rest/v1/rpc/ai_analysis_status' | '/rest/v1/rpc/ai_request_control' | '/functions/v1/analyze-clothing'
     | '/rest/v1/rpc/stylist_status' | '/rest/v1/rpc/stylist_set_consent' | '/functions/v1/stylist-chat'
     | '/rest/v1/rpc/outfitgen_status' | '/rest/v1/rpc/outfitgen_set_consent' | '/rest/v1/rpc/outfitgen_list' | '/rest/v1/rpc/outfitgen_keep'
-    | '/rest/v1/rpc/outfitgen_remove' | '/rest/v1/rpc/outfitgen_undo_remove' | '/functions/v1/outfit-generate',
+    | '/rest/v1/rpc/outfitgen_remove' | '/rest/v1/rpc/outfitgen_undo_remove' | '/functions/v1/outfit-generate'
+    | '/rest/v1/rpc/ai_guard_status_v1' | '/rest/v1/rpc/ai_guard_resume_v1',
     body: object | Blob, ms: number, extra: Record<string, string> = {}, outer?: AbortSignal, beforeSend?: BeforeSend) {
     return this.bounded(ms, async (signal, wait) => {
       if (signal.aborted) throw new AiError('TIMEOUT');
@@ -114,6 +116,22 @@ export class AiClient {
     const value = parseAiStatus(reply.value);
     if (reply.status !== 200 || !value) throw new AiError('UNAVAILABLE');
     return value;
+  }
+  /** AI-GUARD1: whether the spending guard has paused this account. `missing` is only PostgREST's "function not found" reply. */
+  async guardStatus(signal?: AbortSignal): Promise<{ kind: 'missing' } | { kind: 'ready'; status: AiGuardStatus }> {
+    const reply = await this.request('/rest/v1/rpc/ai_guard_status_v1', {}, 5000, {}, signal);
+    if (reply.status === 404 && typeof reply.value === 'object' && reply.value !== null
+      && (reply.value as { code?: unknown }).code === 'PGRST202') return { kind: 'missing' };
+    const status = reply.status === 200 ? parseAiGuardStatus(reply.value) : null;
+    if (status === null || status === 'UNAVAILABLE') throw new AiError('UNAVAILABLE');
+    return { kind: 'ready', status };
+  }
+  /** Resume after a pause. A thrown error means the outcome is unknown; the caller reads the status again. */
+  async resumeGuard(signal?: AbortSignal): Promise<AiGuardResume> {
+    const reply = await this.request('/rest/v1/rpc/ai_guard_resume_v1', {}, 5000, {}, signal);
+    const result = reply.status === 200 ? parseAiGuardResume(reply.value) : null;
+    if (result === null) throw new AiError('UNAVAILABLE');
+    return result;
   }
   /** The Settings read: asks for status version 2 and requires its notice field. Other callers use status. */
   async settingsStatus(signal?: AbortSignal) {

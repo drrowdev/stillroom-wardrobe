@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createClient, type Session } from '@supabase/supabase-js';
 import type { Database } from '../../src/data/database.types';
 import type { OutfitGenClient } from '../../src/data/outfitgen';
+import { AI_GUARD_RESUMED_EVENT } from '../../src/domain/ai-guard';
 import { OUTFITGEN_MANIFEST, OUTFITGEN_MODEL } from '../../src/domain/outfitgen';
 import {
   AUTO_COOLDOWN_MS, autoBlock, outfitGenView, parseDecision, parseGenerateReply, parseOutfitGenStatus, parseSuggestionList,
@@ -67,6 +68,7 @@ describe('suggested outfits: closed replies', () => {
     expect(parseGenerateReply(200, { code: 'OK', suggested: 2 })).toEqual({ code: 'FAILED' });
     expect(parseGenerateReply(429, { code: 'COOLDOWN' })).toEqual({ code: 'COOLDOWN' });
     expect(parseGenerateReply(503, { code: 'SOMETHING' })).toEqual({ code: 'FAILED' });
+    expect(parseGenerateReply(403, { code: 'PAUSED' })).toEqual({ code: 'PAUSED' });
     expect(parseGenerateReply(200, { code: 'BUSY' })).toEqual({ code: 'FAILED' });
   });
   it('counts toward the shared monthly figure like the other purposes', () => {
@@ -178,6 +180,24 @@ describe('suggested outfits: automatic runs', () => {
     await runAuto(failing.store, 'en');
     await runAuto(failing.store, 'en');
     expect(failing.fake.generate).toHaveBeenCalledTimes(1);
+  });
+  it('stops automatic runs on PAUSED until Resume, and a manual run says so plainly (AI-GUARD1)', async () => {
+    const events = new EventTarget();
+    vi.stubGlobal('window', events);
+    const h = harness();
+    h.fake.generate.mockResolvedValue({ code: 'PAUSED' });
+    await runAuto(h.store, 'en');
+    expect(h.store.guardPaused).toBe(true);
+    // Even after the local cooldown would have ended, no automatic run is sent.
+    h.store.failedAtMs = null;
+    await runAuto(h.store, 'en');
+    expect(h.fake.generate).toHaveBeenCalledTimes(1);
+    expect(manualNotices({ code: 'PAUSED' })[0]!.key).toBe('aiGuard.paused');
+    events.dispatchEvent(new Event(AI_GUARD_RESUMED_EVENT));
+    expect(h.store.guardPaused).toBe(false);
+    h.fake.generate.mockResolvedValue({ code: 'OK', suggested: 1, judged: 4, remaining: false });
+    await runAuto(h.store, 'en');
+    expect(h.fake.generate).toHaveBeenCalledTimes(2);
   });
   it('goes on only while the server says more is left, and at most three calls in a scope', async () => {
     const h = harness();

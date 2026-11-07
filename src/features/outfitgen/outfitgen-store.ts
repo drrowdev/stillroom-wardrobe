@@ -5,6 +5,7 @@
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import { readConfiguration, type PublicConfig } from '../../data/config';
+import { AI_GUARD_RESUMED_EVENT } from '../../domain/ai-guard';
 import { OutfitGenClient } from '../../data/outfitgen';
 import {
   autoBlock, outfitGenView, outfitGenLimits, shownOutfitGenView, AUTO_SCOPE_CALLS,
@@ -55,6 +56,8 @@ export class OutfitGenStore {
   /** True from the start of an automatic run to its end, so triggers never overlap. */
   autoActive = false;
   autoCalls = 0;
+  /** Set when a run met the spending guard's PAUSED outcome: automatic runs stay off until Resume, or until a manual run succeeds. */
+  guardPaused = false;
   failedAtMs: number | null = null;
   noticeAt = 0;
   disposed = false;
@@ -62,6 +65,11 @@ export class OutfitGenStore {
     this.api = new OutfitGenClient(client, config, scope);
     scope.signal.addEventListener('abort', () => this.dispose(), { once: true });
     if (scope.signal.aborted) this.dispose();
+    if (typeof window !== 'undefined') {
+      const resumed = () => { this.guardPaused = false; };
+      window.addEventListener(AI_GUARD_RESUMED_EVENT, resumed);
+      scope.signal.addEventListener('abort', () => window.removeEventListener(AI_GUARD_RESUMED_EVENT, resumed), { once: true });
+    }
   }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   get = () => this.state;
@@ -221,7 +229,7 @@ function dispatchBlock(store: OutfitGenStore, auto: boolean, current: () => bool
  * it and starts the local cooldown. Nothing here retries, and offline or failed runs say nothing.
  */
 export async function runAuto(store: OutfitGenStore, language: OutfitGenLanguage, current: () => boolean = () => true): Promise<void> {
-  if (store.disposed || store.autoActive || store.get().running) return;
+  if (store.disposed || store.autoActive || store.get().running || store.guardPaused) return;
   store.autoActive = true;
   let ran = false;
   try {
@@ -240,6 +248,7 @@ export async function runAuto(store: OutfitGenStore, language: OutfitGenLanguage
       if (store.disposed) return;
       if (reply.code === 'NOT_SENT') { store.autoCalls--; return; }
       ran = true;
+      if (reply.code === 'PAUSED') { store.guardPaused = true; store.failedAtMs = performance.now(); return; }
       if (reply.code !== 'OK') { if (reply.code !== 'PENDING_FULL') store.failedAtMs = performance.now(); return; }
       if (!reply.remaining || reply.judged === 0 || store.autoCalls >= AUTO_SCOPE_CALLS) return;
     }
@@ -262,6 +271,7 @@ export function manualNotices(reply: GenerateReply): { key: MessageKey; count?: 
     case 'RATE_LIMIT': case 'COOLDOWN': return [{ key: 'outfitgen.rateLimit' }];
     case 'PENDING_FULL': return [{ key: 'outfitgen.full' }];
     case 'ALLOWANCE': return [{ key: 'outfitgenC.limit' }];
+    case 'PAUSED': return [{ key: 'aiGuard.paused' }];
     default: return [{ key: 'outfitgen.failed' }];
   }
 }
@@ -295,6 +305,7 @@ export async function runManual(store: OutfitGenStore, language: OutfitGenLangua
     store.notice(status === null ? { key: 'outfitgen.failed' } : status && outfitGenLimits(status).reached ? { key: 'outfitgenC.limit' } : viewOf(now).run ? { key: 'outfitgen.failed' } : { key: 'outfitgen.off' });
     return;
   }
+  store.guardPaused = reply.code === 'PAUSED' ? true : reply.code === 'OK' ? false : store.guardPaused;
   store.notice(...manualNotices(reply));
   if (reply.code === 'OK' || rereadCodes.has(reply.code)) void refreshAfterRun(store);
 }

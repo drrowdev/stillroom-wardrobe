@@ -107,7 +107,7 @@ export function silentUnknown(memory: EnhanceMemory, now: number): boolean {
  * What a new photo gets when it isn't sent: nothing, the generic line, the allowance line, or (BG2c) the line asking for a
  * crop to one garment when clean-up was ready but the crop held separate items of comparable size.
  */
-export type EnhanceLine = 'none' | 'generic' | 'allowance' | 'ambiguous';
+export type EnhanceLine = 'none' | 'generic' | 'allowance' | 'ambiguous' | 'paused';
 export function lineWhenNotSent(availability: EnhanceAvailability, memory: EnhanceMemory, now: number): EnhanceLine {
   if (availability === 'off') return 'none';
   if (availability === 'unknown') return silentUnknown(memory, now) ? 'none' : 'generic';

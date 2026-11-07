@@ -524,10 +524,10 @@ describe('local tag suggestions from style words (G1)', () => {
 
 describe('AI status phases', () => {
   const base: AiPhaseInput = { status: 'idle', code: null, reason: null, working: false, polling: null, manual: false, applied: false };
-  it('maps every reply code to off, limit or the neutral failure', () => {
+  it('maps every reply code to off, limit, paused or the neutral failure', () => {
     const off = ['CONSENT_REQUIRED', 'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED'];
     for (const code of aiCodes) {
-      expect(phaseForCode(code)).toBe(off.includes(code) ? 'off' : code === 'ALLOWANCE' ? 'limit' : 'failed');
+      expect(phaseForCode(code)).toBe(off.includes(code) ? 'off' : code === 'ALLOWANCE' ? 'limit' : code === 'PAUSED' ? 'paused' : 'failed');
     }
     expect(phaseForCode('TIMEOUT')).toBe('failed');
   });

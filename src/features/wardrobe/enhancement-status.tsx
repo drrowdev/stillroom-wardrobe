@@ -28,5 +28,5 @@ export function EnhancementStatus({ view, disabled, t, onSkip, onRevert, onCance
     </div>;
   }
   if (view.line === 'none') return null;
-  return <p className="fine muted background-status" role="status">{t(view.line === 'allowance' ? 'enhance.allowance' : view.line === 'ambiguous' ? 'enhance.ambiguous' : 'enhance.fallback')}</p>;
+  return <p className="fine muted background-status" role="status">{t(view.line === 'allowance' ? 'enhance.allowance' : view.line === 'paused' ? 'aiGuard.paused' : view.line === 'ambiguous' ? 'enhance.ambiguous' : 'enhance.fallback')}</p>;
 }

@@ -185,7 +185,7 @@ describe('B1 source runtime and fixed protocol', () => {
     expect(cancel).toHaveBeenCalledTimes(1);
     expect(stream.locked).toBe(false);
   });
-  it.each(['lost-ack', 'expired-claim', 'config-changed', 'provider-timeout'])(
+  it.each(['lost-ack', 'expired-claim', 'config-changed', 'provider-timeout', 'guard-paused'])(
     'never retries or dispatches without a valid acknowledgement: %s (unit transport)', async (failure) => {
       const calls: string[] = [];
       vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -197,6 +197,8 @@ describe('B1 source runtime and fixed protocol', () => {
         expect(url.endsWith('/ai_claim_analysis')).toBe(true);
         if (failure === 'lost-ack') throw new Error('private transport failure');
         if (failure === 'config-changed') return Response.json({ code: 'CONFIG_CHANGED', claimed: false });
+        // AI-GUARD1: PostgREST's reply to the guard's SQLSTATE, a non-2xx error body whose code is the SQLSTATE.
+        if (failure === 'guard-paused') return Response.json({ code: 'AG001', message: 'AI spending guard is paused', details: null, hint: null }, { status: 400 });
         return Response.json({ code: 'OK', claimed: true, manifestId: AZURE_MANIFEST,
           resultExpiresAtMs: Date.now() + 10000, dispatchBeforeMs: Date.now() + (failure === 'expired-claim' ? -1 : 1000) });
       }));
@@ -206,7 +208,7 @@ describe('B1 source runtime and fixed protocol', () => {
       const response = await createHandler({ ...config,
         azure: { apiKey: 'fictional-local-only' } }, provider)(request());
       expect(await response.json()).toEqual({ code: failure === 'lost-ack' ? 'ANALYSIS_FAILED'
-        : failure === 'config-changed' ? 'CONFIG_CHANGED' : 'TIMEOUT' });
+        : failure === 'config-changed' ? 'CONFIG_CHANGED' : failure === 'guard-paused' ? 'PAUSED' : 'TIMEOUT' });
       expect(calls).toEqual(['user', 'ai_status', 'ai_claim_analysis']);
       expect(provider).toHaveBeenCalledTimes(failure === 'provider-timeout' ? 1 : 0);
     },

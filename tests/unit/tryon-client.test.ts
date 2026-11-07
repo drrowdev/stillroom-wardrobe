@@ -324,7 +324,7 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
   it('maps each closed code to what the owner can do next', async () => {
     const cases: [string, number, string][] = [['FILTERED', 0, 'filtered'], ['FILTERED', 1, 'filtered'],
       ['ALLOWANCE', 0, 'allowance'], ['CHAIN_MISMATCH', 1, 'mismatch'], ['WITHDRAWN', 0, 'turnedOff'],
-      ['RESULTS_FULL', 2, 'resultsFull'], ['INACTIVE', 0, 'unavailable']];
+      ['RESULTS_FULL', 2, 'resultsFull'], ['INACTIVE', 0, 'unavailable'], ['PAUSED', 0, 'paused'], ['PAUSED', 2, 'paused']];
     for (const [code, index, failure] of cases) {
       const h = new Harness();
       h.stepReplies = [...Array.from({ length: index }, (_, n) => picture(20 + n)), { kind: 'code', code } as StepResponse];

@@ -310,7 +310,7 @@ async function main() {
       ...mount('src/domain/stylist.ts', '/work/src/domain/stylist.ts'), ...mount('src/domain/enhancement.ts', '/work/src/domain/enhancement.ts'),
       ...mount('src/domain/tryon.ts', '/work/src/domain/tryon.ts'),
       ...mount('src/domain/provider-refusal.ts', '/work/src/domain/provider-refusal.ts'),
-      ...mount('src/domain/ai-budget.ts', '/work/src/domain/ai-budget.ts'),
+      ...mount('src/domain/ai-budget.ts', '/work/src/domain/ai-budget.ts'), ...mount('src/domain/ai-guard.ts', '/work/src/domain/ai-guard.ts'),
       ...mount('src/domain/outfitgen.ts', '/work/src/domain/outfitgen.ts'), ...mount('src/domain/outfit-candidates.ts', '/work/src/domain/outfit-candidates.ts'),
       ...mount('tests/edge-fixtures', '/work/tests/edge-fixtures'),
       '--pull', 'never', '--entrypoint', 'edge-runtime', runtimeReference, 'start', '--main-service', '/work/tests/edge-fixtures/analyze-clothing-double',

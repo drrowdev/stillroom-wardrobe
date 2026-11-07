@@ -15,7 +15,7 @@ export const azureAiProfiles = [
 ] as const;
 export const aiCodes = ['OK', 'UNAVAILABLE', 'UNAUTHENTICATED', 'INVALID_INPUT', 'CONSENT_REQUIRED',
   'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'CONFLICT', 'ACTIVE_DRAFT',
-  'ALLOWANCE', 'TERMINAL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA', 'ANALYSIS_FAILED', 'TIMEOUT'] as const;
+  'ALLOWANCE', 'TERMINAL', 'TOO_LARGE', 'UNSUPPORTED_MEDIA', 'ANALYSIS_FAILED', 'TIMEOUT', 'PAUSED'] as const;
 export type AiCode = typeof aiCodes[number];
 export function isAiCode(value: unknown): value is AiCode { return aiCodes.some((code) => code === value); }
 export function isMicro(value: unknown): value is string {

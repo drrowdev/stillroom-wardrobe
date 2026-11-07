@@ -73,7 +73,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
   budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false } };
   const accounting = { basis: 'estimated', amountMicro: '252000', currency: 'USD' };
   type Call = { url: string; body: Record<string, unknown> | null; auth: string | null; contract?: string | null };
-  type Options = { status?: unknown; claim?: Record<string, unknown>; steps?: number; dispatch?: () => Response | Promise<Response>;
+  type Options = { status?: unknown; claim?: Record<string, unknown>; claimStatus?: number; steps?: number; dispatch?: () => Response | Promise<Response>;
     finish?: Record<string, unknown>; garment?: () => Response; onDispatch?: () => void };
   function backend(options: Options = {}) {
     const calls: Call[] = [];
@@ -87,7 +87,8 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
         const step = parsed!.p_step as number, steps = options.steps ?? 3;
         return Response.json(options.claim ?? { code: 'OK', claimed: true, manifestId: TRYON_MANIFEST, chainId: parsed!.p_chain_id,
           step, steps, last: step === steps, slot: 'top', garment: { path: PATH, mainSha256: sha(GARMENT), bytes: GARMENT.length },
-          dispatchBeforeMs: Date.now() + 15_000, requestSeconds: 85, reservationMicro: TRYON_RESERVATION_MICRO });
+          dispatchBeforeMs: Date.now() + 15_000, requestSeconds: 85, reservationMicro: TRYON_RESERVATION_MICRO },
+        options.claimStatus === undefined ? undefined : { status: options.claimStatus });
       }
       if (url.includes('/storage/v1/object/wardrobe/')) {
         return options.garment?.() ?? new Response(GARMENT, { headers: { 'Content-Type': 'image/jpeg' } });
@@ -123,6 +124,18 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     new Request('http://127.0.0.1:54321/functions/v1/try-on', { method: 'POST', headers: { Authorization: 'Bearer fictional-user-jwt', 'X-Stillroom-AI-Budget-Contract': '2', ...extra }, body, signal });
   const rpcBody = (calls: Call[], name: string) => calls.find((call) => call.url.endsWith(`/rpc/${name}`))?.body;
   const names = (calls: Call[]) => calls.map((call) => call.url.includes('/storage/') ? 'storage' : call.url.split('/').pop());
+
+  it('answers PAUSED for a first and a later step, with no provider call and no dispatch, when the spending guard refuses the claim (AI-GUARD1)', async () => {
+    for (const step of [1, 2]) {
+      const calls = backend({ claim: { code: 'AG001', message: 'AI spending guard is paused', details: null, hint: null }, claimStatus: 400 });
+      const { transport } = provider(() => Response.json(imageBody()));
+      const response = await createTryOnHandler(config, register, transport)(post(form(step)));
+      expect([response.status, await response.json()], `step ${step}`).toEqual([403, { code: 'PAUSED' }]);
+      expect(transport).not.toHaveBeenCalled();
+      expect(names(calls)).toEqual(['user', 'tryon_status', 'tryon_claim']);
+      vi.unstubAllGlobals();
+    }
+  });
 
   it('keeps serving past the historical review date', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });

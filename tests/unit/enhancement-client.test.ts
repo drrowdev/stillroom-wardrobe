@@ -384,6 +384,7 @@ describe('stage outcome reasons', () => {
   const codes: [EnhanceResponse & { kind: 'code' }, string, string][] = [
     [{ kind: 'code', code: 'BUSY' }, 'generic', 'busy'],
     [{ kind: 'code', code: 'ALLOWANCE' }, 'allowance', 'allowance'],
+    [{ kind: 'code', code: 'PAUSED' }, 'paused', 'guard'],
     [{ kind: 'code', code: 'TIMEOUT' }, 'generic', 'ambiguous'],
     [{ kind: 'code', code: 'FILTERED' }, 'generic', 'filtered'],
     [{ kind: 'code', code: 'FAILED' }, 'generic', 'failed'],

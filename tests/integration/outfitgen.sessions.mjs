@@ -88,7 +88,8 @@ export async function outfitgenUpgradeVerify(seed, sql, mark = () => {}) {
   const owners = seed.controls.map((row) => row.owner_id);
   const after = JSON.parse(await sql(`select coalesce(jsonb_agg(to_jsonb(c) order by owner_id),'[]'::jsonb) from private.ai_controls c
     where owner_id in (${owners.map(literal).join(',')});`));
-  equal(after.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => !key.startsWith('outfitgen_')))), seed.controls);
+  // The target inventory also carries the AI-GUARD1 migration, whose five nullable columns are not part of this seed.
+  equal(after.map((row) => Object.fromEntries(Object.entries(row).filter(([key]) => !key.startsWith('outfitgen_') && !key.startsWith('ai_guard_')))), seed.controls);
   for (const row of after) {
     equal([row.outfitgen_activated, row.outfitgen_notice_revision, row.outfitgen_manifest_id, row.outfitgen_consent_revision], [false, null, null, null]);
   }

@@ -10,7 +10,7 @@ export const BUSY_DELAYS_MS = [20_000, 40_000, 80_000] as const;
 export const PHOTO_ESTIMATE_MICRO = 40_000n;
 const notSent: StageResult = Object.freeze({ kind: 'skipped', line: 'none', requestId: null });
 
-export type Halt = 'allowance';
+export type Halt = 'allowance' | 'guard';
 export type Refusal = 'stopped' | 'paused' | Halt;
 export type QueueSnapshot = Readonly<{
   stopped: boolean; paused: boolean; hidden: boolean;
@@ -115,6 +115,7 @@ export class BulkQueue {
         try {
           if (result.reason === 'deferred') { if (await resume()) continue; return notSent; }
           if (result.reason === 'allowance') { this.halt('cleanup', result.reason); return result; }
+          if (result.reason === 'guard') { this.halt('cleanup', 'guard'); return result; }
           const delay = this.delays[attempt++];
           if (result.reason !== 'busy' || delay === undefined) return result;
           try { await this.sleep(delay, AbortSignal.any([waited, this.hideController.signal])); }
@@ -197,6 +198,7 @@ export class BulkQueue {
       },
       resolved: (code?: string) => {
         if (code === 'ALLOWANCE') this.halt('analysis', 'allowance');
+        if (code === 'PAUSED') this.halt('analysis', 'guard');
         if (ticket.state !== 'done') free();
       },
       abandon: () => {
