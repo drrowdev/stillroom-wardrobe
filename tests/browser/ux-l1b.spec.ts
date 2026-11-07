@@ -23,7 +23,8 @@ function backendRequests(page: Page, info: TestInfo) {
   const seen: string[] = [];
   page.on('request', (request) => {
     const url = new URL(request.url());
-    if ((url.protocol === 'http:' || url.protocol === 'https:') && url.origin !== origin) seen.push(`${request.method()} ${url.pathname}`);
+    // The app-wide suggestions status read can land late on a slow run; it is read-only and unrelated to the crop editor.
+    if ((url.protocol === 'http:' || url.protocol === 'https:') && url.origin !== origin && url.pathname !== '/rest/v1/rpc/outfitgen_status') seen.push(`${request.method()} ${url.pathname}`);
   });
   return seen;
 }
