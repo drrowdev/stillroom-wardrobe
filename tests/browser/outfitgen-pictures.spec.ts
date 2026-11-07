@@ -24,6 +24,10 @@ const gate = () => {
   return { hold, release: () => release() };
 };
 const created = () => new Date(Date.now() - 120_000).toISOString();
+/** A line that names the time it will look again: the text with the time left open. */
+const timed = (key: MessageKey, language: Language = 'en') =>
+  new RegExp(text(key, language, { time: '@@' }).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace('@@', '\\d{2}[:.]\\d{2}'));
+const statusLine = (page: Page) => section(page).locator('.suggested-picture-status');
 
 function seed(api: Api) {
   const add = (title: string, fields: Row) => {
@@ -56,7 +60,7 @@ async function usablePhoto(page: Page) {
   }));
 }
 
-type Start = { beforeSignIn?: (api: Api) => void; shortPlan?: boolean; tryOn?: boolean; photo?: boolean; outfitConsent?: boolean; hash?: string; replies?: Api['tryonControl']['replies'] };
+type Start = { beforeSignIn?: (api: Api) => void | Promise<void>; shortPlan?: boolean; tryOn?: boolean; photo?: boolean; outfitConsent?: boolean; hash?: string; replies?: Api['tryonControl']['replies']; language?: Language };
 async function start(page: Page, options: Start = {}, existing?: { api: Api; clothes: Clothes }) {
   // Playwright's WebKit route interception reports an empty body for Blob uploads, so there the try-on POST is re-sent as an ArrayBuffer.
   if (test.info().project.name === 'webkit-photo') {
@@ -74,7 +78,7 @@ async function start(page: Page, options: Start = {}, existing?: { api: Api; clo
       };
     });
   }
-  const api = existing?.api ?? await mockBackend(page, { initialLanguage: 'en' });
+  const api = existing?.api ?? await mockBackend(page, { initialLanguage: options.language ?? 'en' });
   const clothes = existing?.clothes ?? seed(api);
   api.outfitgenControl.setup[owners.a] = { configured: true, activated: true };
   if (options.outfitConsent !== false) api.outfitgenControl.consent[owners.a] = OUTFITGEN_NOTICE_REVISION;
@@ -90,7 +94,7 @@ async function start(page: Page, options: Start = {}, existing?: { api: Api; clo
     const jpeg = await usablePhoto(page);
     api.tryonControl.photos[owners.a] = { jpeg, sha256: createHash('sha256').update(jpeg).digest('hex'), savedAtMs: Date.now() - 86_400_000 };
   }
-  options.beforeSignIn?.(api);
+  await options.beforeSignIn?.(api);
   await page.goto(options.hash ?? '/#/outfits'); await signIn(page);
   await expectSignedIn(page);
   return { api, clothes };
@@ -112,8 +116,9 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
     const first = gate();
     const { api, clothes } = await start(page, { replies: [{ hold: first.hold }] });
     await expect(cards(page)).toHaveCount(2);
-    // While the first picture is made the card says so, and the next one waits.
-    await expect(cards(page).first().locator('.suggested-wait')).toContainText(text('outfitgen.pictureMaking', 'en', { ordinal: 1, total: 2 }), { timeout: 30_000 });
+    // While the first picture is made the card shows its step, the section counts the pictures, and the next one waits.
+    await expect(cards(page).first().locator('.suggested-wait')).toContainText(text('outfitgen.pictureStep', 'en', { step: 1, steps: 3 }), { timeout: 30_000 });
+    await expect(statusLine(page)).toContainText(text('outfitgen.pictureProgress', 'en', { done: 0, total: 2 }));
     await expect(cards(page).nth(1).locator('.suggested-wait')).toHaveText(text('outfitgen.pictureQueued'));
     expect(chains(api)).toHaveLength(1);
     first.release();
@@ -186,7 +191,7 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
   test('never retries a failed outfit more than once and never loops', async ({ page }) => {
     // Every step fails: each outfit is tried at most twice, and two failures in a row stop the queue.
     const { api } = await start(page, { replies: Array.from({ length: 12 }, () => ({ code: 'FAILED', status: 502 })) });
-    await expect(section(page).getByText(text('outfitgen.pictureRetry'), { exact: true })).toBeVisible({ timeout: 90_000 });
+    await expect(section(page).getByText(timed('outfitgen.pictureRetry'))).toBeVisible({ timeout: 90_000 });
     const sent = requestsOf(api).length;
     expect(sent).toBeLessThanOrEqual(4);
     await quiet(page);
@@ -196,7 +201,7 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
 
   test('a refusal before the claim stops the queue for the cooldown instead of retrying at once', async ({ page }) => {
     const { api } = await start(page, { replies: [{ code: 'UNAVAILABLE', status: 503 }] });
-    await expect(section(page).locator('.suggested-picture-line')).toContainText(text('outfitgen.pictureRetry'), { timeout: 30_000 });
+    await expect(section(page).locator('.suggested-picture-line')).toContainText(timed('outfitgen.pictureRetry'), { timeout: 30_000 });
     await quiet(page);
     expect(requestsOf(api)).toHaveLength(1);
   });
@@ -439,6 +444,7 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
     const context = page.context();
     const other = await context.newPage();
     const second = await start(other);
+    await expect(statusLine(other)).toContainText(timed('outfitgen.pictureOtherWindow'), { timeout: 30_000 });
     await quiet(other);
     expect(requestsOf(second.api)).toEqual([]);
     held.release();
@@ -447,7 +453,7 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
     void browser;
   });
 
-  test('a reloaded page does not start a chain while the server still holds the first one', async ({ page }) => {
+  test('a reloaded page takes the interrupted chain\'s row as ordinary and makes its own pictures at once', async ({ page }) => {
     const held = gate();
     const { api } = await start(page, { replies: [{}, { hold: held.hold }] });
     await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(2);
@@ -455,13 +461,10 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
     await page.route('**/rest/v1/rpc/tryon_cancel', (route) => route.abort('failed'));
     await page.reload();
     await expectSignedIn(page);
-    // The reload orphaned a paid step: the chain is still running on the server, so nothing new is sent.
-    await quiet(page, 6_000);
-    expect(requestsOf(api)).toHaveLength(2);
-    // Once the chain is gone, the next evaluation goes on.
-    for (const chain of api.tryonControl.chains) chain.state = 'expired';
-    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-    await expect.poll(() => requestsOf(api).length, { timeout: 60_000 }).toBeGreaterThan(2);
+    // The reload orphaned a paid step and the row stays on the server, but the page does not wait behind it: its own chains are accepted.
+    await expect.poll(() => chains(api).length, { timeout: 60_000 }).toBeGreaterThan(1);
+    await picturesShown(page, 2);
+    expect(api.tryonControl.results).toHaveLength(2);
     held.release();
   });
 
@@ -504,5 +507,288 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
     await expect(page.locator('#tryon-heading')).toBeVisible({ timeout: 30_000 });
     await page.locator('section[aria-labelledby="tryon-heading"]').getByText(text('aiF.about'), { exact: true }).click();
     await expect(page.locator('section[aria-labelledby="tryon-heading"]')).toContainText(text('outfitgenC.photoUse'));
+  });
+});
+
+// PICTURES-WAIT1: the queue is not stalled by an ordinary gap between the server's stored count and the list, it says why it is idle, and it shows progress.
+type Chain = Api['tryonControl']['chains'][number];
+const stored = (api: Api, outfitId: string | null, itemIds: string[]) =>
+  api.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId, itemIds, image: api.fixture, completedAtMs: Date.now() - 3_600_000 });
+const savedOutfit = (api: Api, deleted: boolean) => {
+  const id = randomUUID(), now = new Date(Date.now() - 60_000).toISOString();
+  api.outfits.push({ id, owner_id: owners.a, title: 'Saved outfit', occasion: 'everyday', notes: '', favourite: false, deleted_at: deleted ? now : null, version: 1, created_at: now, updated_at: now });
+  return id;
+};
+const newApi = async (page: Page) => { const api = await mockBackend(page, { initialLanguage: 'en' }); return { api, clothes: seed(api) }; };
+/** Both suggestions already have their pictures, so the queue is idle. */
+const withPictures = (api: Api, clothes: Clothes) => { for (const entry of sets(clothes)) stored(api, null, entry.itemIds); };
+const noOverflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+
+test.describe('PICTURES-WAIT1 pictures wait, lines and progress', () => {
+  test('the owner\'s account (4 stored pictures, 2 of them of Trashed outfits) gets its pictures without a long silent wait', async ({ page }) => {
+    const existing = await newApi(page);
+    const { api, clothes } = existing;
+    const trashed = savedOutfit(api, true);
+    stored(api, trashed, [clothes.top2.id, clothes.trousers.id]);
+    stored(api, trashed, [clothes.top2.id, clothes.boots.id]);
+    stored(api, null, [clothes.shirt.id, clothes.top2.id]);
+    stored(api, null, [clothes.dress.id, clothes.top2.id]);
+    await start(page, {}, existing);
+    // The status counts 4 rows and the list returns 2: that gap is ordinary, so chains are accepted and both pictures appear.
+    await picturesShown(page, 2);
+    expect(chains(api)).toHaveLength(2);
+    expect(requestsOf(api).map((entry) => entry.step)).toEqual([1, 2, 3, 1, 2]);
+    expect(api.tryonControl.results).toHaveLength(6);
+    await expect(statusLine(page)).not.toContainText(timed('outfitgen.pictureOtherPicture'));
+  });
+
+  test('shows the picture count and the time left while pictures are made, and nothing once they are done', async ({ page }) => {
+    const held = gate();
+    const { api } = await start(page, { replies: [{}, {}, {}, { hold: held.hold }] });
+    await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(4);
+    await expect(statusLine(page)).toContainText(text('outfitgen.pictureProgress', 'en', { done: 1, total: 2 }));
+    await expect(statusLine(page)).toContainText(/about \d+ min left|under 1 min left/);
+    const bar = cards(page).nth(1).getByRole('progressbar');
+    await expect(bar).toHaveAttribute('aria-valuemax', '2');
+    await expect(bar).toHaveAttribute('aria-valuenow', '0');
+    await expect(cards(page).nth(1).locator('.suggested-wait')).toContainText(text('outfitgen.pictureStep', 'en', { step: 1, steps: 2 }));
+    held.release();
+    await picturesShown(page, 2);
+    await expect(statusLine(page)).toHaveText('');
+  });
+
+  test('hides the estimate when the queue stops, and says why instead', async ({ page }) => {
+    await start(page, { replies: [{ code: 'UNAVAILABLE', status: 503 }] });
+    await expect(statusLine(page)).toContainText(timed('outfitgen.pictureRetry'), { timeout: 30_000 });
+    await expect(statusLine(page)).not.toContainText('left');
+    await expect(statusLine(page)).not.toContainText(text('outfitgen.pictureProgress', 'en', { done: 0, total: 2 }));
+  });
+
+  test('says "Taking longer than usual" for a slow step, never sends anything because of it, and respects reduced motion', async ({ page }) => {
+    await page.clock.install({ time: Date.now() });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const held = gate();
+    const { api } = await start(page, { replies: [{ hold: held.hold }] });
+    const card = cards(page).first();
+    await expect(card.locator('.suggested-wait')).toContainText(text('outfitgen.pictureStep', 'en', { step: 1, steps: 3 }), { timeout: 30_000 });
+    expect(await card.locator('.suggested-progress span[data-state="now"]').evaluate((element) => getComputedStyle(element).animationName)).toBe('none');
+    await page.clock.fastForward(91_000);
+    await expect(card.locator('.suggested-wait')).toContainText(text('outfitgen.pictureSlow'));
+    await expect(card.locator('.suggested-wait')).not.toContainText(text('outfitgen.pictureStep', 'en', { step: 1, steps: 3 }));
+    await quiet(page, 1_000);
+    expect(requestsOf(api)).toHaveLength(1);
+    held.release();
+    await picturesShown(page, 2);
+    expect(requestsOf(api).map((entry) => entry.step)).toEqual([1, 2, 3, 1, 2]);
+  });
+
+  test('moves the indicator when a step is finished', async ({ page }) => {
+    const held = gate();
+    const { api } = await start(page, { replies: [{}, { hold: held.hold }] });
+    await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(2);
+    const bar = cards(page).first().getByRole('progressbar');
+    await expect(bar).toHaveAttribute('aria-valuenow', '1');
+    await expect(cards(page).first().locator('.suggested-wait')).toContainText(text('outfitgen.pictureStep', 'en', { step: 2, steps: 3 }));
+    held.release();
+  });
+
+  for (const language of ['en', 'fi', 'sv'] as const) {
+    test(`stays readable at 320 px and 200% text while a picture is made, slow, and paused (${language})`, async ({ page }) => {
+      await page.clock.install({ time: Date.now() });
+      await page.setViewportSize({ width: 320, height: 740 });
+      const held = gate();
+      const { api } = await start(page, { language, replies: [{ hold: held.hold }, {}, {}, { code: 'UNAVAILABLE', status: 503 }] });
+      const card = cards(page).first();
+      await expect(card.locator('.suggested-wait')).toContainText(text('outfitgen.pictureStep', language, { step: 1, steps: 3 }), { timeout: 30_000 });
+      await expect(statusLine(page)).toContainText(text('outfitgen.pictureProgress', language, { done: 0, total: 2 }));
+      await page.addStyleTag({ content: zoom });
+      expect(await noOverflow(page)).toBe(true);
+      await axe(page);
+      await page.clock.fastForward(91_000);
+      await expect(card.locator('.suggested-wait')).toContainText(text('outfitgen.pictureSlow', language));
+      expect(await noOverflow(page)).toBe(true);
+      await axe(page);
+      // The step then fails to start the next chain: the queue says it is paused, with the time it looks again.
+      held.release();
+      await expect(statusLine(page)).toContainText(timed('outfitgen.pictureRetry', language), { timeout: 60_000 });
+      expect(await noOverflow(page)).toBe(true);
+      await axe(page);
+      void api;
+    });
+  }
+
+  test('waits while a chain started elsewhere holds a row, also beyond 90 s and several looks, and goes on when it ends', async ({ page }) => {
+    await page.clock.install({ time: Date.now() });
+    const held = gate();
+    const { api } = await start(page, { replies: [{ hold: held.hold }] });
+    await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(1);
+    // Another device starts a chain while this page's first chain is on its first step.
+    const foreign: Chain = { id: randomUUID(), owner: owners.a, outfitId: null, steps: [], nextStep: 1, state: 'running', resultId: null, expiresAtMs: Date.now() + 1_800_000 };
+    api.tryonControl.chains.push(foreign);
+    held.release();
+    await expect.poll(() => api.tryonControl.results.length, { timeout: 30_000 }).toBe(1);
+    await expect(statusLine(page)).toContainText(timed('outfitgen.pictureOtherPicture'), { timeout: 30_000 });
+    for (let look = 0; look < 4; look++) { await page.clock.fastForward(61_000); await page.waitForTimeout(400); }
+    expect(chains(api)).toHaveLength(1);
+    expect(requestsOf(api)).toHaveLength(3);
+    // The other chain ends: the next look makes the second picture, and its claim is accepted.
+    foreign.state = 'expired';
+    await page.clock.fastForward(61_000);
+    await picturesShown(page, 2);
+    expect(chains(api)).toHaveLength(2);
+    expect(api.tryonControl.results).toHaveLength(2);
+  });
+
+  test('stops waiting for a row that outlives a chain (31 minutes)', async ({ page }) => {
+    await page.clock.install({ time: Date.now() });
+    const held = gate();
+    const { api } = await start(page, { replies: [{ hold: held.hold }] });
+    await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(1);
+    const foreign: Chain = { id: randomUUID(), owner: owners.a, outfitId: null, steps: [], nextStep: 1, state: 'running', resultId: null, expiresAtMs: Date.now() + 1_800_000 };
+    api.tryonControl.chains.push(foreign);
+    held.release();
+    await expect.poll(() => api.tryonControl.results.length, { timeout: 30_000 }).toBe(1);
+    await expect(statusLine(page)).toContainText(timed('outfitgen.pictureOtherPicture'), { timeout: 30_000 });
+    await page.clock.fastForward(20 * 60_000);
+    await page.waitForTimeout(400);
+    expect(chains(api)).toHaveLength(1);
+    await page.clock.fastForward(12 * 60_000);
+    await picturesShown(page, 2);
+    expect(chains(api)).toHaveLength(2);
+  });
+
+  test('an outfit moved to the Trash while a picture is made does not stall the queue, and Restore does not either', async ({ page }) => {
+    const existing = await newApi(page);
+    const { api, clothes } = existing;
+    const outfitId = savedOutfit(api, false);
+    stored(api, outfitId, [clothes.top2.id, clothes.boots.id]);
+    const held = gate();
+    await start(page, { replies: [{ hold: held.hold }] }, existing);
+    await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(1);
+    const outfit = api.outfits.find((row) => row.id === outfitId)!;
+    outfit.deleted_at = new Date().toISOString();
+    held.release();
+    await picturesShown(page, 2);
+    expect(chains(api)).toHaveLength(2);
+    await expect(statusLine(page)).not.toContainText(timed('outfitgen.pictureOtherPicture'));
+    outfit.deleted_at = null;
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await quiet(page, 1_500);
+    expect(chains(api)).toHaveLength(2);
+  });
+
+  test('a plan too short for a picture is counted as an outfit without one, and nothing is made for it', async ({ page }) => {
+    const existing = await newApi(page);
+    withPictures(existing.api, existing.clothes);
+    const { api } = await start(page, { shortPlan: true }, existing);
+    await expect(cards(page)).toHaveCount(3);
+    await expect(statusLine(page)).toHaveText(text('outfitgen.pictureMissing_one', 'en', { count: 1 }), { timeout: 30_000 });
+    await quiet(page, 1_500);
+    expect(requestsOf(api)).toHaveLength(0);
+  });
+
+  test('a paused try-on service is not called "off", and the queue goes on once it is back', async ({ page }) => {
+    const { api } = await start(page, { beforeSignIn: (backend) => { backend.tryonControl.setup[owners.a] = { activated: true, providerAvailable: false }; } });
+    await expect(statusLine(page)).toContainText(timed('outfitgen.pictureTryOnPaused'), { timeout: 30_000 });
+    await expect(statusLine(page)).not.toContainText(text('outfitgen.pictureTryOnOff'));
+    expect(requestsOf(api)).toHaveLength(0);
+    // The service is back: the next look reads the status again before the earlier state blocks anything.
+    api.tryonControl.setup[owners.a] = { activated: true, providerAvailable: true };
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await picturesShown(page, 2);
+    expect(api.tryonControl.results).toHaveLength(2);
+  });
+
+  test('a given-up chain whose cancel could not be confirmed keeps the next chain from starting, whatever the foreign count says', async ({ page }) => {
+    const foreign: Chain = { id: randomUUID(), owner: owners.a, outfitId: null, steps: [], nextStep: 1, state: 'running', resultId: null, expiresAtMs: Date.now() + 1_800_000 };
+    // A chain of another device is running at the first look (baseline 1). The queue's first step reaches the server, its reply is lost,
+    // and the cancel of the given-up chain cannot get through.
+    const { api, clothes } = await start(page, { replies: [{ abort: true, commit: true }], beforeSignIn: async (backend) => {
+      backend.tryonControl.chains.push(foreign);
+      await page.route('**/rest/v1/rpc/tryon_cancel', (route) => route.abort('failed'));
+    } });
+    await expect.poll(() => api.tryonControl.chains.filter((chain) => chain.id !== foreign.id).length, { timeout: 30_000 }).toBe(1);
+    const lost = api.tryonControl.chains.find((chain) => chain.id !== foreign.id)!;
+    await expect(statusLine(page)).toContainText(timed('outfitgen.pictureStopping'), { timeout: 60_000 });
+    // The other chain finishes with a picture of its own: stored 2 (it and the lost chain's row), ready 1, so the gap equals the baseline again.
+    foreign.state = 'complete';
+    stored(api, null, [clothes.shirt.id, clothes.top2.id]);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await quiet(page, 3_000);
+    expect(lost.state).toBe('running');
+    expect(chains(api)).toEqual([lost.id]);
+    // Once the cancel goes through, the chain is shown to be over and the queue goes on.
+    await page.unroute('**/rest/v1/rpc/tryon_cancel');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await picturesShown(page, 2);
+    expect(lost.state).toBe('cancelled');
+    expect(chains(api).length).toBeGreaterThan(1);
+  });
+
+  test('a given-up chain that finishes while it is being reconciled leaves no duplicate chain for the same outfit', async ({ page }) => {
+    const foreign: Chain = { id: randomUUID(), owner: owners.a, outfitId: null, steps: [], nextStep: 1, state: 'running', resultId: null, expiresAtMs: Date.now() + 1_800_000 };
+    let lookups = 0;
+    const existing = await newApi(page);
+    const { clothes } = existing;
+    // The second outfit already has its picture, so the first one is the only candidate: after the lost step it is the retry.
+    stored(existing.api, null, sets(clothes)[1]!.itemIds);
+    const { api } = await start(page, { replies: [{ abort: true, commit: true }], beforeSignIn: async (backend) => {
+      backend.tryonControl.chains.push(foreign);
+      await page.route('**/rest/v1/rpc/tryon_cancel', (route) => route.abort('failed'));
+      await page.route('**/rest/v1/rpc/tryon_chain_status', async (route) => {
+        const chain = backend.tryonControl.chains.find((entry) => entry.id !== foreign.id && entry.id === (route.request().postDataJSON() as { p_chain_id?: string }).p_chain_id);
+        lookups += chain ? 1 : 0;
+        if (chain && lookups === 1) {
+          // The run's own check still sees its chain running. Meanwhile the other device's chain finishes with a picture of its own.
+          foreign.state = 'complete';
+          stored(backend, null, [clothes.shirt.id, clothes.top2.id]);
+        }
+        if (chain && lookups === 2) {
+          // The queue's check of the given-up chain: its last step went through after all, and the picture is stored.
+          chain.state = 'complete';
+          const itemIds = chain.steps.map((step) => step.itemId);
+          const id = randomUUID();
+          backend.tryonControl.results.push({ id, owner: owners.a, outfitId: null, itemIds, image: backend.fixture, completedAtMs: Date.now() });
+          chain.resultId = id;
+        }
+        await route.fallback();
+      });
+    } }, existing);
+    await picturesShown(page, 2);
+    await quiet(page, 2_000);
+    // The outfit's garments were asked for once: the finished picture was not made again.
+    const firsts = requestsOf(api).filter((entry) => entry.step === 1);
+    expect(firsts).toHaveLength(1);
+    expect(lookups).toBeGreaterThanOrEqual(2);
+  });
+
+  test('says when no picture could be made for some outfits', async ({ page }) => {
+    const { api } = await start(page, { replies: [{ code: 'FILTERED', status: 422 }, { code: 'FILTERED', status: 422 }] });
+    await expect(statusLine(page)).toHaveText(text('outfitgen.pictureMissing_other', 'en', { count: 2 }), { timeout: 30_000 });
+    await quiet(page, 1_500);
+    expect(requestsOf(api)).toHaveLength(2);
+  });
+
+  test('says when the browser cannot keep windows apart, and when it is offline', async ({ page }) => {
+    await page.addInitScript(() => { Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true }); });
+    const existing = await newApi(page);
+    withPictures(existing.api, existing.clothes);
+    await start(page, {}, existing);
+    await expect(statusLine(page)).toHaveText(text('outfitgen.pictureNoLocks'), { timeout: 30_000 });
+    await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { get: () => false, configurable: true }); window.dispatchEvent(new Event('focus')); });
+    await expect(statusLine(page)).toHaveText(text('outfitgen.pictureOffline'), { timeout: 30_000 });
+    await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { get: () => true, configurable: true }); window.dispatchEvent(new Event('online')); });
+    await expect(statusLine(page)).toHaveText(text('outfitgen.pictureNoLocks'), { timeout: 30_000 });
+  });
+
+  test('says when the status cannot be read, and looks again', async ({ page }) => {
+    const existing = await newApi(page);
+    withPictures(existing.api, existing.clothes);
+    await start(page, {}, existing);
+    await expect(cards(page)).toHaveCount(2);
+    await quiet(page, 1_500);
+    await page.route('**/rest/v1/rpc/tryon_status', (route) => route.fulfill({ status: 503, body: '{}', contentType: 'application/json' }));
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(statusLine(page)).toContainText(timed('outfitgen.pictureUnreadable'), { timeout: 30_000 });
   });
 });

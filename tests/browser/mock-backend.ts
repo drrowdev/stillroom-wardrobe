@@ -1193,9 +1193,10 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
           // Withdrawal removes the saved photo in the same transaction (the ai_controls trigger).
           if (!body.p_enabled) delete tryonControl.photos[owner];
         } else tryonControl.statusReads++;
-        // A running chain holds a reserved result row, which the real status counts with the stored ones.
+        // A running chain holds a reserved result row, which the real status counts with the stored ones. The real count is every row of the
+        // owner, also the pictures of Trashed outfits that the list does not return.
         const reserved = tryonControl.chains.filter(chain => chain.owner === owner && chain.state === 'running').length;
-        await json(tryOnStatusReply(setup, tryonControl.consent[owner] ?? null, live.length + reserved)); return;
+        await json(tryOnStatusReply(setup, tryonControl.consent[owner] ?? null, tryonControl.results.filter(row => row.owner === owner).length + reserved)); return;
       }
       if (name === 'tryon_chain_status' || name === 'tryon_cancel') {
         const chain = tryonControl.chains.find(row => row.owner === owner && row.id === body.p_chain_id);

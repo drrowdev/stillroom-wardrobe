@@ -115,22 +115,48 @@ export function classifyFailure(kind: FailureKind, claimed: boolean, gated: bool
   }
 }
 
-/** The server-side gate's memory: rows the server holds beyond the ready pictures, and since when they have been seen. */
-export type ReservedMemory = { baseline: number; seen: number; sinceMs: number | null };
-export const noReserved: ReservedMemory = { baseline: 0, seen: 0, sinceMs: null };
 /**
- * `status.results` counts every stored or reserved picture; the list holds the ready ones. More rows than pictures means a chain
- * is running for this owner (another window, or a page that was reloaded mid-chain: its paid steps cannot be resumed). Pictures of
- * a deleted outfit also count, so rows that stay unchanged for longer than a chain can live are taken as that, not as a chain.
- * Returns the new memory and whether the queue must wait.
+ * The server-side gate's memory. `baseline` is the gap between the stored rows and the ready pictures this page first saw (stored pictures
+ * of deleted outfits are in it); `lastStatus` is the last stored-row count; `sinceMs` is when a latched wait began.
+ */
+export type ReservedMemory = { baseline: number | null; lastStatus: number | null; sinceMs: number | null };
+export const noReserved: ReservedMemory = { baseline: null, lastStatus: null, sinceMs: null };
+/**
+ * `status.results` counts every stored or reserved picture, also those of deleted outfits; the list holds the ready pictures of live
+ * outfits. The first gap seen is therefore ordinary and becomes the baseline. After that the queue waits only once the stored count
+ * has risen while the gap is above the baseline: a chain started elsewhere (another window or device, or a page reloaded mid-chain, whose
+ * paid steps cannot be resumed) holds a reserved row. The wait lasts until the gap is back at the baseline or longer than a chain can
+ * live, then that gap is adopted. Any other change of the gap (an outfit trashed or restored, a picture deleted) is adopted at once.
+ * Best effort, not a lock: a deleted ready picture together with another device's new row at an unchanged total looks like a trash change.
  */
 export function reservedGate(memory: ReservedMemory, statusResults: number, readyPictures: number, nowMs: number): { wait: boolean; memory: ReservedMemory } {
-  const extra = Math.max(0, statusResults - readyPictures);
-  if (extra <= memory.baseline) return { wait: false, memory: { baseline: extra, seen: extra, sinceMs: null } };
-  const sinceMs = memory.sinceMs !== null && memory.seen === extra ? memory.sinceMs : nowMs;
-  if (nowMs - sinceMs >= PICTURE_LIMITS.reservedWaitMs) return { wait: false, memory: { baseline: extra, seen: extra, sinceMs: null } };
-  return { wait: true, memory: { baseline: memory.baseline, seen: extra, sinceMs } };
+  const gap = Math.max(0, statusResults - readyPictures);
+  const adopt = { wait: false, memory: { baseline: gap, lastStatus: statusResults, sinceMs: null } };
+  if (memory.baseline === null || memory.lastStatus === null) return adopt;
+  if (memory.sinceMs !== null) {
+    if (gap <= memory.baseline || nowMs - memory.sinceMs >= PICTURE_LIMITS.reservedWaitMs) return adopt;
+    return { wait: true, memory: { ...memory, lastStatus: statusResults } };
+  }
+  if (gap > memory.baseline && statusResults > memory.lastStatus) return { wait: true, memory: { baseline: memory.baseline, lastStatus: statusResults, sinceMs: nowMs } };
+  return adopt;
 }
+
+const STEP_SAMPLES = 10;
+/** Without a measured step: the provider takes two requests a minute. */
+const DEFAULT_STEP_MS = 30_000;
+const meanStepMs = (samples: readonly number[]): number => {
+  const recent = samples.filter((value) => Number.isFinite(value) && value > 0).slice(-STEP_SAMPLES);
+  return recent.length ? recent.reduce((sum, value) => sum + value, 0) / recent.length : DEFAULT_STEP_MS;
+};
+/** The rolling window of measured step durations (send to done, a BUSY wait included), newest last. */
+export const addStepSample = (samples: readonly number[], ms: number): number[] => (Number.isFinite(ms) && ms > 0 ? [...samples, ms] : [...samples]).slice(-STEP_SAMPLES);
+/** Time left for `stepsLeft` more steps, or null when that is not known. Whole minutes: 0 means under one minute. */
+export function estimateMinutesLeft(samples: readonly number[], stepsLeft: number | null): number | null {
+  if (stepsLeft === null || !Number.isFinite(stepsLeft) || stepsLeft <= 0) return null;
+  return Math.floor(meanStepMs(samples) * stepsLeft / 60_000 + 0.5);
+}
+/** A step that takes this long is said to take longer than usual: three times the average, and never under the server's own 90 s limit. */
+export const slowStepMs = (samples: readonly number[]): number => Math.max(90_000, 3 * meanStepMs(samples));
 
 /** Whether `steps` more reservations would leave less than the reserve share of the monthly allowance. */
 export function reserveBlock(budget: { monthlyAllowanceMicro: string; remainingMicro: string } | null, maxRequestMicro: string | null, steps: number): boolean {

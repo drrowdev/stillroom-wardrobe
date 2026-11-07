@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  classifyFailure, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKey, pictureTargets, plannedKey, removableResults, reserveBlock,
-  reservedGate, type PictureInputs, type PictureResult,
+  addStepSample, classifyFailure, estimateMinutesLeft, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKey, pictureTargets, plannedKey,
+  removableResults, reserveBlock, reservedGate, slowStepMs, type PictureInputs, type PictureResult,
 } from '../../src/domain/outfitgen-pictures';
 import { parseSuggestionList } from '../../src/domain/outfitgen-app';
 
@@ -104,31 +104,88 @@ describe('what each failure means for the queue (OUTFITGEN2)', () => {
   });
 });
 
-describe('the server-side single-flight gate (OUTFITGEN2)', () => {
+describe('the server-side single-flight gate (OUTFITGEN2, PICTURES-WAIT1)', () => {
+  const observe = (stored: number, ready: number, at: number, memory = noReserved) => reservedGate(memory, stored, ready, at);
   it('lets a chain start when every stored or reserved picture is a ready one', () => {
-    expect(reservedGate(noReserved, 5, 5, 0)).toEqual({ wait: false, memory: { baseline: 0, seen: 0, sinceMs: null } });
+    expect(observe(5, 5, 0)).toEqual({ wait: false, memory: { baseline: 0, lastStatus: 5, sinceMs: null } });
   });
-  it('waits while the server holds more rows than there are ready pictures: a chain is running', () => {
-    const first = reservedGate(noReserved, 6, 5, 1_000);
-    expect(first.wait).toBe(true);
-    expect(reservedGate(first.memory, 6, 5, 2_000).wait).toBe(true);
-    // The chain ended: nothing is held any more.
-    expect(reservedGate(first.memory, 6, 6, 3_000).wait).toBe(false);
+  it('takes the first gap as ordinary, so stored pictures of deleted outfits never stall the queue', () => {
+    // The owner's account: 4 stored pictures, 2 of them belong to Trashed outfits, so 2 are listed.
+    const first = observe(4, 2, 0);
+    expect(first.wait).toBe(false);
+    expect(first.memory.baseline).toBe(2);
+    // Every later look at the same numbers goes on too, however long the page stays open.
+    let memory = first.memory;
+    for (const at of [1_000, 61_000, PICTURE_LIMITS.reservedWaitMs * 3]) {
+      const next = observe(4, 2, at, memory);
+      expect(next.wait).toBe(false);
+      memory = next.memory;
+    }
   });
-  it('treats rows that stay unchanged for longer than a chain can live as stored pictures of deleted outfits, not a chain', () => {
-    const first = reservedGate(noReserved, 7, 5, 0);
-    expect(first.wait).toBe(true);
-    const later = reservedGate(first.memory, 7, 5, PICTURE_LIMITS.reservedWaitMs);
-    expect(later.wait).toBe(false);
-    expect(later.memory.baseline).toBe(2);
-    // A new chain on top of those rows is seen again.
-    expect(reservedGate(later.memory, 8, 5, PICTURE_LIMITS.reservedWaitMs + 1_000).wait).toBe(true);
-    expect(reservedGate(later.memory, 7, 5, PICTURE_LIMITS.reservedWaitMs + 1_000).wait).toBe(false);
+  it('waits once the stored count rises above the baseline: a chain started somewhere else', () => {
+    const first = observe(4, 2, 0);
+    const started = observe(5, 2, 10_000, first.memory);
+    expect(started.wait).toBe(true);
+    expect(started.memory.sinceMs).toBe(10_000);
+    // The wait is kept across later looks, also when the number no longer rises.
+    expect(observe(5, 2, 70_000, started.memory).wait).toBe(true);
+    expect(observe(5, 2, 10_000 + PICTURE_LIMITS.reservedWaitMs - 1, started.memory).wait).toBe(true);
   });
-  it('starts the wait again when the number of held rows changes', () => {
-    const first = reservedGate(noReserved, 6, 5, 0);
-    const changed = reservedGate(first.memory, 7, 5, 1_000);
-    expect(changed.memory.sinceMs).toBe(1_000);
+  it('goes on when the chain ends, and gives up waiting for rows that outlive a chain', () => {
+    const waiting = observe(5, 2, 10_000, observe(4, 2, 0).memory);
+    // The chain finished: its picture is ready, the gap is back at the baseline.
+    expect(observe(5, 3, 20_000, waiting.memory)).toEqual({ wait: false, memory: { baseline: 2, lastStatus: 5, sinceMs: null } });
+    // The row expired: the gap is back at the baseline.
+    expect(observe(4, 2, 20_000, waiting.memory).wait).toBe(false);
+    // Nothing changed for longer than a chain can live: taken as stored pictures.
+    const expired = observe(5, 2, 10_000 + PICTURE_LIMITS.reservedWaitMs, waiting.memory);
+    expect(expired.wait).toBe(false);
+    expect(expired.memory.baseline).toBe(3);
+  });
+  it('does not mistake the queue\'s own picture for another chain', () => {
+    const first = observe(4, 2, 0);
+    // A chain ended: one more stored row and one more ready picture.
+    expect(observe(5, 3, 1_000, first.memory)).toEqual({ wait: false, memory: { baseline: 2, lastStatus: 5, sinceMs: null } });
+  });
+  it('adopts a gap that grew without the stored count rising: an outfit moved to the Trash', () => {
+    const first = observe(4, 3, 0);
+    const trashed = observe(4, 1, 1_000, first.memory);
+    expect(trashed).toEqual({ wait: false, memory: { baseline: 3, lastStatus: 4, sinceMs: null } });
+    // Restored again: the baseline follows the gap down.
+    expect(observe(4, 3, 2_000, trashed.memory).memory.baseline).toBe(1);
+  });
+  it('adopts a lower gap at once, and a fresh page starts from what it sees first', () => {
+    const first = observe(6, 2, 0);
+    expect(observe(4, 2, 1_000, first.memory).memory.baseline).toBe(2);
+    expect(observe(6, 2, 0, noReserved).wait).toBe(false);
+  });
+});
+
+describe('the time estimate (PICTURES-WAIT1)', () => {
+  it('uses 30 s per step before anything was measured, in whole minutes', () => {
+    expect(estimateMinutesLeft([], 8)).toBe(4);
+    expect(estimateMinutesLeft([], 1)).toBe(1);
+    expect(estimateMinutesLeft([], 0)).toBeNull();
+  });
+  it('says under one minute below one', () => {
+    expect(estimateMinutesLeft([20_000], 1)).toBe(0);
+  });
+  it('follows the measured steps, newest ten only', () => {
+    expect(estimateMinutesLeft([60_000, 60_000], 5)).toBe(5);
+    const samples = [...Array.from({ length: 10 }, () => 120_000), 60_000, 60_000];
+    const window = samples.reduce<number[]>((acc, ms) => addStepSample(acc, ms), []);
+    expect(window).toHaveLength(10);
+    expect(window.slice(-2)).toEqual([60_000, 60_000]);
+  });
+  it('is unknown when the steps left are unknown, and ignores bad measurements', () => {
+    expect(estimateMinutesLeft([60_000], null)).toBeNull();
+    expect(addStepSample([1_000], Number.NaN)).toEqual([1_000]);
+    expect(addStepSample([1_000], -5)).toEqual([1_000]);
+    expect(estimateMinutesLeft([Number.NaN, 0], 2)).toBe(1);
+  });
+  it('calls a step slow after three times the average, and never before the server\'s own 90 s', () => {
+    expect(slowStepMs([])).toBe(90_000);
+    expect(slowStepMs([60_000])).toBe(180_000);
   });
 });
 

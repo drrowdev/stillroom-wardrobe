@@ -10,13 +10,14 @@ import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import type { PublicConfig } from '../../data/config';
 import { loadComponents } from '../../data/outfits';
-import { tryOnReady, type TryOnResult } from '../../data/tryon';
+import { tryOnReady, supportedTryOnPolicy, type TryOnResult } from '../../data/tryon';
 import { AI_GUARD_RESUMED_EVENT } from '../../domain/ai-guard';
 import type { TryOnStep } from '../../domain/tryon';
 import type { OutfitComponent } from '../../domain/outfits';
 import type { Suggestion } from '../../domain/outfitgen-app';
 import {
-  classifyFailure, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureTargets, plannedKey, removableResults, reserveBlock, reservedGate,
+  addStepSample, classifyFailure, estimateMinutesLeft, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureTargets, plannedKey, removableResults,
+  reserveBlock, reservedGate, slowStepMs,
   type PictureBlock, type PictureResult, type ReservedMemory,
 } from '../../domain/outfitgen-pictures';
 import { TryOnRun, browserEnvironment, ideaSelection, type RunEnvironment, type RunGate, type RunPhase } from '../outfits/use-try-on';
@@ -25,21 +26,41 @@ import { readTryOnStatus, tryOnStoreFor, type TryOnStore } from '../settings/try
 import { outfitGenStoreFor, readList, readStatus, viewOf, type OutfitGenStore } from './outfitgen-store';
 
 /** The one line the Suggested outfits section shows when pictures are not being made, or `null`. */
-export type PictureLine = 'tryOnOff' | 'noPhoto' | 'full' | 'budget' | 'retryLater' | 'guard';
-export type Making = { id: string; ordinal: number; of: number; step: number; steps: number; waiting: boolean };
+export type PictureLine = 'tryOnOff' | 'tryOnPaused' | 'noPhoto' | 'full' | 'budget' | 'retryLater' | 'guard'
+  | 'otherWindow' | 'otherPicture' | 'ownTryOn' | 'cleanup' | 'stopping' | 'unreadable' | 'noLocks' | 'missing' | 'offline';
+/** Why the picture being made is not moving: the provider is busy, a try-on of the owner holds it, or an outcome is being checked. */
+export type MakingReason = 'working' | 'busy' | 'holding' | 'checking';
+export type Making = {
+  id: string; ordinal: number; of: number;
+  /** The step in progress (1-based) and the steps that finished before it. */
+  step: number; steps: number; completedSteps: number;
+  reason: MakingReason;
+  /** The step has taken much longer than usual. Only a message: nothing is sent or cancelled because of it. */
+  slow: boolean;
+};
 export type PictureState = {
   /** The newest idea picture of each planned garment set; `null` until the results have been read. */
   pictures: ReadonlyMap<string, PictureResult> | null;
   making: Making | null;
+  /** Pictures finished since the queue started, and how many it has taken on; failures and skips are not counted. */
+  done: number;
+  total: number;
+  /** Whole minutes still needed for the steps left (0: under a minute), or `null` when unknown or when nothing is being made. */
+  minutesLeft: number | null;
   /** Suggestions the queue will make a picture for after the current one. */
   waiting: ReadonlySet<string>;
   line: PictureLine | null;
+  /** When a timed line says it will look again; `null` for lines that wait for an event. */
+  lineAtMs: number | null;
+  /** Suggestions that have no picture and will not get one on their own (skipped or failed twice). */
+  missing: number;
   /** Suggestions whose pictures are being deleted (Remove); Undo waits for them. */
   deleting: ReadonlySet<string>;
   /** A picture of a removed suggestion could not be deleted; it stays under Today's try-ons. */
   deleteFailed: boolean;
 };
-const initial: PictureState = { pictures: null, making: null, waiting: new Set(), line: null, deleting: new Set(), deleteFailed: false };
+const initial: PictureState = { pictures: null, making: null, done: 0, total: 0, minutesLeft: null, waiting: new Set(), line: null, lineAtMs: null,
+  missing: 0, deleting: new Set(), deleteFailed: false };
 
 type Context = {
   id: string; key: string; steps: number; ordinal: number; of: number; run: TryOnRun | null; photoGeneration: number;
@@ -51,7 +72,7 @@ type Locks = { request: <T>(name: string, options: { ifAvailable: true }, callba
 const lineOf: Record<Stop['reason'], PictureLine | null> = {
   busy: 'retryLater', allowance: 'budget', consent: null, full: 'full', guard: 'guard', failed: 'retryLater',
 };
-const blockLine: Partial<Record<PictureBlock, PictureLine>> = { tryOn: 'tryOnOff', photo: 'noPhoto', guard: 'guard' };
+const blockLine: Partial<Record<PictureBlock, PictureLine>> = { tryOn: 'tryOnOff', photo: 'noPhoto', guard: 'guard', offline: 'offline', foreground: 'ownTryOn' };
 
 export class PictureQueue {
   private state: PictureState = initial;
@@ -67,8 +88,13 @@ export class PictureQueue {
   private readonly pending = new Map<string, Suggestion>();
   private lastCleanupMs = 0;
   private readonly openChains = new Map<string, string>();
+  /** Chains of this queue's own runs that were given up without a confirmed end. Nothing new starts until each is shown to be over. */
+  private readonly abandoned = new Set<string>();
   private resultsSeq = 0;
   private reserved: ReservedMemory = noReserved;
+  private stepSamples: number[] = [];
+  /** The suggestions waiting behind the picture being made, with their step counts, so the time left follows a skip or a Remove. */
+  private readonly queued = new Map<string, number>();
   private stop: Stop | null = null;
   private failures = 0;
   private deferrals = 0;
@@ -131,7 +157,8 @@ export class PictureQueue {
   /** Marks that the owner is deciding this suggestion (Keep or Remove); the returned function ends the mark. */
   intend(id: string, kind: 'keep' | 'remove'): () => void {
     this.intents.set(id, kind);
-    return () => { if (this.intents.get(id) === kind) this.intents.delete(id); this.watchCurrent(); this.kick(); };
+    this.refreshEstimate();
+    return () => { if (this.intents.get(id) === kind) this.intents.delete(id); this.watchCurrent(); this.refreshEstimate(); this.kick(); };
   }
 
   /**
@@ -234,6 +261,7 @@ export class PictureQueue {
   private changed() {
     if (this.disposed) return;
     this.watchCurrent();
+    this.refreshEstimate();
     if (this.sign() !== this.signature) this.kick();
   }
   private kick() {
@@ -310,15 +338,36 @@ export class PictureQueue {
     this.stop = { reason, until: forMs === null ? Number.POSITIVE_INFINITY : Date.now() + forMs, signature: this.stopSignature() };
     if (reason === 'guard') this.guardPaused = true;
     if (forMs !== null) this.poll(forMs);
-    this.emit({ line: lineOf[reason], waiting: new Set() });
+    this.emit({ line: lineOf[reason], lineAtMs: forMs === null ? null : this.stop.until, waiting: new Set(), minutesLeft: null });
   }
-  private blocked(block: PictureBlock) {
-    const t = this.tryOn.get();
-    const known = t.read.kind === 'ready';
-    const line = block === 'cooldown' ? lineOf[this.stop?.reason ?? 'failed'] : block === 'tryOn' && !known ? null : blockLine[block] ?? null;
-    this.emit({ line, waiting: new Set() });
-    if (this.readFailed() && navigator.onLine) this.poll();
-    if (block === 'cooldown' && this.stop && Number.isFinite(this.stop.until)) this.poll(Math.max(1_000, this.stop.until - Date.now()));
+  /** Shows one line (or none) and says when the queue looks again: after `wakeMs` (the line then names the time) or, with `null`, on an event. */
+  private idle(line: PictureLine | null, wakeMs: number | null = null, patch: Partial<PictureState> = {}): 'idle' {
+    this.emit({ line, lineAtMs: wakeMs === null ? null : Date.now() + wakeMs, waiting: new Set(), minutesLeft: null, ...patch });
+    if (wakeMs !== null) this.poll(wakeMs);
+    return 'idle';
+  }
+  /** Try-on is on for this owner but the service is unavailable for now (provider paused, or the status itself unavailable). */
+  private tryOnPaused(): boolean {
+    const read = this.tryOn.get().read;
+    if (read.kind !== 'ready') return false;
+    const status = read.status;
+    if (status.code === 'UNAVAILABLE') return true;
+    return status.code === 'OK' && status.consent?.enabled === true && status.policy?.activated === true && supportedTryOnPolicy(status)
+      && !status.policy.providerAvailable;
+  }
+  private blocked(block: PictureBlock): 'idle' {
+    const known = this.tryOn.get().read.kind === 'ready';
+    const cooldown = block === 'cooldown';
+    // A read that failed is tried again by the poll, and said so; waiting for a read that is merely not done yet is not worth a line.
+    const unknown = block === 'unresolved' || (block === 'tryOn' && !known);
+    const retrying = unknown && this.readFailed() && navigator.onLine;
+    const paused = block === 'tryOn' && known && this.tryOnPaused();
+    const line = cooldown ? lineOf[this.stop?.reason ?? 'failed'] : unknown ? (retrying ? 'unreadable' : null) : paused ? 'tryOnPaused' : blockLine[block] ?? null;
+    const until = cooldown && this.stop && Number.isFinite(this.stop.until) ? this.stop.until : null;
+    this.emit({ line, lineAtMs: retrying || paused ? Date.now() + PICTURE_LIMITS.pollMs : until, waiting: new Set(), minutesLeft: null });
+    if ((this.readFailed() || paused) && navigator.onLine) this.poll();
+    if (until !== null) this.poll(Math.max(1_000, until - Date.now()));
+    return 'idle';
   }
 
   /** One evaluation: reads what is stale, checks the gates, makes at most one picture. `ran` means a chain ended and another may follow. */
@@ -330,14 +379,18 @@ export class PictureQueue {
     if (this.disposed) return 'idle';
     this.signature = this.sign();
     const block = pictureBlock(this.inputs());
-    if (block !== null) { this.blocked(block); return 'idle'; }
+    if (block !== null) return this.blocked(block);
     const locks = (navigator as unknown as { locks?: Locks }).locks;
     // Without Web Locks there is no way to keep two windows apart, so nothing is made automatically.
-    if (!locks) return 'idle';
-    return locks.request(`stillroom-pictures-${this.scope.ownerId}`, { ifAvailable: true }, async (held) => {
-      if (!held) { this.poll(); return 'idle'; }
-      return this.underLock();
-    });
+    if (!locks) return this.idle('noLocks');
+    try {
+      return await locks.request(`stillroom-pictures-${this.scope.ownerId}`, { ifAvailable: true }, async (held) => {
+        if (!held) return this.idle('otherWindow', PICTURE_LIMITS.pollMs);
+        return this.underLock();
+      });
+    } catch {
+      return this.disposed ? 'idle' : this.idle('unreadable', PICTURE_LIMITS.pollMs);
+    }
   }
 
   private unread(kind: string) { return kind === 'unknown' || kind === 'failed'; }
@@ -355,6 +408,8 @@ export class PictureQueue {
     if (this.disposed || !navigator.onLine) return;
     const t = this.tryOn;
     if (this.unread(t.get().read.kind)) await readTryOnStatus(t, 'active');
+    // A try-on that is on but paused by the service is read again on every look, before its cached state blocks anything.
+    else if (this.tryOnPaused()) await readTryOnStatus(t, 'fresh');
     if (this.unread(t.getPhoto().read)) await readPersonPhoto(t);
     if (!this.disposed && o.get().list.suggestions.length > 0 && this.state.pictures === null) await this.readResults();
   }
@@ -367,7 +422,8 @@ export class PictureQueue {
     if (at === this.resultsSeq) {
       this.emit({ pictures: pictureIndex(results), deleteFailed: this.pending.size > 0 });
     }
-    return results;
+    // A missing list is shown as empty but never counts as a usable one: nothing is made without knowing what already exists.
+    return list === 'missing' ? null : results;
   }
 
   private async ensureComponents(list: readonly Suggestion[]): Promise<boolean> {
@@ -389,38 +445,74 @@ ull for a plan too short to get a picture, or 'unresolved' when the garments cou
 
   private async underLock(): Promise<'ran' | 'idle'> {
     const t = this.tryOn, o = this.outfit;
+    // First, this queue's own given-up chains must be shown to be over (their cancel was only sent). One of them may finish its picture
+    // meanwhile, so everything below is read and decided after this, never before. Kept apart from the best-effort foreign-count gate.
+    if (this.abandoned.size > 0 && !await this.settleAbandoned()) return this.disposed ? 'idle' : this.idle('stopping', PICTURE_LIMITS.pollMs);
+    if (this.disposed) return 'idle';
     // Consent is read again before every chain, so a withdrawal in another window is seen; unknown or failed means nothing is made.
     const consent = await readStatus(o, 'fresh');
     if (this.disposed) return 'idle';
-    if (!consent || viewOf(o.get()).kind !== 'on') { this.poll(); return 'idle'; }
+    if (!consent) return this.idle('unreadable', PICTURE_LIMITS.pollMs);
+    // Consent is off: the section says so itself, and turning it on starts the queue again.
+    if (viewOf(o.get()).kind !== 'on') return this.idle(null);
     const status = await readTryOnStatus(t, 'fresh');
-    if (this.disposed || !status) return 'idle';
+    if (this.disposed) return 'idle';
+    if (!status) return t.get().read.kind === 'failed' ? this.idle('unreadable', PICTURE_LIMITS.pollMs) : this.idle(null, PICTURE_LIMITS.pollMs);
     const ready = await this.readResults();
-    if (this.disposed || !ready) { this.poll(); return 'idle'; }
-    if (pictureBlock(this.inputs()) !== null) return 'idle';
-    if (status.results >= PICTURE_LIMITS.resultsStop) { this.emit({ line: 'full', waiting: new Set() }); return 'idle'; }
+    if (this.disposed) return 'idle';
+    if (!ready) return this.idle('unreadable', PICTURE_LIMITS.pollMs);
+    const block = pictureBlock(this.inputs());
+    if (block !== null) return this.blocked(block);
+    if (status.results >= PICTURE_LIMITS.resultsStop) return this.idle('full', PICTURE_LIMITS.stopMs / 6);
     // A removed suggestion's chain that is not shown to be over may still claim: nothing new starts until it is.
-    if (this.openChains.size > 0) { this.poll(); return 'idle'; }
+    if (this.openChains.size > 0) return this.idle('cleanup', PICTURE_LIMITS.pollMs);
     const gate = reservedGate(this.reserved, status.results, ready.length, Date.now());
     this.reserved = gate.memory;
-    if (gate.wait) { this.poll(); return 'idle'; }
+    if (gate.wait) return this.idle('otherPicture', PICTURE_LIMITS.pollMs);
     const list = o.get().list.suggestions;
-    if (!await this.ensureComponents(list)) { this.poll(); return 'idle'; }
+    if (!await this.ensureComponents(list)) return this.idle('unreadable', PICTURE_LIMITS.pollMs);
     const candidates = list.map((entry) => {
       const steps = ideaSelection(entry.itemIds, this.components).steps;
       return { id: entry.id, key: plannedKey(steps), steps };
     });
-    const targets = pictureTargets(candidates, { have: pictureIndex(ready), attempts: this.attempts, skipped: this.skipped,
-      excluded: new Set([...this.intents.keys(), ...this.deleting, ...this.pending.keys()]) });
-    if (!targets.length) { this.finished = 0; this.emit({ line: null, waiting: new Set() }); return 'idle'; }
-    const target = targets[0]!;
-    if (reserveBlock(status.budget, status.policy?.maxRequestMicro ?? null, target.steps.length)) {
-      this.emit({ line: 'budget', waiting: new Set() });
-      this.poll(PICTURE_LIMITS.stopMs / 6);
-      return 'idle';
+    const have = pictureIndex(ready);
+    const excluded = new Set([...this.intents.keys(), ...this.deleting, ...this.pending.keys()]);
+    const targets = pictureTargets(candidates, { have, attempts: this.attempts, skipped: this.skipped, excluded });
+    if (!targets.length) {
+      const done = this.finished;
+      this.finished = 0;
+      this.queued.clear();
+      // Outfits that have no picture and will not get one on their own (skipped, failed twice, or a plan too short for a picture) are said,
+      // not left unexplained. A too-short plan counts by suggestion; suggestions sharing a planned set share one picture.
+      const open = candidates.filter((entry) => !excluded.has(entry.id));
+      const missing = open.filter((entry) => entry.key === null).length
+        + new Set(open.filter((entry) => entry.key !== null && !have.has(entry.key)).map((entry) => entry.key)).size;
+      return this.idle(missing > 0 ? 'missing' : null, null, { done, total: done, missing });
     }
-    this.emit({ line: null, waiting: new Set(targets.slice(1).map((entry) => entry.id)) });
+    const target = targets[0]!;
+    if (reserveBlock(status.budget, status.policy?.maxRequestMicro ?? null, target.steps.length)) return this.idle('budget', PICTURE_LIMITS.stopMs / 6);
+    this.queued.clear();
+    for (const entry of targets.slice(1)) this.queued.set(entry.id, entry.steps.length);
+    this.emit({ line: null, lineAtMs: null, missing: 0, done: this.finished, total: this.finished + targets.length,
+      waiting: new Set(targets.slice(1).map((entry) => entry.id)) });
     return this.make(target, targets.length);
+  }
+
+  /** Steps still to do: those of the picture in progress and of every suggestion still waiting for its turn. */
+  private minutesLeft(steps: number, completed: number): number | null {
+    let left = Math.max(0, steps - completed);
+    const live = new Set(this.outfit.get().list.suggestions.map((entry) => entry.id));
+    for (const [id, count] of this.queued) {
+      if (live.has(id) && !this.skipped.has(id) && !this.intents.has(id) && !this.deleting.has(id) && !this.pending.has(id)) left += count;
+    }
+    return estimateMinutesLeft(this.stepSamples, left);
+  }
+  /** A card was skipped, decided or removed while a picture is made: the time left follows. */
+  private refreshEstimate() {
+    const making = this.state.making;
+    if (!making) return;
+    const minutes = this.minutesLeft(making.steps, making.completedSteps);
+    if (minutes !== this.state.minutesLeft) this.emit({ minutesLeft: minutes });
   }
 
   private async make(target: { id: string; key: string | null; steps: TryOnStep[] }, left: number): Promise<'ran' | 'idle'> {
@@ -429,6 +521,7 @@ ull for a plan too short to get a picture, or 'unresolved' when the garments cou
     const ctx: Context = { id: target.id, key: target.key!, steps: target.steps.length, ordinal: this.finished + 1, of: this.finished + left, run: null,
       photoGeneration, cancelled: false, gated: false, settled: false, cancel: () => undefined };
     this.current = ctx;
+    let cancelSlow = () => {};
     try {
       const loaded = await loadPersonPhoto(t, this.scope.signal);
       if (this.disposed || ctx.cancelled) return 'idle';
@@ -445,10 +538,25 @@ ull for a plan too short to get a picture, or 'unresolved' when the garments cou
       let unsubscribe = () => {};
       const phase = await new Promise<RunPhase | 'cancelled'>((resolve) => {
         ctx.cancel = () => resolve('cancelled');
+        // The step in progress and when it was sent. The slow-step timer belongs to the step: only a new step starts it again, never
+        // a repeated report of the same one (checks, BUSY waits), and it only changes the words shown.
+        let stepIndex = -1, stepAt = this.env.now(), slow = false;
         const look = () => {
           const now = run.get();
-          this.emit({ making: { id: ctx.id, ordinal: ctx.ordinal, of: ctx.of, steps: ctx.steps, waiting: now.kind === 'running' && now.waiting === true,
-            step: 'index' in now ? now.index + 1 : 1 } });
+          if ((now.kind === 'running' || now.kind === 'checking' || now.kind === 'stopping') && now.index !== stepIndex) {
+            if (stepIndex >= 0 && now.index > stepIndex) this.stepSamples = addStepSample(this.stepSamples, this.env.now() - stepAt);
+            stepIndex = now.index; stepAt = this.env.now(); slow = false;
+            cancelSlow();
+            cancelSlow = this.env.setTimer(() => { slow = true; look(); }, slowStepMs(this.stepSamples));
+          }
+          if (now.kind === 'result' || now.kind === 'failed' || now.kind === 'stopped') cancelSlow();
+          if (now.kind === 'result' && stepIndex >= 0) { this.stepSamples = addStepSample(this.stepSamples, this.env.now() - stepAt); stepIndex = -1; }
+          const completed = now.kind === 'result' ? ctx.steps : Math.max(0, stepIndex);
+          const reason: Making['reason'] = now.kind === 'checking' ? 'checking'
+            : now.kind === 'running' && now.waiting === true ? (this.tryOn.foregroundActive() ? 'holding' : 'busy') : 'working';
+          this.emit({ making: { id: ctx.id, ordinal: ctx.ordinal, of: ctx.of, steps: ctx.steps, completedSteps: completed,
+            step: Math.min(ctx.steps, completed + 1), reason, slow: slow && now.kind !== 'result' },
+          minutesLeft: this.minutesLeft(ctx.steps, completed) });
           if (now.kind === 'result' || now.kind === 'failed' || now.kind === 'stopped') resolve(now);
         };
         unsubscribe = run.subscribe(look);
@@ -458,20 +566,42 @@ ull for a plan too short to get a picture, or 'unresolved' when the garments cou
       unsubscribe();
       return await this.settle(ctx, phase);
     } finally {
-      ctx.run?.abandon();
-      this.current = null;
-      this.emit({ making: null });
+      cancelSlow();
+      this.release(ctx.run);
+      this.emit({ making: null, minutesLeft: null });
     }
+  }
+
+  /**
+   * Gives a run up. Its cancel is only sent, not confirmed, so a chain that may still be open on the server is remembered here and nothing new
+   * starts until it is shown to be over (see `settleAbandoned`). Remove tracks its own chain in `openChains`.
+   */
+  private release(run: TryOnRun | null) {
+    if (!run) return;
+    const kind = run.get().kind;
+    if (run.chainStarted && kind !== 'result' && kind !== 'stopped' && ![...this.openChains.values()].includes(run.id)) this.abandoned.add(run.id);
+    run.abandon();
+  }
+  /** Confirms every given-up chain of this queue is over (terminal status, or a confirmed cancel); the cancel is sent again each time. */
+  private async settleAbandoned(): Promise<boolean> {
+    for (const id of [...this.abandoned]) {
+      if (this.disposed) return false;
+      if (await this.chainEnded(id)) this.abandoned.delete(id);
+    }
+    return this.abandoned.size === 0;
   }
 
   private async settle(ctx: Context, phase: RunPhase | 'cancelled' | null): Promise<'ran' | 'idle'> {
     const run = ctx.run;
     if (phase === null) { this.deferrals++; return this.deferrals >= 3 ? this.parkDeferred() : 'ran'; }
-    if (phase === 'cancelled' || ctx.cancelled) { run?.abandon(); await this.readResults(); return 'ran'; }
+    if (phase === 'cancelled' || ctx.cancelled) { this.release(run); await this.readResults(); return 'ran'; }
     if (phase.kind === 'result') {
       run?.dispose();
       this.attempts.delete(ctx.id);
       this.finished += 1;
+      // The queue's own picture adds one stored row; it is not another chain's, so the next look does not take it for a rise.
+      if (this.reserved.lastStatus !== null) this.reserved = { ...this.reserved, lastStatus: this.reserved.lastStatus + 1 };
+      this.emit({ done: this.finished });
       this.failures = 0;
       this.deferrals = 0;
       await this.readResults();
@@ -480,7 +610,7 @@ ull for a plan too short to get a picture, or 'unresolved' when the garments cou
     if (phase.kind !== 'failed') { run?.dispose(); return 'ran'; }
     // Only a failure after step 1 proves the claim went through; before that a refusal may be any of UNAVAILABLE, INACTIVE or UNCONFIGURED.
     const claimed = (run?.chainStarted ?? false) && phase.index > 0;
-    run?.abandon();
+    this.release(run);
     const action = classifyFailure(phase.failure, claimed, ctx.gated);
     switch (action.kind) {
       case 'skip': this.skipped.add(ctx.id); return 'ran';
