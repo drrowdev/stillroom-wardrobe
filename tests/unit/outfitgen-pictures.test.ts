@@ -95,8 +95,10 @@ describe('what each failure means for the queue (OUTFITGEN2)', () => {
     for (const kind of ['failed', 'lost', 'mismatch'] as const) expect(classifyFailure(kind, true, false)).toEqual({ kind: 'retry' });
     expect(classifyFailure('unavailable', true, false)).toEqual({ kind: 'retry' });
   });
-  it('stops the queue when a chain that never started is refused, and counts nothing for its own gate', () => {
-    expect(classifyFailure('unavailable', false, false)).toMatchObject({ kind: 'stop', reason: 'failed' });
+  it('stops the queue for the cooldown when a refusal comes before the claim went through (claimed is false), and counts nothing for its own gate', () => {
+    expect(classifyFailure('unavailable', false, false)).toEqual({ kind: 'stop', reason: 'failed', forMs: PICTURE_LIMITS.stopMs });
+    // After a successful claim the same outcome is an unknown step, which counts as one attempt.
+    expect(classifyFailure('unavailable', true, false)).toEqual({ kind: 'retry' });
     expect(classifyFailure('failed', true, true)).toEqual({ kind: 'defer' });
     expect(classifyFailure('unavailable', true, true)).toEqual({ kind: 'defer' });
   });

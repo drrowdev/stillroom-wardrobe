@@ -63,7 +63,10 @@ export class PictureQueue {
   private readonly skipped = new Set<string>();
   private readonly intents = new Map<string, 'keep' | 'remove'>();
   private readonly deleting = new Set<string>();
-  private readonly failedDeletes = new Set<string>();
+  /** Removed suggestions whose cleanup is not done: a chain not shown to be over, or a picture not deleted. Kept until it succeeds. */
+  private readonly pending = new Map<string, Suggestion>();
+  private lastCleanupMs = 0;
+  private readonly openChains = new Map<string, string>();
   private resultsSeq = 0;
   private reserved: ReservedMemory = noReserved;
   private stop: Stop | null = null;
@@ -132,40 +135,76 @@ export class PictureQueue {
   }
 
   /**
-   * After Remove: stops this suggestion's chain (reconciling its final outcome with the server), then deletes the pictures of its planned
-   * set that finished after the suggestion was created. Everything older stays. A failure is shown, never retried by itself.
+   * After Remove: stops this suggestion's chain and makes sure the server shows it ended, then deletes the pictures of its planned set
+   * that finished after the suggestion was created. Everything older stays. Anything that cannot be established or done leaves the
+   * cleanup pending: the warning stays, Undo stays off, and a later pass (or Retry) runs it again, so a result that completes late is
+   * still deleted. Nothing here retries on its own more often than every few seconds.
    */
   async discard(suggestion: Suggestion): Promise<void> {
-    if (this.disposed) return;
+    if (this.disposed || this.deleting.has(suggestion.id)) return;
     this.deleting.add(suggestion.id);
-    this.emit({ deleting: new Set(this.deleting) });
-    try {
-      const active = this.current;
-      if (active && active.id === suggestion.id) {
-        active.cancelled = true;
-        await active.run?.stop();
-        active.cancel();
-      }
-      const key = await this.keyOf(suggestion);
-      if (key === null) return;
-      const fresh = await this.tryOn.api.results().catch(() => null);
-      if (this.disposed) return;
-      if (fresh === null || fresh === 'missing') { this.failedDeletes.add(suggestion.id); return; }
-      for (const id of removableResults(fresh, key, suggestion.createdAtMs)) {
-        const outcome = await this.tryOn.api.deleteResult(id).catch(() => null);
-        if (this.disposed) return;
-        if (outcome === null) this.failedDeletes.add(id);
-      }
-    } finally {
+    this.emitBusy();
+    let done = false;
+    try { done = await this.cleanup(suggestion); } catch { done = false; }
+    finally {
       this.deleting.delete(suggestion.id);
+      if (done) this.pending.delete(suggestion.id); else this.pending.set(suggestion.id, suggestion);
       if (!this.disposed) {
+        this.emitBusy();
         await this.readResults();
-        this.emit({ deleting: new Set(this.deleting) });
         this.kick();
       }
     }
   }
+  /** Runs every pending cleanup again (the Retry button, and a later pass). */
+  async retryCleanup(): Promise<void> {
+    for (const suggestion of [...this.pending.values()]) {
+      if (this.disposed || !navigator.onLine) return;
+      await this.discard(suggestion);
+    }
+  }
+  private emitBusy() {
+    this.emit({ deleting: new Set([...this.deleting, ...this.pending.keys()]), deleteFailed: this.pending.size > 0 });
+  }
 
+  private async cleanup(suggestion: Suggestion): Promise<boolean> {
+    const active = this.current;
+    if (active && active.id === suggestion.id) {
+      active.cancelled = true;
+      const run = active.run;
+      await run?.stop().catch(() => undefined);
+      active.cancel();
+      if (run && run.chainStarted) {
+        const phase = run.get();
+        if (phase.kind !== 'stopped' && phase.kind !== 'result') this.openChains.set(suggestion.id, run.id);
+      }
+    }
+    // A chain that was not shown to be over stays open until a later attempt does show it, so a late result is deleted too.
+    const open = this.openChains.get(suggestion.id);
+    if (open !== undefined) {
+      if (!await this.chainEnded(open)) return false;
+      this.openChains.delete(suggestion.id);
+    }
+    const key = await this.keyOf(suggestion);
+    if (key === null) return false;
+    const fresh = await this.tryOn.api.results().catch(() => null);
+    if (this.disposed) return true;
+    if (fresh === null || fresh === 'missing') return false;
+    let ok = true;
+    for (const id of removableResults(fresh, key, suggestion.createdAtMs)) {
+      const outcome = await this.tryOn.api.deleteResult(id).catch(() => null);
+      if (this.disposed) return true;
+      if (outcome === null) ok = false;
+    }
+    return ok;
+  }
+  /** Whether the server shows the run's chain as over: the cancel was confirmed, the chain finished, or it is gone. */
+  private async chainEnded(chainId: string): Promise<boolean> {
+    const status = await this.tryOn.api.chainStatus(chainId).catch(() => null);
+    if (status === null) return false;
+    if (status.kind === 'code') return status.code === 'NOT_FOUND';
+    return status.state !== 'running';
+  }
   dispose() {
     if (this.disposed) return;
     this.cancelCurrent();
@@ -244,12 +283,18 @@ export class PictureQueue {
     const view = viewOf(o);
     const status = t.read.kind === 'ready' ? t.read.status : null;
     return {
-      consentOn: view.kind === 'on', consentChanging: o.writing || o.unresolved || this.outfit.writePromise !== null,
+      consentOn: view.kind === 'on', consentChanging: this.changing(),
       guardPaused: this.guardPaused || this.outfit.guardPaused, tryOnReady: tryOnReady(status), sessionStopped: this.tryOn.stopped(),
       photo: p.read === 'unknown' || (p.read === 'failed' && p.saved === null) ? 'unknown' as const : p.saved ? 'saved' as const : 'none' as const,
       online: navigator.onLine, visible: document.visibilityState === 'visible', foreground: this.tryOn.foregroundActive(),
       cooldownUntilMs: this.stop?.until ?? null, nowMs: Date.now(),
     };
+  }
+  /** A consent or photo change is pending in either store: nothing is admitted or sent until it settles. */
+  private changing(): boolean {
+    const o = this.outfit, t = this.tryOn, tryOnState = t.get();
+    return o.get().writing || o.get().unresolved || o.writePromise !== null
+      || tryOnState.writing || tryOnState.unresolved || t.writePromise !== null || t.getPhoto().busy !== null;
   }
   private stopSignature() {
     const t = this.tryOn.get(), p = this.tryOn.getPhoto();
@@ -273,6 +318,7 @@ export class PictureQueue {
   private async once(): Promise<'ran' | 'idle'> {
     if (this.disposed) return 'idle';
     if (this.stop && (this.stop.signature !== this.stopSignature() || Date.now() >= this.stop.until)) this.stop = null;
+    if (this.pending.size > 0 && Date.now() - this.lastCleanupMs > 15_000) { this.lastCleanupMs = Date.now(); await this.retryCleanup(); this.poll(); }
     await this.refresh();
     if (this.disposed) return 'idle';
     this.signature = this.sign();
@@ -305,8 +351,7 @@ export class PictureQueue {
     if (this.disposed || list === null) return null;
     const results = list === 'missing' ? [] : list;
     if (at === this.resultsSeq) {
-      for (const id of [...this.failedDeletes]) if (!results.some((entry) => entry.id === id) && !this.deleting.has(id)) this.failedDeletes.delete(id);
-      this.emit({ pictures: pictureIndex(results), deleteFailed: this.failedDeletes.size > 0 });
+      this.emit({ pictures: pictureIndex(results), deleteFailed: this.pending.size > 0 });
     }
     return results;
   }
@@ -328,6 +373,10 @@ export class PictureQueue {
 
   private async underLock(): Promise<'ran' | 'idle'> {
     const t = this.tryOn, o = this.outfit;
+    // Consent is read again before every chain, so a withdrawal in another window is seen; unknown or failed means nothing is made.
+    const consent = await readStatus(o, 'fresh');
+    if (this.disposed) return 'idle';
+    if (!consent || viewOf(o.get()).kind !== 'on') { this.poll(); return 'idle'; }
     const status = await readTryOnStatus(t, 'fresh');
     if (this.disposed || !status) return 'idle';
     const ready = await this.readResults();
@@ -344,7 +393,7 @@ export class PictureQueue {
       return { id: entry.id, key: plannedKey(steps), steps };
     });
     const targets = pictureTargets(candidates, { have: pictureIndex(ready), attempts: this.attempts, skipped: this.skipped,
-      excluded: new Set([...this.intents.keys(), ...this.deleting]) });
+      excluded: new Set([...this.intents.keys(), ...this.deleting, ...this.pending.keys()]) });
     if (!targets.length) { this.finished = 0; this.emit({ line: null, waiting: new Set() }); return 'idle'; }
     const target = targets[0]!;
     if (reserveBlock(status.budget, status.policy?.maxRequestMicro ?? null, target.steps.length)) {
@@ -411,9 +460,10 @@ export class PictureQueue {
       return 'ran';
     }
     if (phase.kind !== 'failed') { run?.dispose(); return 'ran'; }
-    const chainStarted = run?.chainStarted ?? false;
+    // Only a failure after step 1 proves the claim went through; before that a refusal may be any of UNAVAILABLE, INACTIVE or UNCONFIGURED.
+    const claimed = (run?.chainStarted ?? false) && phase.index > 0;
     run?.abandon();
-    const action = classifyFailure(phase.failure, chainStarted, ctx.gated);
+    const action = classifyFailure(phase.failure, claimed, ctx.gated);
     switch (action.kind) {
       case 'skip': this.skipped.add(ctx.id); return 'ran';
       case 'defer': this.deferrals++; return this.deferrals >= 3 ? this.parkDeferred() : 'ran';
@@ -445,11 +495,11 @@ export class PictureQueue {
     if (this.disposed || ctx.cancelled || !t.api.current() || t.disposed) return deny('abort');
     if (t.photoGeneration !== ctx.photoGeneration) return deny('abort');
     const s = o.get();
-    if (s.writing || s.unresolved || o.writePromise !== null || viewOf(s).kind !== 'on' || this.guardPaused || o.guardPaused) return deny('abort');
+    if (this.changing() || viewOf(s).kind !== 'on' || this.guardPaused || o.guardPaused) return deny('abort');
     const read = t.get().read;
     if (t.stopped() || read.kind !== 'ready' || !tryOnReady(read.status)) return deny('abort');
     const intent = this.intents.get(ctx.id);
-    if (intent === 'remove' || this.deleting.has(ctx.id) || (index === 0 && intent !== undefined)) return deny('abort');
+    if (intent === 'remove' || this.deleting.has(ctx.id) || this.pending.has(ctx.id) || (index === 0 && intent !== undefined)) return deny('abort');
     if (index === 0 && (!navigator.onLine || document.visibilityState !== 'visible')) return deny('abort');
     if (t.foregroundActive()) return deny('hold');
     ctx.gated = false;

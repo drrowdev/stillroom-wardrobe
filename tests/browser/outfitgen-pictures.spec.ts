@@ -190,6 +190,76 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
     expect(api.tryonControl.results).toHaveLength(0);
   });
 
+  test('a refusal before the claim stops the queue for the cooldown instead of retrying at once', async ({ page }) => {
+    const { api } = await start(page, { replies: [{ code: 'UNAVAILABLE', status: 503 }] });
+    await expect(section(page).locator('.suggested-picture-line')).toContainText(text('outfitgen.pictureRetry'), { timeout: 30_000 });
+    await quiet(page);
+    expect(requestsOf(api)).toHaveLength(1);
+  });
+
+  test('consent withdrawn in another window is seen before the next chain', async ({ page }) => {
+    const held = gate();
+    const { api } = await start(page, { replies: [{}, {}, { hold: held.hold }] });
+    await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(3);
+    // Another window turns suggested outfits off while the first chain is on its last step.
+    api.outfitgenControl.consent[owners.a] = null;
+    held.release();
+    await expect.poll(() => api.tryonControl.results.length, { timeout: 30_000 }).toBe(1);
+    await quiet(page);
+    expect(requestsOf(api)).toHaveLength(3);
+  });
+
+  test('a pending try-on consent change keeps the next step from being sent', async ({ page }) => {
+    const step = gate(), write = gate();
+    const { api } = await start(page, { replies: [{}, { hold: step.hold }] });
+    await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(2);
+    await page.route('**/rest/v1/rpc/tryon_set_consent', async (route) => { await write.hold; await route.fallback(); });
+    await page.evaluate(() => { location.hash = '#/settings'; });
+    await page.locator('section[aria-labelledby="tryon-heading"] [role="switch"][aria-checked="true"]').click();
+    step.release();
+    await quiet(page, 3_000);
+    expect(requestsOf(api)).toHaveLength(2);
+    write.release();
+  });
+
+  test('Remove keeps its cleanup pending until the chain is shown to be over, then deletes the late picture', async ({ page }) => {
+    const step = gate();
+    const { api, clothes } = await start(page, { replies: [{}, { hold: step.hold }] });
+    await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(2);
+    let failing = true;
+    for (const name of ['tryon_cancel', 'tryon_chain_status']) {
+      await page.route(`**/rest/v1/rpc/${name}`, (route) => failing ? route.abort('failed') : route.fallback());
+    }
+    await cards(page).first().getByRole('button', { name: text('outfitgen.removeLabel', 'en', { title: 'Crisp navy' }), exact: true }).click();
+    await expect(cards(page)).toHaveCount(1);
+    step.release();
+    await expect(section(page).getByText(text('outfitgen.pictureDeleteFailed'), { exact: false })).toBeVisible({ timeout: 30_000 });
+    await expect(section(page).getByRole('button', { name: text('common.undo'), exact: true })).toBeDisabled();
+    // The chain finishes late, after the cleanup looked.
+    const late = randomUUID();
+    api.tryonControl.results.push({ id: late, owner: owners.a, outfitId: null, itemIds: [clothes.shirt.id, clothes.trousers.id, clothes.boots.id],
+      image: api.fixture, completedAtMs: Date.now() });
+    for (const chain of api.tryonControl.chains) { chain.state = 'complete'; chain.resultId = late; }
+    failing = false;
+    await section(page).getByRole('button', { name: text('common.retry'), exact: true }).click();
+    await expect.poll(() => api.tryonControl.deletes, { timeout: 30_000 }).toEqual([late]);
+    await expect(section(page).getByText(text('outfitgen.pictureDeleteFailed'), { exact: false })).toHaveCount(0);
+    await expect(section(page).getByRole('button', { name: text('common.undo'), exact: true })).toBeEnabled();
+  });
+
+  test('a picture still being made when the suggestion is kept appears in the kept outfit\'s details', async ({ page }) => {
+    const held = gate();
+    const { api } = await start(page, { replies: [{}, {}, { hold: held.hold }] });
+    await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(3);
+    await cards(page).first().getByRole('button', { name: text('outfitgen.keepLabel', 'en', { title: 'Crisp navy' }), exact: true }).click();
+    await expect(cards(page)).toHaveCount(1);
+    const outfitId = String(api.outfits.find((entry) => entry.title === 'Crisp navy')!.id);
+    await page.evaluate((id) => { location.hash = `#/outfits/${id}`; }, outfitId);
+    await expect(page.locator('#outfit-detail-title')).toBeVisible();
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(0);
+    held.release();
+    await expect(page.locator('.tryon-saved-list img')).toBeVisible({ timeout: 30_000 });
+  });
   test('Remove deletes what was made while the suggestion existed, and Undo makes a new picture', async ({ page }) => {
     const { api, clothes } = await start(page);
     const first = [clothes.shirt.id, clothes.trousers.id, clothes.boots.id];

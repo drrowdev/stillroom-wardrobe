@@ -437,7 +437,7 @@ export function useTryOnStatus(store: TryOnStore | null): TryOnStatus | null {
 /** Saved try-ons of one outfit. `missing`: this backend has no try-on; `failed`: the list couldn't be read. */
 export type SavedTryOnsState = { kind: 'idle' | 'loading' | 'missing' | 'failed' } | { kind: 'ready'; results: TryOnResult[] };
 /** Saved try-ons of one outfit, or (`null`) of unsaved ideas, newest first; each stays until it is deleted. `retry` reads the list again. */
-export function useOutfitTryOns(api: TryOnClient | null, outfitId: string | null, enabled: boolean, sameSet: string | null = null): { state: SavedTryOnsState; retry: () => void } {
+export function useOutfitTryOns(api: TryOnClient | null, outfitId: string | null, enabled: boolean, sameSet: string | null = null, stamp = ''): { state: SavedTryOnsState; retry: () => void } {
   const [state, setState] = useState<SavedTryOnsState>({ kind: 'idle' });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -451,7 +451,7 @@ export function useOutfitTryOns(api: TryOnClient | null, outfitId: string | null
         .sort((a, b) => b.completedAtMs - a.completedAtMs) });
     }, () => { if (!controller.signal.aborted) setState({ kind: 'failed' }); });
     return () => controller.abort();
-  }, [api, outfitId, enabled, sameSet, attempt]);
+  }, [api, outfitId, enabled, sameSet, stamp, attempt]);
   const retry = useCallback(() => setAttempt(value => value + 1), []);
   return { state, retry };
 }

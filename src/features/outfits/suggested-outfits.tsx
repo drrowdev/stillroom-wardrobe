@@ -107,7 +107,8 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
     {(view.kind === 'off' || view.kind === 'renew') && <p><span>{t('outfitgen.off')}</span>{' '}<a className="text-button" href="#/settings">{t('aiC.turnOn')}</a></p>}
     {on && limits?.reached && <p className="notice">{t('outfitgenC.limit')}</p>}
     {on && suggestions.length > 0 && pics?.line && <PictureLineText line={pics.line} t={t} />}
-    {on && pics?.deleteFailed && <p className="notice" role="status">{t('outfitgen.pictureDeleteFailed')}</p>}
+    {on && pics?.deleteFailed && <p className="notice" role="status">{t('outfitgen.pictureDeleteFailed')}{' '}<button type="button" className="text-button" disabled={!online}
+      onClick={() => { void queue?.retryCleanup(); }}>{t('common.retry')}</button></p>}
     {view.kind === 'loadFailed' && <p className="notice notice-error">{t('outfitgen.loadFailed')}</p>}
     {on && state.list.kind === 'failed' && <div className="notice notice-error" role="alert"><span>{t('outfitgen.loadFailed')}</span>
       <button type="button" className="text-button" disabled={!online} onClick={() => { void readList(store); }}>{t('common.retry')}</button></div>}

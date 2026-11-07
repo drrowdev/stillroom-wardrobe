@@ -98,9 +98,10 @@ export type FailureAction =
   | { kind: 'stop'; reason: 'busy' | 'allowance' | 'consent' | 'full' | 'guard' | 'failed'; forMs: number | null };
 /**
  * What a failed chain means for the queue. Nothing here sends again: a failure either skips the outfit, counts one attempt
- * against it (two at most), or stops the whole queue. A failure caused by the queue's own gate (`gated`) counts for nothing.
+ * against it (two at most), or stops the whole queue. A failure caused by the queue's own gate (`gated`) counts for nothing. claimed is true
+ * only once step 1 went through: a refusal before that (unavailable, inactive, unconfigured) stops the queue for the cooldown and is not retried.
  */
-export function classifyFailure(kind: FailureKind, chainStarted: boolean, gated: boolean): FailureAction {
+export function classifyFailure(kind: FailureKind, claimed: boolean, gated: boolean): FailureAction {
   if (gated) return { kind: 'defer' };
   switch (kind) {
     case 'filtered': return { kind: 'skip' };
@@ -109,7 +110,7 @@ export function classifyFailure(kind: FailureKind, chainStarted: boolean, gated:
     case 'turnedOff': return { kind: 'stop', reason: 'consent', forMs: null };
     case 'resultsFull': return { kind: 'stop', reason: 'full', forMs: PICTURE_LIMITS.stopMs };
     case 'paused': return { kind: 'stop', reason: 'guard', forMs: null };
-    case 'unavailable': return chainStarted ? { kind: 'retry' } : { kind: 'stop', reason: 'failed', forMs: PICTURE_LIMITS.stopMs };
+    case 'unavailable': return claimed ? { kind: 'retry' } : { kind: 'stop', reason: 'failed', forMs: PICTURE_LIMITS.stopMs };
     default: return { kind: 'retry' };
   }
 }
