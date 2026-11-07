@@ -185,8 +185,11 @@ export class PictureQueue {
       if (!await this.chainEnded(open)) return false;
       this.openChains.delete(suggestion.id);
     }
-    const key = await this.keyOf(suggestion);
-    if (key === null) return false;
+    const resolved = await this.keyOf(suggestion);
+    if (resolved === 'unresolved') return false;
+    // A plan too short for a picture never had one made: there is nothing to delete.
+    if (resolved === null) return true;
+    const key = resolved;
     const fresh = await this.tryOn.api.results().catch(() => null);
     if (this.disposed) return true;
     if (fresh === null || fresh === 'missing') return false;
@@ -198,12 +201,15 @@ export class PictureQueue {
     }
     return ok;
   }
-  /** Whether the server shows the run's chain as over: the cancel was confirmed, the chain finished, or it is gone. */
+  /**
+   * Whether the chain is over: it shows a terminal state, or a cancel is confirmed (the cancel is sent again here, so a failed one is retried).
+   * An unknown chain (NOT_FOUND) is not over: a step already sent can still claim, and only a successful cancel leaves the durable stop marker.
+   */
   private async chainEnded(chainId: string): Promise<boolean> {
     const status = await this.tryOn.api.chainStatus(chainId).catch(() => null);
-    if (status === null) return false;
-    if (status.kind === 'code') return status.code === 'NOT_FOUND';
-    return status.state !== 'running';
+    if (status?.kind === 'chain' && status.state !== 'running') return true;
+    const reply = await this.tryOn.api.cancel(chainId).catch(() => null);
+    return reply !== null && ['CANCELLED', 'COMPLETED', 'EXPIRED', 'WITHDRAWN', 'STALE'].includes(reply.code);
   }
   dispose() {
     if (this.disposed) return;
@@ -223,7 +229,7 @@ export class PictureQueue {
     const o = this.outfit.get(), t = this.tryOn.get(), p = this.tryOn.getPhoto();
     const status = t.read.kind === 'ready' ? t.read.status : null;
     return [viewOf(o).kind, o.writing, o.unresolved, o.list.suggestions.map((entry) => entry.id).join(','), tryOnReady(status), this.tryOn.stopped(),
-      p.read, p.saved?.savedAtMs ?? '', this.tryOn.foregroundActive(), this.guardPaused || this.outfit.guardPaused].join('|');
+      p.read, p.saved?.savedAtMs ?? '', this.tryOn.foregroundActive(), this.guardPaused || this.outfit.guardPaused, this.changing()].join('|');
   }
   private changed() {
     if (this.disposed) return;
@@ -311,6 +317,7 @@ export class PictureQueue {
     const known = t.read.kind === 'ready';
     const line = block === 'cooldown' ? lineOf[this.stop?.reason ?? 'failed'] : block === 'tryOn' && !known ? null : blockLine[block] ?? null;
     this.emit({ line, waiting: new Set() });
+    if (this.readFailed() && navigator.onLine) this.poll();
     if (block === 'cooldown' && this.stop && Number.isFinite(this.stop.until)) this.poll(Math.max(1_000, this.stop.until - Date.now()));
   }
 
@@ -333,15 +340,22 @@ export class PictureQueue {
     });
   }
 
+  private unread(kind: string) { return kind === 'unknown' || kind === 'failed'; }
+  /** A status or photo read that failed: the poll tries again while online, so the queue does not wait for an unrelated trigger. */
+  private readFailed(): boolean {
+    return [this.outfit.get().read.kind, this.tryOn.get().read.kind, this.tryOn.getPhoto().read].includes('failed');
+  }
+
   private async refresh() {
     const o = this.outfit;
-    if (o.get().read.kind === 'unknown') await readStatus(o);
+    // A failed read is tried again on every pass (and by the poll in locked), but nothing is admitted until a fresh read succeeds.
+    if (this.unread(o.get().read.kind)) await readStatus(o);
     if (this.disposed || viewOf(o.get()).kind !== 'on') return;
     if (o.get().list.kind === 'unknown') await readList(o);
     if (this.disposed || !navigator.onLine) return;
     const t = this.tryOn;
-    if (t.get().read.kind === 'unknown') await readTryOnStatus(t, 'active');
-    if (t.getPhoto().read === 'unknown') await readPersonPhoto(t);
+    if (this.unread(t.get().read.kind)) await readTryOnStatus(t, 'active');
+    if (this.unread(t.getPhoto().read)) await readPersonPhoto(t);
     if (!this.disposed && o.get().list.suggestions.length > 0 && this.state.pictures === null) await this.readResults();
   }
 
@@ -366,8 +380,10 @@ export class PictureQueue {
       return true;
     } catch { return false; }
   }
-  private async keyOf(suggestion: Suggestion): Promise<string | null> {
-    if (!await this.ensureComponents([suggestion])) return null;
+  /** The planned set's key, 
+ull for a plan too short to get a picture, or 'unresolved' when the garments could not be read. */
+  private async keyOf(suggestion: Suggestion): Promise<string | null | 'unresolved'> {
+    if (!await this.ensureComponents([suggestion])) return 'unresolved';
     return plannedKey(ideaSelection(suggestion.itemIds, this.components).steps);
   }
 
