@@ -157,11 +157,10 @@ test.describe('OUTFITS-PICTURES saved-outfit cards', () => {
     const before = seen.pictures.length;
     expect(before).toBeGreaterThan(0);
     expect(before).toBeLessThan(14);
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await expect(async () => {
-      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      await page.evaluate(() => window.scrollBy(0, 300));
       expect(await page.locator('.outfit-card-picture').count()).toBe(14);
-    }).toPass({ timeout: 30_000 });
+    }).toPass({ timeout: 30_000, intervals: [100, 200, 300] });
     expect(peak).toBeLessThanOrEqual(3);
     expect(new Set(seen.pictures).size).toBe(14);
   });
@@ -185,19 +184,33 @@ test.describe('OUTFITS-PICTURES saved-outfit cards', () => {
     await expect.poll(() => page.evaluate(() => (window as unknown as { revoked: string[] }).revoked)).toContain(url);
   });
 
-  test('keeps the card layout at 320 px and 200% text', async ({ page }) => {
-    await page.setViewportSize({ width: 320, height: 640 });
+  test('keeps one 4:5 box for picture and collage cards, at 320 px with 200% text and in a wide grid', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
     await open(page, (api, clothes) => {
       const full = [clothes.top.id, clothes.trousers.id, clothes.shoes.id];
       result(api, seedOutfit(api, full, 'Weekend'), full, 1000);
       seedOutfit(api, [clothes.coat.id, clothes.cardigan.id, clothes.trousers.id], 'Cold day');
     });
-    await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });
     await expect(picture(page, 'Weekend')).toHaveCount(1);
-    const boxes = await page.evaluate(() => [...document.querySelectorAll('.outfit-card-thumbs')].map(box => ({ w: box.getBoundingClientRect().width, h: box.getBoundingClientRect().height })));
-    expect(boxes).toHaveLength(2);
-    for (const { w, h } of boxes) expect(Math.abs(w - h)).toBeLessThan(2);
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    const sizes = () => page.evaluate(() => ({
+      boxes: [...document.querySelectorAll('.outfit-card-thumbs')].map(box => ({ w: box.getBoundingClientRect().width, h: box.getBoundingClientRect().height })),
+      image: (() => { const box = document.querySelector('.outfit-card-picture img')!.getBoundingClientRect(); return { w: box.width, h: box.height }; })(),
+      tops: [...document.querySelectorAll('.outfit-card-link')].map(link => Math.round(link.getBoundingClientRect().top)),
+      scroll: document.documentElement.scrollWidth <= innerWidth,
+    }));
+    for (const width of [1280, 320]) {
+      await page.setViewportSize({ width, height: width === 320 ? 640 : 900 });
+      if (width === 320) await page.addStyleTag({ content: 'html { font-size: 200%; } body { font-size: 32px; }' });
+      await expect(picture(page, 'Weekend')).toHaveCount(1);
+      const seen = await sizes();
+      expect(seen.boxes).toHaveLength(2);
+      for (const { w, h } of seen.boxes) expect(Math.abs(h - w * 1.25)).toBeLessThan(2);
+      expect(Math.abs(seen.boxes[0]!.w - seen.boxes[1]!.w)).toBeLessThan(1);
+      expect(Math.abs(seen.boxes[0]!.h - seen.boxes[1]!.h)).toBeLessThan(1);
+      expect(Math.abs(seen.image.h - seen.boxes[0]!.h)).toBeLessThan(3);
+      if (width === 1280) expect(seen.tops[0]).toBe(seen.tops[1]);
+      expect(seen.scroll).toBe(true);
+    }
   });
 
   test('stays on the collage when the pictures cannot be read, or this backend has no try-on', async ({ page }) => {
