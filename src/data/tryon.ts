@@ -449,10 +449,10 @@ export class TryOnClient {
   }
   /**
    * Sends one step once under `requestId`, with the 100-second client deadline. Step 1 carries the outfit or the idea's items; a later step
-   * sends the previous step's picture unchanged. A thrown TIMEOUT or UNAVAILABLE means the outcome is unknown: the
+   * sends the previous step's picture unchanged. `gate` is checked right before the POST; false throws INVALID_INPUT. A thrown TIMEOUT or UNAVAILABLE means the outcome is unknown: the
    * caller reconciles through `chainStatus` and never sends the step again by itself.
    */
-  async step(input: StepInput, signal: AbortSignal): Promise<StepResponse> {
+  async step(input: StepInput, signal: AbortSignal, gate?: () => boolean): Promise<StepResponse> {
     const { chainId, step, requestId, person, outfitId, itemIds } = input;
     if (!isUuid(chainId) || !isUuid(requestId) || !Number.isInteger(step) || step < 1 || step > TRYON_MAX_STEPS
       || (step === 1 ? (outfitId === undefined) === (itemIds === undefined) : outfitId !== undefined || itemIds !== undefined)
@@ -470,6 +470,8 @@ export class TryOnClient {
       if (outfitId !== undefined) form.append('outfitId', outfitId);
       if (itemIds !== undefined) form.append('itemIds', itemIds.join(','));
       form.append('person', new Blob([person], { type: 'image/jpeg' }), 'person.jpg');
+      // The caller's last check, after every await that precedes the POST: a refusal sends nothing and charges nothing.
+      if (gate && !gate()) throw new TryOnError('INVALID_INPUT');
       const response = await wait(fetch(`${this.config.url}/functions/v1/try-on`, {
         method: 'POST', redirect: 'error', cache: 'no-store', credentials: 'omit', signal: inner,
         headers: this.headers(token, { Accept: 'image/jpeg, application/json' }), body: form,

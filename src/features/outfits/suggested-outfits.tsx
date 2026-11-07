@@ -3,16 +3,22 @@ import { Icon } from '../../app/icon';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import { loadComponents } from '../../data/outfits';
+import { plannedKey } from '../../domain/outfitgen-pictures';
 import { outfitGenLimits, type Suggestion } from '../../domain/outfitgen-app';
 import type { OutfitComponent } from '../../domain/outfits';
 import { pluralText, type Language, type MessageKey, type Translate } from '../../i18n';
 import '../../i18n/outfitgen';
+import '../../i18n/tryon';
 import type { PrivateImages } from '../../images/private-images';
 import { usePrivateImage } from '../../images/use-private-image';
 import {
   keepSuggestion, outfitGenStoreFor, readList, removeSuggestion, runManual, statusOf, undoRemoval, viewOf, type OutfitGenStore,
 } from '../outfitgen/outfitgen-store';
+import { pictureQueueFor, type PictureLine, type PictureQueue, type PictureState } from '../outfitgen/picture-queue';
 import { useOutfitGen, useOutfitGenStatus } from '../outfitgen/use-outfitgen';
+import { usePictureQueue } from '../outfitgen/use-pictures';
+import { TryOnPicture } from './try-on/try-on-parts';
+import { ideaSelection, itemName, slotKey } from './use-try-on';
 
 function Thumb({ component, images, t }: { component: OutfitComponent | undefined; images: PrivateImages; t: Translate }) {
   if (!component?.thumbPath) return <div className="outfit-thumb"><span className="photo-unavailable"><Icon name="photo" />{t('photo.missing')}</span></div>;
@@ -45,6 +51,10 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
   const heading = useRef<HTMLHeadingElement>(null);
   const [components, setComponents] = useState<ReadonlyMap<string, OutfitComponent>>(() => new Map());
   const on = view.kind === 'on';
+  const queue = pictureQueueFor(client, scope);
+  const pics = usePictureQueue(queue);
+  // The queue also starts a few seconds after the app opens; here it only reads the saved pictures for the cards on screen.
+  useEffect(() => { if (on && queue) { queue.start(); void queue.refreshPictures(); } }, [on, queue]);
   useEffect(() => { if (on && state.list.kind === 'unknown') void readList(store); }, [on, state.list.kind, store]);
   const wanted = state.list.suggestions.flatMap((suggestion) => suggestion.itemIds).filter((id) => !components.has(id));
   const wantedKey = [...new Set(wanted)].sort().join(',');
@@ -65,8 +75,18 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
   const settle = () => setTimeout(() => {
     if (document.activeElement === null || document.activeElement === document.body) heading.current?.focus();
   }, 0);
-  const keep = (id: string) => { void keepSuggestion(store, id).then((result) => { if (result.code === 'OK') onKept(); settle(); }); };
-  const remove = (id: string) => { void removeSuggestion(store, id).then(settle); };
+  // The decision is marked first, so the queue never mistakes a decided card for one that went away; Remove then deletes the pictures it made.
+  const keep = (id: string) => {
+    const release = queue?.intend(id, 'keep');
+    void keepSuggestion(store, id).then((result) => { if (result.code === 'OK') onKept(); settle(); }).finally(() => release?.());
+  };
+  const remove = (id: string) => {
+    const card = suggestions.find((entry) => entry.id === id);
+    const release = queue?.intend(id, 'remove');
+    void removeSuggestion(store, id).then(async () => {
+      if (queue && card && store.get().removed?.id === id) await queue.discard(card);
+    }).finally(() => { release?.(); settle(); });
+  };
   const line = (key: MessageKey, count?: number) => key === 'outfitgen.found_other' && count !== undefined
     ? pluralText(language, 'outfitgen.found', count) : t(key);
   return <section className="suggested" aria-labelledby="suggested-title">
@@ -78,31 +98,80 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
     <div role="status" className="suggested-notices">
       {state.running === 'auto' && <p>{t('outfitgen.finding')}</p>}
       {state.notices.map((notice) => notice.key === 'outfitgen.removed' && state.removed
-        ? <p key={notice.at}>{t(notice.key)}{' '}<button type="button" className="text-button" disabled={state.deciding.has(state.removed.id) || !online}
+        ? <p key={notice.at}>{t(notice.key)}{' '}<button type="button" className="text-button"
+          disabled={state.deciding.has(state.removed.id) || pics?.deleting.has(state.removed.id) === true || !online}
           onClick={() => { void undoRemoval(store); }}>{t('common.undo')}</button></p>
         : <p key={notice.at}>{line(notice.key, notice.count)}</p>)}
+      {pics?.making && <p className="sr-only">{t('outfitgen.pictureMaking', { ordinal: pics.making.ordinal, total: pics.making.of })}</p>}
     </div>
     {(view.kind === 'off' || view.kind === 'renew') && <p><span>{t('outfitgen.off')}</span>{' '}<a className="text-button" href="#/settings">{t('aiC.turnOn')}</a></p>}
     {on && limits?.reached && <p className="notice">{t('outfitgenC.limit')}</p>}
+    {on && suggestions.length > 0 && pics?.line && <PictureLineText line={pics.line} t={t} />}
+    {on && pics?.deleteFailed && <p className="notice" role="status">{t('outfitgen.pictureDeleteFailed')}{' '}<button type="button" className="text-button" disabled={!online}
+      onClick={() => { void queue?.retryCleanup(); }}>{t('common.retry')}</button></p>}
     {view.kind === 'loadFailed' && <p className="notice notice-error">{t('outfitgen.loadFailed')}</p>}
     {on && state.list.kind === 'failed' && <div className="notice notice-error" role="alert"><span>{t('outfitgen.loadFailed')}</span>
       <button type="button" className="text-button" disabled={!online} onClick={() => { void readList(store); }}>{t('common.retry')}</button></div>}
     {on && state.list.kind === 'ready' && suggestions.length === 0 && !running && state.notices.length === 0 && <p>{t('outfitgen.none')}</p>}
     {on && suggestions.length > 0 && <ul className="suggested-list">
       {suggestions.map((suggestion) => <Card key={suggestion.id} suggestion={suggestion} components={components} images={images} t={t}
-        busy={state.deciding.has(suggestion.id)} online={online} onKeep={() => keep(suggestion.id)} onRemove={() => remove(suggestion.id)} />)}
+        queue={queue} pics={pics} busy={state.deciding.has(suggestion.id)} online={online}
+        onKeep={() => keep(suggestion.id)} onRemove={() => remove(suggestion.id)} />)}
     </ul>}
   </section>;
 }
 
-function Card({ suggestion, components, images, t, busy, online, onKeep, onRemove }: {
-  suggestion: Suggestion; components: ReadonlyMap<string, OutfitComponent>; images: PrivateImages; t: Translate; busy: boolean; online: boolean;
-  onKeep: () => void; onRemove: () => void;
+const pictureLines: Record<Exclude<PictureLine, 'guard'>, MessageKey> = {
+  tryOnOff: 'outfitgen.pictureTryOnOff', noPhoto: 'outfitgen.pictureNoPhoto', full: 'outfitgen.pictureFull',
+  budget: 'outfitgen.pictureBudget', retryLater: 'outfitgen.pictureRetry',
+};
+/** The one plain line shown when pictures are not being made; the cards still list their garments. */
+function PictureLineText({ line, t }: { line: PictureLine; t: Translate }) {
+  const key: MessageKey = line === 'guard' ? 'aiGuard.paused' : pictureLines[line];
+  return <p className="suggested-picture-line">{t(key)}{(line === 'tryOnOff' || line === 'noPhoto') && <>{' '}<a className="text-button" href="#/settings">{t('nav.settings')}</a></>}</p>;
+}
+
+/** Mounts the picture only when its card is near the screen, so many cards never fetch their pictures at once. */
+function LazyPicture({ queue, id, title, online, t }: { queue: PictureQueue; id: string; title: string; online: boolean; t: Translate }) {
+  const [near, setNear] = useState(typeof IntersectionObserver === 'undefined');
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (near || !ref.current) return;
+    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) setNear(true); }, { rootMargin: '300px 0px' });
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [near]);
+  return <div ref={ref} className="suggested-picture">
+    {near ? <TryOnPicture api={queue.api} result={{ id }} t={t} online={online} idPrefix={`suggested-${id}`} readOnly
+      alt={t('outfitgen.pictureAlt', { title })} /> : <div className="tryon-frame" aria-hidden="true" />}
+  </div>;
+}
+
+function Card({ suggestion, components, images, t, queue, pics, busy, online, onKeep, onRemove }: {
+  suggestion: Suggestion; components: ReadonlyMap<string, OutfitComponent>; images: PrivateImages; t: Translate;
+  queue: PictureQueue | null; pics: PictureState | null; busy: boolean; online: boolean; onKeep: () => void; onRemove: () => void;
 }) {
-  return <li className="suggested-card">
-    <div className="suggested-thumbs">
-      {suggestion.itemIds.map((id) => <Thumb key={id} component={components.get(id)} images={images} t={t} />)}
-    </div>
+  const key = plannedKey(ideaSelection(suggestion.itemIds, components).steps);
+  const picture = key !== null ? pics?.pictures?.get(key) : undefined;
+  const making = pics?.making?.id === suggestion.id ? pics.making : null;
+  const queued = key !== null && pics?.waiting.has(suggestion.id) === true;
+  return <li className="suggested-card" aria-busy={making !== null || undefined}>
+    {picture && queue ? <LazyPicture key={picture.id} queue={queue} id={picture.id} title={suggestion.title} online={online} t={t} />
+      : making ? <div className="tryon-frame suggested-wait"><p>{making.waiting ? t('tryon.waiting')
+        : t('outfitgen.pictureMaking', { ordinal: making.ordinal, total: making.of })}</p></div>
+      : queued ? <div className="tryon-frame suggested-wait"><p>{t('outfitgen.pictureQueued')}</p></div> : null}
+    <ul className="suggested-garments" aria-label={t('outfitgen.garments', { title: suggestion.title })}>
+      {suggestion.itemIds.map((id) => {
+        const component = components.get(id);
+        return <li key={id}>
+          <Thumb component={component} images={images} t={t} />
+          <span className="suggested-garment-text">
+            <span>{itemName(components, id, t)}</span>
+            {component?.category && <span className="muted">{t(slotKey(component.category))}</span>}
+          </span>
+        </li>;
+      })}
+    </ul>
     <div className="suggested-text">
       <h3>{suggestion.title}</h3>
       <p className="suggested-occasion">{t(`occasion.${suggestion.occasion}`)}</p>

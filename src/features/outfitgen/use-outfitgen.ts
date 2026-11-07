@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react';
-import { readStatus, type OutfitGenStore } from './outfitgen-store';
+import { readStatus, viewOf, type OutfitGenState, type OutfitGenStore } from './outfitgen-store';
 
 export function useOutfitGen(store: OutfitGenStore) {
   return useSyncExternalStore(store.subscribe, store.get);
@@ -18,4 +18,11 @@ export function useOutfitGenStatus(store: OutfitGenStore) {
       document.removeEventListener('visibilitychange', refresh);
     };
   }, [store]);
+}
+
+const none = { subscribe: () => () => undefined, get: (): OutfitGenState | null => null };
+/** Whether suggested outfits are on, which is also what makes the automatic pictures use the saved photo. */
+export function usePicturesOn(store: OutfitGenStore | null): boolean {
+  const state = useSyncExternalStore<OutfitGenState | null>(store?.subscribe ?? none.subscribe, store?.get ?? none.get);
+  return state !== null && viewOf(state).kind === 'on';
 }

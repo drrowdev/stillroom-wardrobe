@@ -110,7 +110,8 @@ export function outfitGenLimits(status: OutfitGenStatus): OutfitGenLimits {
   return { reached, warning: !reached && b.warning };
 }
 
-export type Suggestion = Readonly<{ id: string; itemIds: readonly string[]; title: string; reason: string; occasion: OutfitGenOccasion; score: number }>;
+/** createdAtMs is the server's clock, the same one that stamps a try-on result's completion. */
+export type Suggestion = Readonly<{ id: string; itemIds: readonly string[]; title: string; reason: string; occasion: OutfitGenOccasion; score: number; createdAtMs: number }>;
 export type SuggestionList = { kind: 'ok'; suggestions: Suggestion[] } | { kind: 'unavailable' };
 
 /** Parses the closed `outfitgen_list` reply. Text is shown as plain text only. */
@@ -127,9 +128,10 @@ export function parseSuggestionList(value: unknown): SuggestionList | null {
       || !itemIds.every((item) => typeof item === 'string' && UUID.test(item)) || new Set(itemIds).size !== itemIds.length
       || typeof title !== 'string' || title.length < 1 || title.length > 40 || typeof reason !== 'string' || reason.length < 1 || reason.length > 160
       || typeof occasion !== 'string' || !OUTFITGEN_OCCASIONS.includes(occasion as OutfitGenOccasion)
-      || typeof score !== 'number' || !Number.isInteger(score) || score < 1 || score > 10 || typeof entry.createdAt !== 'string') return null;
+      || typeof score !== 'number' || !Number.isInteger(score) || score < 1 || score > 10 || typeof entry.createdAt !== 'string'
+      || !Number.isFinite(Date.parse(entry.createdAt))) return null;
     seen.add(id);
-    suggestions.push({ id, itemIds: itemIds as string[], title, reason, occasion: occasion as OutfitGenOccasion, score });
+    suggestions.push({ id, itemIds: itemIds as string[], title, reason, occasion: occasion as OutfitGenOccasion, score, createdAtMs: Date.parse(entry.createdAt) });
   }
   return { kind: 'ok', suggestions };
 }

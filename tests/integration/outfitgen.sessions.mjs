@@ -135,7 +135,7 @@ function helpers(snapshot, sql) {
     delete from private.ai_usage where purpose='outfitgen' and owner_id in (${literal(a.uid)},${literal(b.uid)});`);
   const configure = async () => {
     const before = { a: await controls(a), b: await controls(b) };
-    await sql(`update private.ai_controls set monthly_allowance_micro=100000000,outfitgen_notice_revision=1,outfitgen_manifest_id=${literal(MANIFEST)},
+    await sql(`update private.ai_controls set monthly_allowance_micro=100000000,outfitgen_notice_revision=2,outfitgen_manifest_id=${literal(MANIFEST)},
       outfitgen_max_request_micro=400000,updated_at=clock_timestamp() where owner_id in (${literal(a.uid)},${literal(b.uid)});`);
     return before;
   };
@@ -173,8 +173,8 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal((await rpc(a, 'outfitgen_status')).code, 'INACTIVE');
     await sql(`update private.ai_controls set outfitgen_activated=true where owner_id=${literal(a.uid)};`);
     equal((await rpc(a, 'outfitgen_status')).code, 'CONSENT_REQUIRED');
-    equal((await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 2 })).code, 'CONFIG_CHANGED');
-    const on = await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 1 });
+    equal((await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 1 })).code, 'CONFIG_CHANGED');
+    const on = await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 2 });
     equal(on.code, 'OK');
     ok(on.unassessed === base + 5 && on.autoUnassessed === 0 && on.pending === 0 && on.live === false);
     equal((await rpc(b, 'outfitgen_status')).code, 'INACTIVE');

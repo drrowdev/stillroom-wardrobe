@@ -15,10 +15,13 @@ import type { OutfitGenLanguage, OutfitGenMode } from '../../domain/outfitgen';
 import type { MessageKey } from '../../i18n';
 import '../../i18n/outfitgen';
 
-/** The notice paragraphs, in order, with the shared titles and retention sentence they sit under. Pinned by tests/unit/outfitgen-notice.test.ts. */
+/**
+ * The notice paragraphs, in order, with the shared titles and retention sentence they sit under. Pinned by tests/unit/outfitgen-notice.test.ts.
+ * Revision 2 (OUTFITGEN2) adds the automatic pictures of you and an opt-out that mentions them; revision 1's keys stay in the catalogue, frozen.
+ */
 export const OUTFITGEN_NOTICE_KEYS = [
-  'stylistC.fieldsTitle', 'outfitgenC.sent', 'outfitgenC.when', 'stylistC.processing', 'outfitgenC.processing', 'aiC.retentionTitle',
-  'aiC.azureTrainingNotice', 'outfitgenC.stored', 'aiC.chargesTitle', 'outfitgenC.charges', 'outfitgenC.optOut',
+  'stylistC.fieldsTitle', 'outfitgenC.sent', 'outfitgenC.when', 'outfitgenC.pictures', 'stylistC.processing', 'outfitgenC.processing', 'aiC.retentionTitle',
+  'aiC.azureTrainingNotice', 'outfitgenC.stored', 'aiC.chargesTitle', 'outfitgenC.charges', 'outfitgenC.optOut2',
 ] as const satisfies readonly MessageKey[];
 
 export type Notice = { key: MessageKey; count?: number; at: number };

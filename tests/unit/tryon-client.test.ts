@@ -7,7 +7,8 @@ import {
 } from '../../src/data/tryon';
 import { TRYON_LIMITS, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, type TryOnStep } from '../../src/domain/tryon';
 import {
-  BUSY_RETRY_EVERY_MS, BUSY_RETRY_FOR_MS, RECONCILE_EVERY_MS, RECONCILE_FOR_MS, RUN_LIFETIME_MS, TryOnRun, failureAction, ideaSelection, type RunEnvironment, type TryOnApi,
+  BUSY_RETRY_EVERY_MS, BUSY_RETRY_FOR_MS, HOLD_EVERY_MS, RECONCILE_EVERY_MS, RECONCILE_FOR_MS, RUN_LIFETIME_MS, TryOnRun, failureAction, ideaSelection,
+  type RunEnvironment, type RunGate, type TryOnApi,
 } from '../../src/features/outfits/use-try-on';
 import type { OutfitComponent } from '../../src/domain/outfits';
 import { readTryOnStatus, TryOnStore, tryOnViewOf } from '../../src/features/settings/tryon-store';
@@ -119,6 +120,8 @@ class Harness {
   isCurrent = true;
   stopped = false;
   recorded: string[] = [];
+  refused = 0;
+  foreground: [string, boolean][] = [];
   private ids = 0;
   env: RunEnvironment = {
     online: () => this.isOnline,
@@ -131,7 +134,9 @@ class Harness {
   };
   api: TryOnApi = {
     current: () => this.isCurrent,
-    step: (input, signal) => {
+    step: (input, signal, gate) => {
+      // The client asks its caller's last question right before the POST; a refusal sends nothing.
+      if (gate && !gate()) { this.refused += 1; return Promise.reject(new TryOnError('INVALID_INPUT')); }
       this.steps.push(input);
       const next = this.stepReplies.shift() ?? new TryOnError('UNAVAILABLE');
       if (next === 'hold') return new Promise((resolve) => { this.held.push({ resolve, signal }); });
@@ -144,7 +149,8 @@ class Harness {
     },
     cancel: (chainId) => { this.cancels.push(chainId); return Promise.resolve(this.cancelReply); },
   };
-  session = { stopped: () => this.stopped, recordStep: (outcome: string) => { this.recorded.push(outcome); } };
+  session = { stopped: () => this.stopped, recordStep: (outcome: string) => { this.recorded.push(outcome); },
+    foreground: (id: string, active: boolean) => { this.foreground.push([id, active]); } };
   run(steps: TryOnStep[] = [{ slot: 'top', itemId: ID(1) }, { slot: 'bottom', itemId: ID(2) }, { slot: 'footwear', itemId: ID(3) }]) {
     return new TryOnRun(this.api, this.session, this.env, OUTFIT, steps, new Uint8Array(new ArrayBuffer(10)));
   }
@@ -577,6 +583,97 @@ describe('the try-on run (rev4 §2.3-§3.2)', () => {
   });
 });
 
+describe('a background run (OUTFITGEN2): asks before every send and yields to the owner\'s own try-on', () => {
+  const background = (h: Harness, gate: (index: number) => RunGate) => new TryOnRun(h.api, h.session, h.env, { itemIds: plan.map((step) => step.itemId) },
+    plan, new Uint8Array(new ArrayBuffer(10)), { gate });
+  it('sends nothing, and is not started, when the gate says abort before the first send', async () => {
+    const h = new Harness();
+    const run = background(h, () => 'abort');
+    run.start();
+    await flush();
+    expect(h.steps).toEqual([]);
+    expect(run.chainStarted).toBe(false);
+    expect(run.get()).toEqual({ kind: 'failed', index: 0, failure: 'unavailable' });
+    expect(run.holdsPicture()).toBe(false);
+  });
+  it('does not start while a foreground try-on holds the gate, even for the first step', async () => {
+    const h = new Harness();
+    const run = background(h, () => 'hold');
+    run.start();
+    await flush();
+    expect(h.steps).toEqual([]);
+    expect(run.chainStarted).toBe(false);
+  });
+  it('waits for a held step, asks again every few seconds and sends it once the gate allows it', async () => {
+    const h = new Harness();
+    h.stepReplies = [picture(20), picture(30), { kind: 'result', resultId: ID(9) }];
+    let verdict: RunGate = 'hold';
+    const run = background(h, (index) => (index === 1 ? verdict : 'go'));
+    run.start();
+    await flush();
+    // Step 1 went out and came back; step 2 is held back because the owner's try-on is running.
+    expect(h.steps.map((step) => step.step)).toEqual([1]);
+    expect(run.get()).toEqual({ kind: 'running', index: 1, waiting: true });
+    expect(run.chainStarted).toBe(true);
+    await h.advance(HOLD_EVERY_MS * 3);
+    expect(h.steps.map((step) => step.step)).toEqual([1]);
+    verdict = 'go';
+    await h.advance(HOLD_EVERY_MS);
+    expect(h.steps.map((step) => step.step)).toEqual([1, 2, 3]);
+    expect(run.get()).toMatchObject({ kind: 'result', resultId: ID(9) });
+  });  it('asks again before every BUSY retry, and stops retrying the moment the gate says abort', async () => {
+    const h = new Harness();
+    h.stepReplies = busy(5);
+    let allowed = true;
+    const run = background(h, () => (allowed ? 'go' : 'abort'));
+    run.start();
+    await flush();
+    expect(h.steps).toHaveLength(1);
+    expect(run.get()).toMatchObject({ kind: 'running', waiting: true });
+    allowed = false;
+    await h.advance(BUSY_RETRY_EVERY_MS);
+    expect(h.steps).toHaveLength(1);
+    expect(run.get()).toMatchObject({ kind: 'failed', failure: 'unavailable' });
+  });
+  it('holds, rather than fails, when the last check right before the POST says a foreground run began', async () => {
+    const h = new Harness();
+    let calls = 0;
+    // The first question (before the awaits) says go; the client's own last question (right before the POST) says hold.
+    const run = background(h, () => (++calls === 1 ? 'go' : 'hold'));
+    run.start();
+    await flush();
+    expect(h.refused).toBe(1);
+    expect(h.steps).toEqual([]);
+    expect(run.chainStarted).toBe(false);
+    expect(run.get().kind).toBe('failed');
+  });
+  it('a foreground run tells the session while it is sending, and a background run never does', async () => {
+    const foreground = new Harness();
+    foreground.stepReplies = [picture(20), picture(30), { kind: 'result', resultId: ID(9) }];
+    const run = foreground.run();
+    run.start();
+    await flush();
+    expect(foreground.foreground.map(([, active]) => active)).toEqual([true, false]);
+    expect(new Set(foreground.foreground.map(([id]) => id))).toEqual(new Set([run.id]));
+    const other = new Harness();
+    other.stepReplies = [{ kind: 'result', resultId: ID(9) }];
+    const solo = new TryOnRun(other.api, other.session, other.env, { itemIds: [ID(1)] }, [plan[0]!], new Uint8Array(new ArrayBuffer(10)), { gate: () => 'go' });
+    solo.start();
+    await flush();
+    expect(solo.get()).toMatchObject({ kind: 'result' });
+    expect(other.foreground).toEqual([]);
+  });
+  it('a foreground run that is abandoned while sending reports itself idle', async () => {
+    const h = new Harness();
+    h.stepReplies = ['hold'];
+    const run = h.run();
+    run.start();
+    await flush();
+    expect(h.foreground.at(-1)).toEqual([run.id, true]);
+    run.abandon();
+    expect(h.foreground.at(-1)).toEqual([run.id, false]);
+  });
+});
 const owner = '10000000-0000-4000-8000-0000000000aa';
 const config = { url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_test_only', version: 'test' };
 function supabase() {

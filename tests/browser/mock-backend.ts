@@ -14,7 +14,7 @@ import type { ImageChangeReceipt } from '../../src/domain/image-replacement';
 import type { DeletionOperation } from '../../src/domain/item-lifecycle';
 import { wardrobeTargetDeleteRoute } from '../../src/data/storage-delete';
 import { STYLIST_MANIFEST, STYLIST_MODEL } from '../../src/domain/stylist';
-import { OUTFITGEN_MANIFEST, OUTFITGEN_MODEL } from '../../src/domain/outfitgen';
+import { OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION } from '../../src/domain/outfitgen';
 import { CLEANUP_MANIFEST, CLEANUP_NOTICE_REVISION, ENHANCE_MODEL } from '../../src/domain/enhancement';
 import { selectTryOnSteps, TRYON_MANIFEST, TRYON_MODEL, TRYON_NOTICE_REVISION, type TryOnCandidate, type TryOnStep } from '../../src/domain/tryon';
 
@@ -544,9 +544,9 @@ function stylistStatus(setup: StylistSetup, consent: number | null) {
 export type OutfitGenSetup = { configured: boolean; activated: boolean; noticeRevision: number; manifestId: string; modelId: string;
   maxRequestMicro: string; totalAllowanceMicro: string; totalMicro: string };
 export type MockSuggestion = { id: string; owner: string; itemIds: string[]; title: string; reason: string; occasion: string; score: number;
-  state: 'suggested' | 'kept' | 'removed' | 'declined' };
+  state: 'suggested' | 'kept' | 'removed' | 'declined'; createdAt?: string };
 export type OutfitGenReply = { status: number; body: unknown; add?: Omit<MockSuggestion, 'owner' | 'state' | 'id'>[]; hold?: Promise<void> };
-const outfitGenDefaults: OutfitGenSetup = { configured: false, activated: false, noticeRevision: 1, manifestId: OUTFITGEN_MANIFEST, modelId: OUTFITGEN_MODEL,
+const outfitGenDefaults: OutfitGenSetup = { configured: false, activated: false, noticeRevision: OUTFITGEN_NOTICE_REVISION, manifestId: OUTFITGEN_MANIFEST, modelId: OUTFITGEN_MODEL,
   maxRequestMicro: '373402', totalAllowanceMicro: '17940000', totalMicro: '0' };
 function outfitGenStatus(setup: OutfitGenSetup, consent: number | null, counts: { pending: number; unassessed: number; autoUnassessed: number;
   autoCallsLeft: number; live: boolean; cooldownUntilMs: number | null }) {
@@ -1079,7 +1079,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       if (name === 'outfitgen_list') {
         outfitgenControl.listReads++;
         await json({ code: 'OK', suggestions: mine.filter(entry => entry.state === 'suggested').map(entry => ({ id: entry.id, itemIds: entry.itemIds,
-          title: entry.title, reason: entry.reason, occasion: entry.occasion, score: entry.score, createdAt: '2026-11-06T10:00:00Z' })) }); return;
+          title: entry.title, reason: entry.reason, occasion: entry.occasion, score: entry.score, createdAt: entry.createdAt ?? '2026-11-06T10:00:00Z' })) }); return;
       }
       const target = mine.find(entry => entry.id === body.p_id);
       if (!target) { await json({ code: 'NOT_FOUND' }); return; }
@@ -1193,7 +1193,9 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
           // Withdrawal removes the saved photo in the same transaction (the ai_controls trigger).
           if (!body.p_enabled) delete tryonControl.photos[owner];
         } else tryonControl.statusReads++;
-        await json(tryOnStatusReply(setup, tryonControl.consent[owner] ?? null, live.length)); return;
+        // A running chain holds a reserved result row, which the real status counts with the stored ones.
+        const reserved = tryonControl.chains.filter(chain => chain.owner === owner && chain.state === 'running').length;
+        await json(tryOnStatusReply(setup, tryonControl.consent[owner] ?? null, live.length + reserved)); return;
       }
       if (name === 'tryon_chain_status' || name === 'tryon_cancel') {
         const chain = tryonControl.chains.find(row => row.owner === owner && row.id === body.p_chain_id);

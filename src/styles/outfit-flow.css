@@ -29,8 +29,16 @@
 .suggested-notices p, .suggested > p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .suggested-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 16px; }
 .suggested-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
-.suggested-thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
-.suggested-thumbs .outfit-thumb { width: 100%; border-radius: 6px; }
+.suggested-picture { min-width: 0; }
+.suggested-picture .tryon-frame { max-width: 30rem; margin-inline: auto; }
+.suggested-wait { display: grid; place-items: center; padding: 12px; text-align: center; max-width: 30rem; margin-inline: auto; }
+.suggested-wait p { position: relative; z-index: 1; margin: 0; font-size: 0.875rem; overflow-wrap: anywhere; }
+.suggested-picture-line { margin: 0 0 12px; overflow-wrap: anywhere; }
+.suggested-garments { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.suggested-garments li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.suggested-garments .outfit-thumb { width: 56px; flex: none; border-radius: 6px; }
+.suggested-garment-text { display: grid; min-width: 0; overflow-wrap: anywhere; }
+.suggested-garment-text .muted { font-size: 0.875rem; }
 .suggested-text { min-width: 0; overflow-wrap: anywhere; }
 .suggested-text h3 { margin: 0 0 2px; }
 .suggested-text p { margin: 0; }

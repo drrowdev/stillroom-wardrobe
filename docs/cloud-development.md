@@ -2227,3 +2227,69 @@ ordinary use. It protects every AI purpose through the one place they share.
 - **Does not catch.** A call that costs more than its reservation (the envelope checks and anomaly shutdown remain the control), a slow loop
   that stays under the threshold (the monthly allowance bounds it), spending outside the ledger, a dead sweep job, and a cheap analysis loop
   below the threshold. A same-input loop detector and per-purpose ceilings were deliberately left out (lean mode).
+
+## OUTFITGEN2 automatic pictures of the owner on suggested outfits - 8 November 2026
+
+Owner request of 7 November 2026, after trying Suggested outfits live ("what would actually help me is to also see how the outfit looks on
+myself ... the outfit shown on myself and then the clothes individually listed under the image"), and the owner's decision that the picture is
+made **automatically for every new suggestion, in the background**. Quality over cost stays the direction; the integrity bounds stay. No
+daily cap (owner amendment); the monthly allowance and AI-GUARD1 bound the spend. Source packet; nothing is activated by it.
+
+- **What the owner sees.** Each suggestion card shows the picture of the owner wearing the outfit on top ("Made with AI", tap to zoom), the
+  garments listed individually under it (thumbnail, name, kind), then title, occasion and reason, and Keep / Remove. While a picture is
+  made the card shows "Making your picture 2 of 9" (a polite status for assistive technology), the rest wait. Where try-on is off or no
+  photo is saved, or pictures are paused, the cards show the garments only and the section carries one plain line.
+- **How.** A per-scope queue (`src/features/outfitgen/picture-queue.ts`, rules in `src/domain/outfitgen-pictures.ts`) runs in the client
+  while the app is open. It starts a few seconds after the app opens and whenever the suggestions, consent, try-on, the saved photo, the
+  network or the page's visibility change. It makes one chain at a time through the existing idea try-on (`TryOnRun`, one garment per call
+  in slot order, up to 6 steps). No new Edge function and no migration. **It works only while the app is open and resumes at the next open.**
+- **Finding the picture.** A try-on result keeps the item ids of the steps that made it (the planned steps, which leave out accessories and
+  a second layer), so a card's picture is the newest idea result (no outfit) whose sorted item ids equal the sorted ids of the card's
+  selected steps. No link column. A set with fewer than two steps gets no picture; suggestions with the same planned set share one.
+- **One chain at a time, across windows and reloads.** (1) One pass per window. (2) A Web Lock per owner (`navigator.locks`, taken per
+  chain; without Web Locks nothing is made automatically). (3) The server's own count: `tryon_status.results` counts every stored or reserved
+  picture and `tryon_results_v1` lists the ready ones, so more rows than pictures means a chain is running (another device, or a page reloaded
+  mid-chain, whose paid steps cannot be resumed; the chain's lifetime is 30 minutes). The queue waits while that holds; rows that stay
+  unchanged for longer than a chain can live (pictures of a deleted outfit also count) are taken as stored pictures, and a new increase is
+  seen again. A page that closes normally cancels its chain; one that is killed leaves it to expire. Memory-only attempt counts reset on
+  reload and are not a durable bound; the server count, the 190 stop and the allowance are.
+- **Dispatch boundary.** Before **every** send of a background chain, including the first and every BUSY retry, a gate checks scope, consent
+  (not changing, on, supported), the spending guard, try-on readiness and its session stop, the saved photo's generation, that the owner is not
+  deciding the suggestion, and that no foreground try-on is running; `TryOnClient.step` asks the same gate once more right before the POST,
+  after its own awaits. A foreground try-on (the owner's own, reported through the try-on store) holds a chain between steps and keeps a
+  new one from starting; the residual is a step already on its way, which finishes. A refused send sends nothing and charges nothing.
+  The run and its photo bytes are dropped on every terminal outcome, and a failed run is abandoned explicitly (its chain is cancelled).
+- **Failures.** BUSY (after the run's own 100-second wait) stops for 5 minutes; ALLOWANCE, unavailability, a full list (190 of 200) and a
+  refused chain stop for 30 minutes; CONSENT_REQUIRED stops until the consent or photo changes; **PAUSED (AI-GUARD1) halts until Resume**,
+  like automatic outfit runs; FILTERED skips that outfit; any other failure counts one attempt (at most two per outfit, the second after the
+  others) and two failures in a row stop the queue. Nothing retries beyond that and nothing loops. **Budget reserve (D1):** a chain starts
+  only if the monthly budget still has 15 % of the allowance free after its reservations, counted at the policy's `maxRequestMicro` (best
+  effort, not an escrow); manual try-ons are unaffected.
+- **Decisions.** Keep and Remove mark their intent first, so the queue does not abandon a chain for a card that is leaving: Keep lets a
+  running chain finish and the picture stays; the kept outfit's details list matching idea pictures (K2: found by garments, not linked).
+  **Remove** stops the card's chain (reconciling its final outcome with the server), then deletes the idea pictures of exactly that planned
+  set that finished **after the suggestion was created**; older pictures stay, and a picture the owner made by hand of the identical set
+  inside that window goes too. Undo waits for the deletion and the queue then makes a new picture. A failed deletion is shown and the
+  picture stays under Today's Try-ons. Nothing else deletes pictures.
+- **Consent.** The try-on notice (revision 3, frozen) says the saved photo is used only when the owner tries on, so the new use needs its own
+  affirmative consent: **outfit-suggestions notice revision 2** (`outfitgenC.pictures`, `outfitgenC.optOut2`; revision 1's strings stay in
+  the catalogue and are frozen in `tests/unit/outfitgen-notice.test.ts`, revision 2 is pinned there), and Settings states it next to the
+  try-on notice (`outfitgenC.photoUse`) while suggestions are on. `OUTFITGEN_NOTICE_REVISION` is 2; `OUTFITGEN_SETTINGS` keeps its
+  literal `noticeRevision: 1` (its hash is pinned to the immutable manifest row, which is never mutated); the Edge handler checks the constant.
+  The person-photo guard trigger watches only the try-on consent and notice columns, so the saved photo and the try-on consent survive.
+- **Rollout (owner/coordinator; the source packet does none of it).** After AI-GUARD1 is live: Pages deploy and redeploy `outfit-generate`
+  (back to back), then the owner runs `update private.ai_controls set outfitgen_notice_revision = 2 where owner_id = '<owner>' and
+  outfitgen_notice_revision = 1;` (the stored revision-1 consent no longer matches, so the status says consent is required and the Outfits
+  section and Settings show "turn it on again"; the consent columns need no change), then reads revision 2 and turns suggested outfits on
+  again. Every other order fails closed: the app and the function both require the revision to match, so suggestions are inert, not wrong.
+  Between the Pages deploy and the SQL the suggestions section is hidden (the app no longer supports the old notice); existing suggestions stay stored and
+  pictures begin at the next app open after consent.
+- **Validation.** Unit: `tests/unit/outfitgen-pictures.test.ts` (keys, lookup, Remove's selection, blocks, targets, failures, server gate,
+  reserve), `tests/unit/tryon-client.test.ts` (the gate, holds, BUSY, the last check, foreground reporting), the notice pins and the
+  handler tests. Browser (`tests/browser/outfitgen-pictures.spec.ts`, three projects, mock backend): a picture per suggestion in turn, one
+  chain at a time, the garments under the picture; yielding to the owner's try-on; ALLOWANCE and PAUSED stops; failures retried once;
+  Remove's deletion and Undo; no calls without try-on, a photo or consent; a second window; a reloaded page; sign-out; 320 px and 200 % text.
+  CI-only: the outfit-generation stage uses revision 2.
+- **Not verified here.** Real provider behaviour, real timing (about 2 requests a minute shared with clean-up, so 2-4 minutes per outfit and
+  20-30 minutes for nine), real cost (the reservation is 360,000 micro per step; the ledger records less and no typical figure is claimed
+  before the owner trial), how a phone treats a backgrounded page, and that a killed tab leaves a chain that expires on the server.

@@ -5,6 +5,8 @@ import { tryOnReady } from '../../../data/tryon';
 import type { OutfitComponent, OutfitRecord } from '../../../domain/outfits';
 import type { Translate } from '../../../i18n';
 import '../../../i18n/tryon';
+import { pictureQueueFor } from '../../outfitgen/picture-queue';
+import { usePictureQueue } from '../../outfitgen/use-pictures';
 import { tryOnStoreFor } from '../../settings/tryon-store';
 import { tryOnSelection, useOutfitTryOns, useTryOnStatus } from '../use-try-on';
 import { TryOnPicture } from './try-on-parts';
@@ -29,12 +31,17 @@ export function TryOnButton({ client, scope, record, components, disabled, t, on
  * picture's Blob URL is revoked when its page is left. */
 export const SAVED_PAGE = 6;
 
-export function SavedTryOns({ client, scope, outfitId, online, t }: {
+export function SavedTryOns({ client, scope, outfitId, online, t, sameSet }: {
   client: AppClient; scope: OwnerScope; outfitId: string | null; online: boolean; t: Translate;
+  /** OUTFITGEN2: the outfit's planned garment set; idea pictures of exactly this set are listed too (found by garments, not linked). */
+  sameSet?: string | null;
 }) {
   const store = tryOnStoreFor(client, scope);
   const status = useTryOnStatus(store);
-  const { state, retry } = useOutfitTryOns(store?.api ?? null, outfitId, outfitId === null ? online : status !== null && status.results > 0);
+  // OUTFITGEN2 (K2): a picture the queue is still making for this outfit's set appears here once it is finished.
+  const pics = usePictureQueue(sameSet ? pictureQueueFor(client, scope) : null);
+  const stamp = sameSet ? pics?.pictures?.get(sameSet)?.id ?? '' : '';
+  const { state, retry } = useOutfitTryOns(store?.api ?? null, outfitId, outfitId === null ? online : status !== null && status.results > 0, sameSet ?? null, stamp);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState(0);

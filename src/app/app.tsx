@@ -37,6 +37,7 @@ import { lazyNamed, preloadChunks } from './lazy-load';
 import { WeatherStore, weatherKey } from '../features/today/use-weather';
 import { StylistStore } from '../features/stylist/stylist-store';
 import { OutfitGenTrigger } from '../features/outfitgen/outfitgen-trigger';
+import { PICTURE_LIMITS } from '../domain/outfitgen-pictures';
 import { weatherConfig } from '../domain/weather';
 import { ShellBoundary, ShellFallback } from './shell-fallback';
 import { restoreShellFocus, useShell } from './shell-focus';
@@ -171,6 +172,13 @@ function OwnedWardrobe({ client, config, controller, scope, profile, change, bus
     return store ? { run: (lang, current) => runAuto(store, lang, current) } : null;
   }, () => languageNow.current));
   useEffect(() => { outfitTrigger.appOpen(); }, [outfitTrigger]);
+  // The automatic pictures of suggested outfits: the queue loads and starts a few seconds after the app opens, and only does anything with consent, try-on and a saved photo.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void import('../features/outfitgen/picture-queue').then(({ pictureQueueFor }) => pictureQueueFor(client, scope, config)?.start(), () => undefined);
+    }, PICTURE_LIMITS.startDelayMs);
+    return () => clearTimeout(timer);
+  }, [client, scope, config]);
   const weather = weatherConfig(profile);
   const weatherId = weatherKey(weather);
   useEffect(() => { weatherStore.keep(weatherId); }, [weatherStore, weatherId]);

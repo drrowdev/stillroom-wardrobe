@@ -52,9 +52,11 @@ type Picture = { kind: 'loading' } | { kind: 'shown'; url: string } | { kind: 'f
  * One saved try-on: the picture (a Blob URL revoked on replace and unmount), its label and Delete with a confirm. It stays until
  * the owner deletes it; it leaves the view when the server no longer has it.
  */
-export function TryOnPicture({ api, result, t, online, idPrefix, children, onDeleted }: {
+export function TryOnPicture({ api, result, t, online, idPrefix, children, onDeleted, readOnly, alt }: {
   api: TryOnClient; result: { id: string }; t: Translate; online: boolean;
   idPrefix: string; children?: ReactNode; onDeleted?: () => void;
+  /** A picture shown on a suggestion card: no Delete (pictures are deleted under Try-ons, or with Remove). */
+  readOnly?: boolean; alt?: string;
 }) {
   const [picture, setPicture] = useState<Picture>({ kind: 'loading' });
   const [attempt, setAttempt] = useState(0);
@@ -93,19 +95,19 @@ export function TryOnPicture({ api, result, t, online, idPrefix, children, onDel
   if (gone) return <p className="notice" role="status">{t('tryon.deleted')}</p>;
   return <figure className="tryon-result stack">
     {picture.kind === 'shown' ? <button ref={zoomButton} type="button" className="tryon-zoom" aria-label={t('tryon.zoomOpen')} onClick={() => setViewing(true)}>
-      <img src={picture.url} alt={t('tryon.resultAlt')} width={1024} height={1280} /></button>
+      <img src={picture.url} alt={alt ?? t('tryon.resultAlt')} width={1024} height={1280} /></button>
       : picture.kind === 'failed' ? <div className="notice notice-error" role="alert"><span>{t('tryon.resultFailed')}</span>
         <button type="button" className="text-button" disabled={!online} onClick={() => setAttempt(value => value + 1)}>{t('common.retry')}</button></div>
       : <p role="status">{t('tryon.loadingResult')}</p>}
     <figcaption>{t('tryon.madeWith')}</figcaption>
     {deleteFailed && <div className="notice notice-error" role="alert"><span>{t('tryon.deleteFailed')}</span></div>}
-    <div className="outfit-actions">
-      <button ref={deleteButton} id={`${idPrefix}-delete`} type="button" className="button button-secondary" disabled={!online || deleting}
-        onClick={() => setConfirming(true)}>{t('common.delete')}</button>
+    {(!readOnly || children) && <div className="outfit-actions">
+      {!readOnly && <button ref={deleteButton} id={`${idPrefix}-delete`} type="button" className="button button-secondary" disabled={!online || deleting}
+        onClick={() => setConfirming(true)}>{t('common.delete')}</button>}
       {children}
-    </div>
+    </div>}
     {deleting && <p className="muted" role="status">{t('common.saving')}</p>}
-    {viewing && picture.kind === 'shown' && <PictureViewer url={picture.url} alt={t('tryon.resultAlt')} t={t}
+    {viewing && picture.kind === 'shown' && <PictureViewer url={picture.url} alt={alt ?? t('tryon.resultAlt')} t={t}
       onClose={() => { setViewing(false); requestAnimationFrame(() => zoomButton.current?.focus()); }} />}
     {confirming && <ConfirmDialog id={`${idPrefix}-confirm`} title={t('tryon.deleteTitle')} confirm={t('common.delete')} cancel={t('common.cancel')} danger
       onConfirm={remove} onCancel={() => { setConfirming(false); requestAnimationFrame(() => deleteButton.current?.focus()); }} />}

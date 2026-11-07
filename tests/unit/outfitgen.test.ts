@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  OUTFITGEN_BODY_CONTROLS, OUTFITGEN_LIMITS, OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_PROMPT, OUTFITGEN_RESERVATION_MICRO,
+  OUTFITGEN_BODY_CONTROLS, OUTFITGEN_LIMITS, OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION, OUTFITGEN_PROMPT, OUTFITGEN_RESERVATION_MICRO,
   OUTFITGEN_SCHEMA, OUTFITGEN_SETTINGS, buildOutfitGenRequest, estimateInputTokens, isSuggestion, parseOutfitGenBody, parseOutfitGenItem,
   validateOutfitGenReply, type OutfitGenItem,
 } from '../../src/domain/outfitgen';
@@ -119,7 +119,7 @@ describe('outfit generation response classification', () => {
 describe('outfit generation handler (mocked Auth, RPC, Storage and provider)', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
   const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service', azure: { apiKey: 'fictional-azure' } };
-  const status = { code: 'OK', consent: { enabled: true, noticeRevision: 1 }, policy: { activated: true, noticeRevision: 1, manifestId: OUTFITGEN_MANIFEST,
+  const status = { code: 'OK', consent: { enabled: true, noticeRevision: OUTFITGEN_NOTICE_REVISION }, policy: { activated: true, noticeRevision: OUTFITGEN_NOTICE_REVISION, manifestId: OUTFITGEN_MANIFEST,
     modelId: OUTFITGEN_MODEL, maxRequestMicro: '400000' },
   budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false },
   pending: 0, unassessed: 5, autoUnassessed: 5, autoCallsLeft: 3, live: false, serverTimeMs: 1_000_000, cooldownUntilMs: null };

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { OUTFITGEN_NOTICE_REVISION } from '../../src/domain/outfitgen';
 import { pluralText, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { mockBackend, owners, signIn, type OutfitGenSetup } from './mock-backend';
 import { expectSignedIn } from './shell-support';
@@ -39,7 +40,7 @@ async function start(page: Page, options: StartOptions = {}) {
   const control = api.outfitgenControl;
   control.missing = options.missing === true;
   if (options.setup) control.setup[owners.a] = { configured: true, activated: true, ...options.setup };
-  if (options.consent) control.consent[owners.a] = 1;
+  if (options.consent) control.consent[owners.a] = OUTFITGEN_NOTICE_REVISION;
   if (options.suggestions) for (const entry of sets(clothes)) control.suggestions.push({ id: crypto.randomUUID(), owner: owners.a, state: 'suggested', ...entry });
   control.autoUnassessed = options.autoUnassessed ?? 0;
   control.unassessed = control.autoUnassessed;
@@ -95,8 +96,8 @@ test.describe('OUTFITGEN1b suggested outfits', () => {
     await expect(page.locator('#outfitgen-heading')).toHaveText(text('outfitgenC.settings'));
     await expect(toggle(page, false)).toBeVisible();
     await card(page).getByText(text('aiF.about'), { exact: true }).click();
-    for (const key of ['outfitgenC.sent', 'outfitgenC.when', 'outfitgenC.processing', 'aiC.azureTrainingNotice', 'outfitgenC.stored', 'outfitgenC.charges',
-      'outfitgenC.optOut'] as const) await expect(card(page)).toContainText(text(key));
+    for (const key of ['outfitgenC.sent', 'outfitgenC.when', 'outfitgenC.pictures', 'outfitgenC.processing', 'aiC.azureTrainingNotice', 'outfitgenC.stored', 'outfitgenC.charges',
+      'outfitgenC.optOut2'] as const) await expect(card(page)).toContainText(text(key));
     const bodies: unknown[] = [];
     page.on('request', (request) => { if (new URL(request.url()).pathname === '/rest/v1/rpc/outfitgen_set_consent') bodies.push(request.postDataJSON()); });
     await toggle(page, false).click();
@@ -105,8 +106,8 @@ test.describe('OUTFITGEN1b suggested outfits', () => {
     await sheet(page).getByRole('button', { name: text('aiC.enable'), exact: true }).click();
     await expect(toggle(page, true)).toBeVisible();
     await expect(sheet(page)).toHaveCount(0);
-    expect(bodies).toEqual([{ p_enabled: true, p_notice_revision: 1 }]);
-    expect(api.outfitgenControl.consent[owners.a]).toBe(1);
+    expect(bodies).toEqual([{ p_enabled: true, p_notice_revision: OUTFITGEN_NOTICE_REVISION }]);
+    expect(api.outfitgenControl.consent[owners.a]).toBe(OUTFITGEN_NOTICE_REVISION);
     await toggle(page, true).click();
     await expect(toggle(page, false)).toBeVisible();
     expect(bodies.at(-1)).toEqual({ p_enabled: false, p_notice_revision: null });
