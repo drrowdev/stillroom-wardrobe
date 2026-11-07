@@ -2237,7 +2237,7 @@ daily cap (owner amendment); the monthly allowance and AI-GUARD1 bound the spend
 
 - **What the owner sees.** Each suggestion card shows the picture of the owner wearing the outfit on top ("Made with AI", tap to zoom), the
   garments listed individually under it (thumbnail, name, kind), then title, occasion and reason, and Keep / Remove. While a picture is
-  made the card shows "Making your picture 2 of 9" (a polite status for assistive technology), the rest wait. Where try-on is off or no
+  made the card shows its step ("Step 2 of 3"), the rest wait. Where try-on is off or no
   photo is saved, or pictures are paused, the cards show the garments only and the section carries one plain line.
 - **How.** A per-scope queue (`src/features/outfitgen/picture-queue.ts`, rules in `src/domain/outfitgen-pictures.ts`) runs in the client
   while the app is open. It starts a few seconds after the app opens and whenever the suggestions, consent, try-on, the saved photo, the
@@ -2246,13 +2246,27 @@ daily cap (owner amendment); the monthly allowance and AI-GUARD1 bound the spend
 - **Finding the picture.** A try-on result keeps the item ids of the steps that made it (the planned steps, which leave out accessories and
   a second layer), so a card's picture is the newest idea result (no outfit) whose sorted item ids equal the sorted ids of the card's
   selected steps. No link column. A set with fewer than two steps gets no picture; suggestions with the same planned set share one.
-- **One chain at a time, across windows and reloads.** (1) One pass per window. (2) A Web Lock per owner (`navigator.locks`, taken per
-  chain; without Web Locks nothing is made automatically). (3) The server's own count: `tryon_status.results` counts every stored or reserved
-  picture and `tryon_results_v1` lists the ready ones, so more rows than pictures means a chain is running (another device, or a page reloaded
-  mid-chain, whose paid steps cannot be resumed; the chain's lifetime is 30 minutes). The queue waits while that holds; rows that stay
-  unchanged for longer than a chain can live (pictures of a deleted outfit also count) are taken as stored pictures, and a new increase is
-  seen again. A page that closes normally cancels its chain; one that is killed leaves it to expire. Memory-only attempt counts reset on
-  reload and are not a durable bound; the server count, the 190 stop and the allowance are.
+- **One chain at a time, across windows and reloads (best effort, not a mutex).** (1) One pass per window. (2) A Web Lock per owner
+  (`navigator.locks`, taken per chain; without Web Locks nothing is made automatically, and the section says so). (3) The server's own count:
+  `tryon_status.results` counts every stored or reserved picture, also those of Trashed outfits, and `tryon_results_v1` lists the ready
+  pictures of live outfits, so the two differ by an ordinary gap. PICTURES-WAIT1: the first gap a page sees is its baseline and never makes the
+  queue wait. The queue waits only after the stored count has **risen** while the gap is above the baseline (a chain started in another window or
+  device, or a page reloaded mid-chain whose paid steps cannot be resumed; the chain's lifetime is 30 minutes). That wait is kept until the gap is back
+  at the baseline or 31 minutes have passed, then the gap is adopted. Any other change of the gap (an outfit moved to the Trash or restored, a
+  picture deleted) is adopted at once, and the queue's own finished picture does not count as a rise. Accepted residuals: a reload mid-chain or
+  a chain already running on another device is taken as ordinary by a fresh page, so two chains can overlap; and a ready picture deleted together
+  with another device's new reservation at an unchanged total looks like a Trash change. The server does **not** refuse a second chain of the same
+  owner (`tryon_claim` answers BUSY only for lock contention or when both provider slots are held, and a refused claim charges nothing), so
+  this is bounded by AI-GUARD1, the 15 % reserve, the provider slots and the allowance, not prevented. A page that closes normally cancels its chain; one that is killed
+  leaves it to expire. Memory-only attempt counts reset on reload and are not a durable bound; the 190 stop and the allowance are.
+- **What the owner sees while it works or waits (PICTURES-WAIT1).** The card being made shows a step bar ("Step 2 of 3", the current step pulses
+  unless reduced motion is on; "Taking longer than usual" after three times the average step and at least 90 s, a message only: nothing is
+  sent or cancelled because of it). Above the cards one status line says "Making pictures: 3 of 11 done · about 25 min left" (the estimate is the mean
+  of the last ten measured steps, 30 s per step before any, whole minutes, updated per step, hidden when unknown or stopped). When nothing is being
+  made the same line gives the reason instead, with the time of the next look where there is one: paused (busy, failed, unavailable), budget,
+  saved pictures full, no try-on or photo, offline, another window making a picture, an unfinished try-on of this account, the owner's own try-on,
+  a removal being finished, status that cannot be read, a browser without Web Locks, or outfits that got no picture. Silent on purpose: consent
+  off (the section's own notice), a hidden page, and a state that is about to change.
 - **Dispatch boundary.** Before **every** send of a background chain, including the first and every BUSY retry, a gate checks scope, consent
   (not changing, on, supported), the spending guard, try-on readiness and its session stop, the saved photo's generation, that the owner is not
   deciding the suggestion, and that no foreground try-on is running; `TryOnClient.step` asks the same gate once more right before the POST,

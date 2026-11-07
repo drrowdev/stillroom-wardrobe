@@ -31,8 +31,15 @@
 .suggested-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
 .suggested-picture { min-width: 0; }
 .suggested-picture .tryon-frame { max-width: 30rem; margin-inline: auto; }
-.suggested-wait { display: grid; place-items: center; padding: 12px; text-align: center; max-width: 30rem; margin-inline: auto; }
+.suggested-wait { display: grid; place-items: center; align-content: center; gap: 10px; padding: 12px; text-align: center; max-width: 30rem; margin-inline: auto; }
 .suggested-wait p { position: relative; z-index: 1; margin: 0; font-size: 0.875rem; overflow-wrap: anywhere; }
+.suggested-progress { position: relative; z-index: 1; display: flex; gap: 6px; width: 100%; max-width: 12rem; }
+.suggested-progress span { flex: 1 1 0; height: 6px; border-radius: 3px; background: var(--border); }
+.suggested-progress span[data-state="done"] { background: var(--primary); }
+.suggested-progress span[data-state="now"] { background: var(--primary); opacity: .55; animation: suggested-pulse 1.4s ease-in-out infinite; }
+@keyframes suggested-pulse { 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .suggested-progress span[data-state="now"] { animation: none; } }
+.suggested-picture-status:empty { display: none; }
 .suggested-picture-line { margin: 0 0 12px; overflow-wrap: anywhere; }
 .suggested-garments { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
 .suggested-garments li { display: flex; align-items: center; gap: 10px; min-width: 0; }

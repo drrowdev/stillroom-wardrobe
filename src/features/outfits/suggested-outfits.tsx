@@ -6,7 +6,7 @@ import { loadComponents } from '../../data/outfits';
 import { plannedKey } from '../../domain/outfitgen-pictures';
 import { outfitGenLimits, type Suggestion } from '../../domain/outfitgen-app';
 import type { OutfitComponent } from '../../domain/outfits';
-import { pluralText, type Language, type MessageKey, type Translate } from '../../i18n';
+import { locales, pluralText, type Language, type MessageKey, type Translate } from '../../i18n';
 import '../../i18n/outfitgen';
 import '../../i18n/tryon';
 import type { PrivateImages } from '../../images/private-images';
@@ -102,11 +102,13 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
           disabled={state.deciding.has(state.removed.id) || pics?.deleting.has(state.removed.id) === true || !online}
           onClick={() => { void undoRemoval(store); }}>{t('common.undo')}</button></p>
         : <p key={notice.at}>{line(notice.key, notice.count)}</p>)}
-      {pics?.making && <p className="sr-only">{t('outfitgen.pictureMaking', { ordinal: pics.making.ordinal, total: pics.making.of })}</p>}
     </div>
     {(view.kind === 'off' || view.kind === 'renew') && <p><span>{t('outfitgen.off')}</span>{' '}<a className="text-button" href="#/settings">{t('aiC.turnOn')}</a></p>}
     {on && limits?.reached && <p className="notice">{t('outfitgenC.limit')}</p>}
-    {on && suggestions.length > 0 && pics?.line && <PictureLineText line={pics.line} t={t} />}
+    {on && suggestions.length > 0 && <div aria-live="polite" className="suggested-picture-status">
+      {pics?.making ? <p className="suggested-picture-line">{progressText(pics, language, t)}</p>
+        : pics?.line ? <PictureLineText pics={pics} line={pics.line} language={language} t={t} /> : null}
+    </div>}
     {on && pics?.deleteFailed && <p className="notice" role="status">{t('outfitgen.pictureDeleteFailed')}{' '}<button type="button" className="text-button" disabled={!online}
       onClick={() => { void queue?.retryCleanup(); }}>{t('common.retry')}</button></p>}
     {view.kind === 'loadFailed' && <p className="notice notice-error">{t('outfitgen.loadFailed')}</p>}
@@ -121,14 +123,27 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
   </section>;
 }
 
-const pictureLines: Record<Exclude<PictureLine, 'guard'>, MessageKey> = {
+type LineKey = Exclude<PictureLine, 'guard' | 'missing'>;
+const pictureLines: Record<LineKey, MessageKey> = {
   tryOnOff: 'outfitgen.pictureTryOnOff', noPhoto: 'outfitgen.pictureNoPhoto', full: 'outfitgen.pictureFull',
-  budget: 'outfitgen.pictureBudget', retryLater: 'outfitgen.pictureRetry',
+  budget: 'outfitgen.pictureBudget', retryLater: 'outfitgen.pictureRetry', otherWindow: 'outfitgen.pictureOtherWindow',
+  otherPicture: 'outfitgen.pictureOtherPicture', ownTryOn: 'outfitgen.pictureOwnTryOn', cleanup: 'outfitgen.pictureCleanup',
+  unreadable: 'outfitgen.pictureUnreadable', noLocks: 'outfitgen.pictureNoLocks', offline: 'outfitgen.pictureOffline',
 };
+/** The overall count of the pictures being made, with the time left when it is known. */
+function progressText(pics: PictureState, language: Language, t: Translate): string {
+  const counts = { done: pics.done, total: Math.max(pics.total, pics.done + 1) };
+  const minutes = pics.minutesLeft;
+  if (minutes === null) return t('outfitgen.pictureProgress', counts);
+  const left = minutes < 1 ? t('outfitgen.pictureLeftShort')
+    : t('outfitgen.pictureLeft', { duration: new Intl.NumberFormat(locales[language], { style: 'unit', unit: 'minute', unitDisplay: 'short' }).format(minutes) });
+  return t('outfitgen.pictureProgressLeft', { ...counts, left });
+}
 /** The one plain line shown when pictures are not being made; the cards still list their garments. */
-function PictureLineText({ line, t }: { line: PictureLine; t: Translate }) {
-  const key: MessageKey = line === 'guard' ? 'aiGuard.paused' : pictureLines[line];
-  return <p className="suggested-picture-line">{t(key)}{(line === 'tryOnOff' || line === 'noPhoto') && <>{' '}<a className="text-button" href="#/settings">{t('nav.settings')}</a></>}</p>;
+function PictureLineText({ pics, line, language, t }: { pics: PictureState; line: PictureLine; language: Language; t: Translate }) {
+  const time = pics.lineAtMs === null ? '' : new Intl.DateTimeFormat(locales[language], { hour: '2-digit', minute: '2-digit' }).format(pics.lineAtMs);
+  const text = line === 'guard' ? t('aiGuard.paused') : line === 'missing' ? pluralText(language, 'outfitgen.pictureMissing', pics.missing) : t(pictureLines[line], { time });
+  return <p className="suggested-picture-line">{text}{(line === 'tryOnOff' || line === 'noPhoto') && <>{' '}<a className="text-button" href="#/settings">{t('nav.settings')}</a></>}</p>;
 }
 
 /** Mounts the picture only when its card is near the screen, so many cards never fetch their pictures at once. */
@@ -155,10 +170,16 @@ function Card({ suggestion, components, images, t, queue, pics, busy, online, on
   const picture = key !== null ? pics?.pictures?.get(key) : undefined;
   const making = pics?.making?.id === suggestion.id ? pics.making : null;
   const queued = key !== null && pics?.waiting.has(suggestion.id) === true;
-  return <li className="suggested-card" aria-busy={making !== null || undefined}>
+  return <li className="suggested-card">
     {picture && queue ? <LazyPicture key={picture.id} queue={queue} id={picture.id} title={suggestion.title} online={online} t={t} />
-      : making ? <div className="tryon-frame suggested-wait"><p>{making.waiting ? t('tryon.waiting')
-        : t('outfitgen.pictureMaking', { ordinal: making.ordinal, total: making.of })}</p></div>
+      : making ? <div className="tryon-frame suggested-wait">
+        <div className="suggested-progress" role="progressbar" aria-valuemin={0} aria-valuemax={making.steps} aria-valuenow={making.completedSteps}
+          aria-valuetext={t('outfitgen.pictureStep', { step: making.step, steps: making.steps })}           aria-label={suggestion.title}>
+          {Array.from({ length: making.steps }, (_, at) => <span key={at} data-state={at < making.completedSteps ? 'done' : at === making.completedSteps ? 'now' : 'waiting'} />)}
+        </div>
+        <p>{making.slow ? t('outfitgen.pictureSlow') : t('outfitgen.pictureStep', { step: making.step, steps: making.steps })}</p>
+                  {!making.slow && (making.reason === 'busy' || making.reason === 'holding') && <p>{t('tryon.waiting')}</p>}
+      </div>
       : queued ? <div className="tryon-frame suggested-wait"><p>{t('outfitgen.pictureQueued')}</p></div> : null}
     <ul className="suggested-garments" aria-label={t('outfitgen.garments', { title: suggestion.title })}>
       {suggestion.itemIds.map((id) => {
