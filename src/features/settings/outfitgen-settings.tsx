@@ -35,13 +35,13 @@ export function OutfitGenSettings({ store, busy, online, t }: Props) {
   const change = (enabled: boolean, button: HTMLElement | null) => { pressed.current = button; return writeConsent(store, enabled); };
   const noticeList = <dl className="ai-notice fine">
     <dt>{t('stylistC.fieldsTitle')}</dt>
-    <dd><p>{t('outfitgenC.sent')}</p><p>{t('outfitgenC.when')}</p></dd>
+    <dd><p>{t('outfitgenC.sent')}</p><p>{t('outfitgenC.when')}</p><p>{t('outfitgenC.pictures')}</p></dd>
     <dt>{t('stylistC.processing')}</dt>
     <dd>{t('outfitgenC.processing')}</dd>
     <dt>{t('aiC.retentionTitle')}</dt>
     <dd><p>{t('aiC.azureTrainingNotice')}</p><p>{t('outfitgenC.stored')}</p></dd>
     <dt>{t('aiC.chargesTitle')}</dt>
-    <dd><p>{t('outfitgenC.charges')}</p><p>{t('outfitgenC.optOut')}</p></dd>
+    <dd><p>{t('outfitgenC.charges')}</p><p>{t('outfitgenC.optOut2')}</p></dd>
   </dl>;
   const line = view.kind === 'loadFailed' ? 'outfitgenC.loadFailed' : view.kind === 'unresolved' ? 'stylist.unresolved'
     : view.kind === 'unavailable' ? 'outfitgenC.unavailable' : view.kind === 'paused' ? 'outfitgenC.paused' : view.kind === 'renew' ? 'outfitgenC.changed' : null;

@@ -3,7 +3,7 @@ import { createClient, type Session } from '@supabase/supabase-js';
 import type { Database } from '../../src/data/database.types';
 import type { OutfitGenClient } from '../../src/data/outfitgen';
 import { AI_GUARD_RESUMED_EVENT } from '../../src/domain/ai-guard';
-import { OUTFITGEN_MANIFEST, OUTFITGEN_MODEL } from '../../src/domain/outfitgen';
+import { OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION } from '../../src/domain/outfitgen';
 import {
   AUTO_COOLDOWN_MS, autoBlock, outfitGenView, parseDecision, parseGenerateReply, parseOutfitGenStatus, parseSuggestionList,
   type AutoLocal, type GenerateReply, type OutfitGenStatus,
@@ -22,8 +22,8 @@ const BUDGET = { monthlyAllowanceMicro: '17940000', usedMicro: '0', remainingMic
 
 function raw(over: Record<string, unknown> = {}, code = 'OK', enabled = true) {
   return { code, period: '2026-11', serverTimeMs: Date.parse('2026-11-20T00:00:00Z'),
-    consent: { enabled, noticeRevision: enabled ? 1 : null, consentedAt: enabled ? '2026-11-01T00:00:00Z' : null },
-    policy: code === 'UNCONFIGURED' ? null : { activated: true, noticeRevision: 1, manifestId: OUTFITGEN_MANIFEST, modelId: OUTFITGEN_MODEL, maxRequestMicro: '373402' },
+    consent: { enabled, noticeRevision: enabled ? OUTFITGEN_NOTICE_REVISION : null, consentedAt: enabled ? '2026-11-01T00:00:00Z' : null },
+    policy: code === 'UNCONFIGURED' ? null : { activated: true, noticeRevision: OUTFITGEN_NOTICE_REVISION, manifestId: OUTFITGEN_MANIFEST, modelId: OUTFITGEN_MODEL, maxRequestMicro: '373402' },
     budget: BUDGET, pending: 0, unassessed: 2, autoUnassessed: 2, autoCallsLeft: 3, live: false, cooldownUntilMs: null, ...over };
 }
 const status = (over: Record<string, unknown> = {}, code = 'OK', enabled = true): OutfitGenStatus => parseOutfitGenStatus(raw(over, code, enabled))!;
@@ -136,7 +136,7 @@ function supabase() {
   vi.spyOn(client.auth, 'getSession').mockResolvedValue({ data: { session }, error: null });
   return client;
 }
-const suggestion = (n: number) => ({ id: `30000000-0000-4000-8000-00000000000${n}`, itemIds: [ids[0]!, ids[1]!], title: `Set ${n}`, reason: 'Calm.', occasion: 'smart' as const, score: 9 });
+const suggestion = (n: number) => ({ id: `30000000-0000-4000-8000-00000000000${n}`, itemIds: [ids[0]!, ids[1]!], title: `Set ${n}`, reason: 'Calm.', occasion: 'smart' as const, score: 9, createdAtMs: 1_000 });
 function harness(statuses: OutfitGenStatus[] = [status()]) {
   const abort = new AbortController();
   const store = new OutfitGenStore(supabase(), config, { ownerId: owner, epoch: 1, signal: abort.signal });

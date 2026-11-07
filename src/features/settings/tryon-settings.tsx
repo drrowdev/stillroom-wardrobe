@@ -7,15 +7,15 @@ import '../../i18n/tryon';
 import { goToSettings } from './go-to-settings';
 import { readTryOnStatus, TRYON_NOTICE_KEYS, tryOnViewOf, writeTryOnConsent, type TryOnStore } from './tryon-store';
 
-type Props = { store: TryOnStore | null; busy: boolean; online: boolean; t: Translate };
+type Props = { store: TryOnStore | null; busy: boolean; online: boolean; t: Translate; picturesOn?: boolean };
 
 // Status is read on arrival, focus, visibility and reconnect, never while the profile is being saved; reads never write.
 // Turn off stays available whenever consent is on, including when try-on is paused, not activated or unavailable.
-export function TryOnSettings({ store, busy, online, t }: Props) {
+export function TryOnSettings({ store, busy, online, t, picturesOn }: Props) {
   if (!store) return null;
-  return <Card store={store} busy={busy} online={online} t={t} />;
+  return <Card store={store} busy={busy} online={online} t={t} picturesOn={picturesOn} />;
 }
-function Card({ store, busy, online, t }: Props & { store: TryOnStore }) {
+function Card({ store, busy, online, t, picturesOn }: Props & { store: TryOnStore }) {
   const state = useSyncExternalStore(store.subscribe, store.get);
   const photo = useSyncExternalStore(store.subscribePhoto, store.getPhoto);
   useEffect(() => { store.setBusy(busy); }, [store, busy]);
@@ -68,7 +68,7 @@ function Card({ store, busy, online, t }: Props & { store: TryOnStore }) {
     </div>}
     error={state.settingsError && !(state.settingsError === 'tryonC.changed' && view.kind === 'renew')
       && <p role="alert" className="notice notice-error">{t(state.settingsError)}</p>}
-    notice={details ? noticeList : null}
+    notice={details ? <>{noticeList}{picturesOn && photo.saved !== null && <p className="muted fine">{t('outfitgenC.photoUse')}</p>}</> : null}
     sheet={sheet.open ? <ConsentSheet id="tryon" title={t('tryonC.turnOnTitle')} notice={noticeList} writing={state.writing}
       disabled={disabled} t={t} onCancel={sheet.close} onConfirm={() => { void change(true, switchButton.current).finally(sheet.close); }} /> : null}
     t={t} />;

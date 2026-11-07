@@ -8,7 +8,9 @@ export const OUTFITGEN_MODEL = 'gpt-5.6-terra-2026-07-09';
 export const OUTFITGEN_DEPLOYMENT = 'eval-terra-20260709';
 export const OUTFITGEN_ENDPOINT = 'https://stillroom-ai-eval.openai.azure.com/openai/v1/chat/completions';
 export const OUTFITGEN_PROMPT_VERSION = 1;
-export const OUTFITGEN_NOTICE_REVISION = 1;
+// Revision 2 (OUTFITGEN2) adds the automatic pictures of you to the consent. The reviewed manifest row pins OUTFITGEN_SETTINGS
+// below at its original revision 1, so the settings object keeps that literal and only this consent constant moves.
+export const OUTFITGEN_NOTICE_REVISION = 2;
 // Allowance valuation of the 48,000 input / 8,192 output envelope at LongCo 4.40 / 19.80 per million:
 // (48,000 x 440 + 8,192 x 1,980) / 100 = 373,401.6, rounded up. The applicable ShortCo tariff (2.20 / 13.20) prices the
 // recorded usage. Neither is an invoice ceiling, and no typical per-call cost is claimed before the owner trial.
@@ -86,7 +88,7 @@ export const OUTFITGEN_SETTINGS = {
   profileId: OUTFITGEN_MANIFEST, purpose: 'outfit-judging', product: 'Azure OpenAI', deploymentType: 'DataZoneStandard', region: 'EU',
   api: 'v1/chat/completions', endpoint: OUTFITGEN_ENDPOINT, expectedSnapshot: OUTFITGEN_MODEL,
   acceptedReturnedModels: { expected_snapshot: OUTFITGEN_MODEL, model_family: 'gpt-5.6-terra', deployment_alias: OUTFITGEN_DEPLOYMENT },
-  schemaVersion: 1, promptVersion: OUTFITGEN_PROMPT_VERSION, noticeRevision: OUTFITGEN_NOTICE_REVISION,
+  schemaVersion: 1,   promptVersion: OUTFITGEN_PROMPT_VERSION, noticeRevision: 1,
   bodyControls: OUTFITGEN_BODY_CONTROLS,
   messages: [{ role: 'system', contentSource: 'OUTFITGEN_PROMPT' },
     { role: 'user', contentSource: 'garments-and-candidates-json, then per garment a ref label and its main JPEG',

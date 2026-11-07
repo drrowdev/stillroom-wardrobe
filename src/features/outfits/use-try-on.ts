@@ -8,16 +8,29 @@ import type { CancelResult, ChainStatus, StepInput, StepResponse, TryOnClient, T
 import { sha256Hex, TryOnError } from '../../data/tryon';
 import { selectTryOnSteps, TRYON_LIMITS, TRYON_MAX_STEPS, type TryOnCandidate, type TryOnSelection, type TryOnStep } from '../../domain/tryon';
 import type { OutfitComponent, OutfitRecord } from '../../domain/outfits';
+import { pictureKey } from '../../domain/outfitgen-pictures';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import { readTryOnStatus, type TryOnState, type TryOnStore } from '../settings/tryon-store';
 
 export type TryOnApi = {
   current(): boolean;
-  step(input: StepInput, signal: AbortSignal): Promise<StepResponse>;
+  step(input: StepInput, signal: AbortSignal, gate?: () => boolean): Promise<StepResponse>;
   chainStatus(chainId: string, signal?: AbortSignal): Promise<ChainStatus>;
   cancel(chainId: string, signal?: AbortSignal): Promise<CancelResult>;
 };
-export type SessionStop = { stopped(): boolean; recordStep(outcome: 'ok' | 'failed' | 'other'): void };
+export type SessionStop = {
+  stopped(): boolean; recordStep(outcome: 'ok' | 'failed' | 'other'): void;
+  /** A foreground run (one the owner started) reports when it is, or is no longer, sending or checking. */
+  foreground?(id: string, active: boolean): void;
+};
+/**
+ * OUTFITGEN2: a background run (automatic pictures) asks before every send, including the first and every BUSY retry. `go` sends,
+ * `hold` waits for a moment and asks again (a foreground try-on is running; not for the first send), `abort` ends the run without
+ * sending (consent, photo or scope changed). A foreground run has no gate and reports itself to the session instead.
+ */
+export type RunGate = 'go' | 'hold' | 'abort';
+export type RunOptions = { gate?: (index: number) => RunGate };
+export const HOLD_EVERY_MS = 3_000;
 export type RunEnvironment = {
   online(): boolean;
   /** Calls back once the device is online again; returns a remover. */
@@ -128,7 +141,7 @@ export class TryOnRun {
   private readonly named: { outfitId: string } | { itemIds: readonly string[] };
 
   constructor(private readonly api: TryOnApi, private readonly session: SessionStop, private readonly env: RunEnvironment,
-    subject: string | TryOnIdea, readonly steps: readonly TryOnStep[], photo: Uint8Array<ArrayBuffer>) {
+    subject: string | TryOnIdea, readonly steps: readonly TryOnStep[], photo: Uint8Array<ArrayBuffer>, private readonly options: RunOptions = {}) {
     if (steps.length < 1 || steps.length > TRYON_MAX_STEPS) throw new TryOnError('INVALID_INPUT');
     this.named = typeof subject === 'string' ? { outfitId: subject } : { itemIds: [...subject.itemIds] };
     this.chainId = env.uuid();
@@ -143,7 +156,15 @@ export class TryOnRun {
   private set(phase: RunPhase) {
     if (this.disposed) return;
     this.phase = phase;
+    this.report(phase.kind === 'running' || phase.kind === 'checking' || phase.kind === 'stopping');
     for (const listener of this.listeners) listener();
+  }
+  private reported = false;
+  /** A foreground run tells the session while it is busy, so background pictures wait; a background run never does. */
+  private report(active: boolean) {
+    if (this.options.gate || this.reported === active) return;
+    this.reported = active;
+    this.session.foreground?.(this.chainId, active);
   }
   private clearTimers() { for (const stop of this.stopTimers.splice(0)) stop(); }
   private drop() { this.person = null; this.photo = null; }
@@ -191,18 +212,31 @@ export class TryOnRun {
     if (this.session.stopped()) { this.fail(index, 'unavailable'); return; }
     const generation = ++this.generation;
     this.clearTimers();
+    const verdict = this.options.gate?.(index) ?? 'go';
+    if (verdict === 'abort' || (verdict === 'hold' && index === 0)) { this.fail(index, 'unavailable'); return; }
+    if (verdict === 'hold') { this.hold(index, generation); return; }
     this.set(waiting ? { kind: 'running', index, waiting: true } : { kind: 'running', index });
     const controller = new AbortController();
     this.inFlight = controller;
-    this.started = true;
+    // A gated run counts as started only once its last check has passed (see the gate below).
+    if (!this.options.gate) this.started = true;
     this.armLifetime();
     let reply: StepResponse;
+    const refusal: { value: RunGate | null } = { value: null };
     try {
+      const gate = this.options.gate ? () => {
+        const last = this.options.gate!(index);
+        if (last === 'go') this.started = true; else refusal.value = last;
+        return last === 'go';
+      } : undefined;
       reply = await this.api.step({ chainId: this.chainId, step: index + 1, requestId: this.env.uuid(), person,
-        ...(index === 0 ? this.named : {}) }, controller.signal);
+        ...(index === 0 ? this.named : {}) }, controller.signal, gate);
     } catch (error) {
       if (!this.live(generation)) return;
       this.inFlight = null;
+      // The last check held the step back (a foreground try-on began meanwhile): nothing was sent, so wait and ask again.
+      if (refusal.value === 'hold' && index > 0) { this.hold(index, generation); return; }
+      if (refusal.value !== null) { this.fail(index, 'unavailable'); return; }
       const code = error instanceof TryOnError ? error.code : 'UNAVAILABLE';
       // Refused before sending: nothing was charged and nothing can be pending.
       if (code === 'UNAUTHENTICATED' || code === 'INVALID_INPUT') { this.fail(index, 'unavailable'); return; }
@@ -240,6 +274,12 @@ export class TryOnRun {
     if (ambiguous(reply.code)) { this.reconcile(index, generation); return; }
     this.session.recordStep('other');
     this.fail(index, failureOf(reply.code));
+  }
+
+  /** Waits for the gate to allow the step again; nothing is sent meanwhile. The chain's lifetime still ends the wait. */
+  private hold(index: number, generation: number) {
+    this.set({ kind: 'running', index, waiting: true });
+    this.stopTimers.push(this.env.setTimer(() => { if (this.live(generation)) void this.send(index, true); }, HOLD_EVERY_MS));
   }
 
   /** A BUSY claim was refused and charged nothing: claim the same step again shortly, within the budget. False once it is spent. */
@@ -344,6 +384,7 @@ export class TryOnRun {
   }
   dispose(): void {
     if (this.disposed) return;
+    this.report(false);
     this.generation += 1;
     this.clearTimers();
     this.endLifetime();
@@ -396,7 +437,7 @@ export function useTryOnStatus(store: TryOnStore | null): TryOnStatus | null {
 /** Saved try-ons of one outfit. `missing`: this backend has no try-on; `failed`: the list couldn't be read. */
 export type SavedTryOnsState = { kind: 'idle' | 'loading' | 'missing' | 'failed' } | { kind: 'ready'; results: TryOnResult[] };
 /** Saved try-ons of one outfit, or (`null`) of unsaved ideas, newest first; each stays until it is deleted. `retry` reads the list again. */
-export function useOutfitTryOns(api: TryOnClient | null, outfitId: string | null, enabled: boolean): { state: SavedTryOnsState; retry: () => void } {
+export function useOutfitTryOns(api: TryOnClient | null, outfitId: string | null, enabled: boolean, sameSet: string | null = null): { state: SavedTryOnsState; retry: () => void } {
   const [state, setState] = useState<SavedTryOnsState>({ kind: 'idle' });
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
@@ -406,11 +447,11 @@ export function useOutfitTryOns(api: TryOnClient | null, outfitId: string | null
     api.results(controller.signal).then(list => {
       if (controller.signal.aborted) return;
       if (list === 'missing') { setState({ kind: 'missing' }); return; }
-      setState({ kind: 'ready', results: list.filter(entry => entry.outfitId === outfitId)
+      setState({ kind: 'ready', results: list.filter(entry => entry.outfitId === outfitId || (outfitId !== null && sameSet !== null && entry.outfitId === null && pictureKey(entry.itemIds) === sameSet))
         .sort((a, b) => b.completedAtMs - a.completedAtMs) });
     }, () => { if (!controller.signal.aborted) setState({ kind: 'failed' }); });
     return () => controller.abort();
-  }, [api, outfitId, enabled, attempt]);
+  }, [api, outfitId, enabled, sameSet, attempt]);
   const retry = useCallback(() => setAttempt(value => value + 1), []);
   return { state, retry };
 }

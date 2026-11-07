@@ -15,6 +15,7 @@ import { enhanceStoreFor, type EnhanceStore } from './enhance-store';
 import { StylistSettings } from './stylist-settings';
 import { OutfitGenSettings } from './outfitgen-settings';
 import { outfitGenStoreFor, type OutfitGenStore } from '../outfitgen/outfitgen-store';
+import { usePicturesOn } from '../outfitgen/use-outfitgen';
 import { TryOnSettings } from './tryon-settings';
 import { tryOnStoreFor, type TryOnStore } from './tryon-store';
 import {
@@ -28,6 +29,7 @@ type Props = { client: AppClient; ai: AiClient; controller: SessionController; s
 export function AiFeatures({ client, ai, controller, scope, profile, stylist, busy, unresolved, language, online, t }: Props) {
   const enhance = enhanceStoreFor(client, scope), tryOn = tryOnStoreFor(client, scope);
   const outfits = outfitGenStoreFor(client, scope);
+  const picturesOn = usePicturesOn(outfits);
   const spend = useSpend(scope, stylist, enhance, tryOn, outfits);
   return <div className="settings-group-card ai-features">
     <AiGuardNotice ai={ai} language={language} online={online} t={t} />
@@ -38,7 +40,7 @@ export function AiFeatures({ client, ai, controller, scope, profile, stylist, bu
     <AiSettings ai={ai} controller={controller} scope={scope} profile={profile} busy={busy} unresolved={unresolved}
       language={language} online={online} t={t} onSpend={spend.analysis} />
     <EnhanceSettings store={enhance} busy={busy} online={online} t={t} />
-    <TryOnSettings store={tryOn} busy={busy} online={online} t={t} />
+    <TryOnSettings store={tryOn} busy={busy} online={online} t={t} picturesOn={picturesOn} />
     <StylistSettings store={stylist} busy={busy} language={language} online={online} t={t} />
     {outfits && <OutfitGenSettings store={outfits} busy={busy} online={online} t={t} />}
   </div>;

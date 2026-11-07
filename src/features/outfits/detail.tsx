@@ -12,6 +12,8 @@ import type { Language, MessageKey, Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
 import { OutfitEditor } from './editor';
 import { SavedTryOns, TryOnButton } from './try-on/try-on-entry';
+import { plannedKey } from '../../domain/outfitgen-pictures';
+import { tryOnSelection } from './use-try-on';
 import { ComponentText, OutfitThumb } from './outfits-screen';
 import { useOutfit, usePickerItems, type OutfitView } from './use-outfits';
 import { recoverableOutfit } from '../../domain/outfit-lifecycle';
@@ -96,7 +98,7 @@ export function OutfitDetail(props: Shared & { id: string | null; timeZone: stri
         <button type="button" className="button button-secondary" disabled={!online || blocked || view.loading || !!view.error}
           onClick={event => { event.currentTarget.focus(); setConfirmation(structuredClone(record)); }}>{t('wardrobe.moveSelected')}</button>
       </OutfitSummary>}
-    {!editView && record && !trashed && <SavedTryOns client={client} scope={scope} outfitId={record.id} online={online} t={t} />}
+    {!editView && record && !trashed && <SavedTryOns client={client} scope={scope} outfitId={record.id} online={online} t={t} sameSet={view.data ? plannedKey(tryOnSelection(record, view.data.components).steps) : null} />}
     {confirmation && <OutfitLifecycleDialog title={t('outfitTrash.confirmName', { name: confirmation.title })} body={t('outfitTrash.preserve')}
       action={t('wardrobe.moveSelected')} lifecycle={props.lifecycle} online={online} t={t} onCancel={() => setConfirmation(null)}
       onConfirm={() => { void props.lifecycle.execute([confirmation], 'trash').then(result => {

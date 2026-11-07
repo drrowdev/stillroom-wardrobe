@@ -78,6 +78,16 @@ export class TryOnStore {
     this.busy = busy;
     if (!busy && this.deferred && !this.disposed) { this.deferred = false; void readTryOnStatus(this, 'passive'); }
   }
+  // OUTFITGEN2: the runs the owner started that are sending or checking right now. Automatic pictures never send while one is active.
+  private readonly foregroundRuns = new Set<string>();
+  private readonly foregroundListeners = new Set<() => void>();
+  foregroundActive = () => this.foregroundRuns.size > 0;
+  subscribeForeground = (listener: () => void) => { this.foregroundListeners.add(listener); return () => { this.foregroundListeners.delete(listener); }; };
+  foreground(id: string, active: boolean) {
+    if (active === this.foregroundRuns.has(id)) return;
+    if (active) this.foregroundRuns.add(id); else this.foregroundRuns.delete(id);
+    for (const listener of [...this.foregroundListeners]) listener();
+  }
   /** Records a step outcome for the session stop; FILTERED and other refusals don't count and don't reset. */
   recordStep(outcome: 'ok' | 'failed' | 'other') {
     if (outcome === 'ok') { this.failures = 0; return; }
@@ -106,6 +116,8 @@ export class TryOnStore {
     this.listeners.clear();
     for (const listener of this.photoListeners) listener();
     this.photoListeners.clear();
+    this.foregroundRuns.clear();
+    this.foregroundListeners.clear();
   }
 }
 

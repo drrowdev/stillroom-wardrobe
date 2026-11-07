@@ -1,5 +1,5 @@
 import {
-  OUTFITGEN_LIMITS, OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_RESERVATION_MICRO, buildOutfitGenRequest, isSuggestion,
+  OUTFITGEN_LIMITS, OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION, OUTFITGEN_RESERVATION_MICRO, buildOutfitGenRequest, isSuggestion,
   parseOutfitGenBody, parseOutfitGenItem, validateOutfitGenReply, type OutfitGenItem, type OutfitGenMode,
 } from '../../../src/domain/outfitgen.ts';
 import { buildBatch, setKey, type CandidateBans, type CandidateItem } from '../../../src/domain/outfit-candidates.ts';
@@ -147,7 +147,7 @@ export function createOutfitGenHandler(config: OutfitGenConfig, registrar: Outfi
       const policy = preflight.policy, consent = preflight.consent;
       if (!object(policy) || policy.activated !== true) return error('INACTIVE');
       if (!object(consent) || consent.enabled !== true || consent.noticeRevision !== policy.noticeRevision) return error('CONSENT_REQUIRED');
-      if (policy.noticeRevision !== 1 || policy.manifestId !== OUTFITGEN_MANIFEST || policy.modelId !== OUTFITGEN_MODEL
+      if (policy.noticeRevision !== OUTFITGEN_NOTICE_REVISION || policy.manifestId !== OUTFITGEN_MANIFEST || policy.modelId !== OUTFITGEN_MODEL
         || !microText(policy.maxRequestMicro) || BigInt(policy.maxRequestMicro as string) < BigInt(OUTFITGEN_RESERVATION_MICRO)
         || !azureConfigured(config.azure) || !count(preflight.pending, 100) || !count(preflight.autoCallsLeft, 3)
         || !count(preflight.autoUnassessed, 1_000_000) || typeof preflight.live !== 'boolean' || !count(preflight.serverTimeMs, 2 ** 53)
