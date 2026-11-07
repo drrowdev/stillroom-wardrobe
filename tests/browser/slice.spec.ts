@@ -1123,7 +1123,7 @@ for (const firstOwner of ['a', 'b'] as const) {
       expect(requests.some((request) => request.path === '/rest/v1/items')).toBe(true);
       expect(requests.some((request) => request.path.startsWith('/storage/'))).toBe(true);
       expect(requests.every((request) => request.owner === owners[owner])).toBe(true);
-      expect(requests.filter((request) => request.path.startsWith('/rest/')).every((request) => request.ownerFilter === `eq.${owners[owner]}`)).toBe(true);
+      expect(requests.filter((request) => request.path.startsWith('/rest/')).every((request) => request.ownerFilter === `eq.${owners[owner]}` || request.path === '/rest/v1/rpc/outfitgen_status' && request.ownerFilter === null)).toBe(true);
     };
     for (const tab of Object.values(tabs)) {
       await tab.goto('/');
@@ -1397,7 +1397,7 @@ test('concise empty wardrobe and bounded synthetic evidence', async ({ page }, t
     expect(api.profiles[owners.b]).toEqual(foreign);
     expect(api.profiles[owners.a]?.ui_language).toBe(language);
     expect(api.requests.filter((request) => request.path.startsWith('/rest/'))
-      .every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
+      .every((request) => request.owner === owners.a && (request.ownerFilter === `eq.${owners.a}` || request.path === '/rest/v1/rpc/outfitgen_status' && request.ownerFilter === null))).toBe(true);
     await expectIdentity(page, 'Alex');
     expect(await page.evaluate(({ origin, language, width }) => {
       const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';

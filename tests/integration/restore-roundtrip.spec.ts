@@ -80,7 +80,7 @@ const READ_ONLY_RPCS = new Set(['admin_status', 'analyzed_item_save_preflight', 
   'image_change_requests', 'image_change_status', 'image_recovery_preflight', 'image_recovery_versions', 'item_attribution_history',
   'item_attribution_history_v2', 'attribution_digest',
   'item_deletion_operation_status', 'item_deletion_operations', 'item_deletion_status', 'restore_image_change_status',
-  'restore_item_save_status', 'tryon_person_photo_status_v1']);
+  'restore_item_save_status', 'tryon_person_photo_status_v1', 'outfitgen_list']);
 
 // Every row of the ten owner tables (paged until exhausted) and every stored object with its SHA-256, read as the owner.
 async function snapshot({ client, scope }: Owner): Promise<Snapshot> {
@@ -159,6 +159,8 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
   // refused and fails.
   const STATUS_RPC_PATHS = new Set(['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status',
     '/rest/v1/rpc/tryon_status']);
+  // The suggested-outfits check is timer-driven (app open, after a Save), so it may fall after the baseline; it is refused there like the others but is not a drill failure.
+  const TIMED_STATUS_PATH = '/rest/v1/rpc/outfitgen_status';
   const isAiStatus = (request: import('@playwright/test').Request) =>
     request.method() === 'POST' && STATUS_RPC_PATHS.has(new URL(request.url()).pathname);
   const aiInFlight = new Set<import('@playwright/test').Request>();
@@ -172,6 +174,10 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
   const settle = (request: import('@playwright/test').Request) => { if (aiInFlight.delete(request)) aiFinished++; };
   page.on('requestfinished', settle); page.on('requestfailed', settle);
   // A URL predicate on the exact pathnames: a glob would miss `/rest/v1/rpc/ai_status?…`.
+  await page.route(url => url.pathname === TIMED_STATUS_PATH, async route => {
+    if (aiLocked && route.request().method() === 'POST') { await route.abort('blockedbyclient'); return; }
+    await route.fallback();
+  });
   await page.route(url => STATUS_RPC_PATHS.has(url.pathname), async route => {
     if (aiLocked && route.request().method() === 'POST') { lateAiStatus++; await route.abort('blockedbyclient'); return; }
     await route.fallback();
@@ -357,7 +363,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     const signInAttempts = requests.slice(signInFrom).filter(({ method }) => !['GET', 'HEAD', 'OPTIONS'].includes(method))
       .map(({ method, url }) => ({ method, path: new URL(url).pathname }))
       .filter(({ method, path }) => !(path.startsWith('/auth/v1/') || method === 'PATCH' && path === '/rest/v1/profiles'
-        || method === 'POST' && (STATUS_RPC_PATHS.has(path) || READ_ONLY_RPCS.has(path.replace('/rest/v1/rpc/', ''))
+        || method === 'POST' && (STATUS_RPC_PATHS.has(path) || path === TIMED_STATUS_PATH || READ_ONLY_RPCS.has(path.replace('/rest/v1/rpc/', ''))
           && path.startsWith('/rest/v1/rpc/'))));
     if (signInAttempts.length) throw new Error(`Write attempts while signing in: ${signInAttempts.map(({ method, path }) => `${method} ${path}`).join(', ')}.`);
     const opened = await snapshot(a);

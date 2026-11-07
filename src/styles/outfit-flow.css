@@ -20,3 +20,19 @@
   .outfit-editor .outfit-slot { grid-template-columns: 48px minmax(0, 1fr); }
   .outfit-editor .outfit-slot .outfit-thumb { width: 48px; }
 }
+
+/* Suggested outfits: a list of cards, each a strip of garment photos, a reason and two actions. */
+.suggested { margin-block-end: 32px; }
+.suggested-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-block-end: 12px; }
+.suggested-head h2 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.suggested-notices:empty { display: none; }
+.suggested-notices p, .suggested > p { margin: 0 0 8px; overflow-wrap: anywhere; }
+.suggested-list { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 16px; }
+.suggested-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; }
+.suggested-thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+.suggested-thumbs .outfit-thumb { width: 100%; border-radius: 6px; }
+.suggested-text { min-width: 0; overflow-wrap: anywhere; }
+.suggested-text h3 { margin: 0 0 2px; }
+.suggested-text p { margin: 0; }
+.suggested-occasion { color: var(--secondary); font-size: 0.875rem; }
+.suggested-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: auto; }

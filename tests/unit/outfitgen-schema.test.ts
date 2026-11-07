@@ -121,6 +121,22 @@ describe('outfit generation migration (source proofs; the SQL itself runs in the
     for (const rule of ['public.combination_rules', 'public.suggestion_feedback', 'c.f=1', 'outfitgen_eligible']) expect(valid).toContain(rule);
   });
 
+  it('adds only the capacity check to Undo in the forward migration', async () => {
+    const lines = (text: string) => text.slice(text.indexOf('create'), text.lastIndexOf('$$;')).split('\n').map((line) => line.trim()).filter((line) => line !== '' && !line.startsWith('--'));
+    const original = await read('20261106090000_outfit_generation.sql');
+    const start = original.indexOf('create function public.outfitgen_undo_remove');
+    const before = lines(original.slice(start, original.indexOf('$$;', start) + 3)).map((line) => line.replace(/^create function /, 'create or replace function '));
+    const after = lines(await read('20261107090000_outfitgen_undo_capacity.sql'));
+    const added = after.filter((line) => !before.includes(line));
+    expect(before.filter((line) => !after.includes(line))).toEqual([]);
+    expect(added.join(' ')).toContain("select count(*) from public.suggested_outfits where owner_id=v_owner and state='suggested')>=40");
+    expect(added.join(' ')).toContain("return jsonb_build_object('code','PENDING_FULL')");
+    expect(added).toHaveLength(3);
+    const migration = await read('20261107090000_outfitgen_undo_capacity.sql');
+    expect(migration.indexOf('>=40')).toBeGreaterThan(migration.indexOf("f.vote<>-1 then return jsonb_build_object('code','CONFLICT')"));
+    expect(migration.indexOf('>=40')).toBeLessThan(migration.indexOf('delete from public.suggestion_feedback'));
+    expect(migration).not.toMatch(/\b(grant|revoke)\b/i);
+  });
   it('keeps the schedule migration inactive and names the job', async () => {
     const sql = await read('20261106090100_outfitgen_expire_schedule.sql');
     expect(sql).toContain("'stillroom-outfitgen-expire', '*/5 * * * *', 'select public.outfitgen_expire_due(500)'");

@@ -1,13 +1,14 @@
 import type baseMessages from './messages.json';
 import type phaseZeroMessages from './phase-zero.json';
 import type tryOnMessages from './tryon.json';
+import type outfitGenMessages from './outfitgen.json';
 import { bootMessages } from './boot';
 
 // LANG1: this module holds no catalogue text. The app fetches the active language's startup table (./load) before
 // it renders; tests and tools install all three through ./all. Lazy screens register their own catalogues.
 type Startup = typeof baseMessages & typeof phaseZeroMessages;
 /** Catalogs loaded with a lazy screen rather than at startup; `registerMessages` adds them when their chunk loads. */
-type LazyCatalogs = typeof tryOnMessages;
+type LazyCatalogs = typeof tryOnMessages & typeof outfitGenMessages;
 export type MessageKey = keyof (Startup & LazyCatalogs);
 export type Language = 'en' | 'fi' | 'sv';
 export const languages: readonly Language[] = ['en', 'fi', 'sv'];

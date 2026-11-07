@@ -3,11 +3,12 @@
 import { isMicro, type AiStatus } from '../../domain/ai-controls';
 import type { EnhanceStatus } from '../../domain/enhance-controls';
 import type { StylistStatus } from '../../domain/stylist-controls';
+import type { OutfitGenStatus } from '../../domain/outfitgen-app';
 import type { TryOnStatus } from '../../data/tryon';
 
-export type SpendSource = 'analysis' | 'stylist' | 'enhance' | 'tryOn';
+export type SpendSource = 'analysis' | 'stylist' | 'enhance' | 'tryOn' | 'outfits';
 /** Tie order when two responses carry the same server time. */
-export const SPEND_ORDER: readonly SpendSource[] = ['analysis', 'stylist', 'enhance', 'tryOn'];
+export const SPEND_ORDER: readonly SpendSource[] = ['analysis', 'stylist', 'enhance', 'tryOn', 'outfits'];
 /** The longest single wait before the snapshot is checked again; far below the 2,147,483,647 ms timer limit. */
 export const MAX_CHECK_DELAY_MS = 86_400_000;
 
@@ -24,8 +25,8 @@ export function analysisFigures(status: AiStatus): SpendFigures | null {
   return status.budget ? { usedMicro: status.budget.usedMicro, limitMicro: status.budget.monthlyAllowanceMicro,
     serverTimeMs: status.serverTimeMs, period: status.period } : null;
 }
-/** Stylist, clean-up and try-on: the same one budget. None without a budget or server time. */
-export function sharedFigures(status: EnhanceStatus | StylistStatus | TryOnStatus): SpendFigures | null {
+/** Stylist, clean-up, try-on and suggested outfits: the same one budget. None without a budget or server time. */
+export function sharedFigures(status: EnhanceStatus | StylistStatus | TryOnStatus | OutfitGenStatus): SpendFigures | null {
   return status.budget && status.serverTimeMs !== null
     ? { usedMicro: status.budget.usedMicro, limitMicro: status.budget.monthlyAllowanceMicro, serverTimeMs: status.serverTimeMs } : null;
 }

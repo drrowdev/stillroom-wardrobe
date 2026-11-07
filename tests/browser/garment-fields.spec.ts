@@ -611,7 +611,7 @@ test('complete creation form accessibility and bounded synthetic visual evidence
     expect(api.items.length === 0 && api.images.length === 0 && api.files.size === 0
       && api.profiles[owners.a]?.ui_language === capture.language
       && api.requests.filter((request) => request.path.startsWith('/rest/')).every((request) => request.owner === owners.a
-        && (request.path === '/rest/v1/rpc/ai_status'
+        && (['/rest/v1/rpc/ai_status', '/rest/v1/rpc/outfitgen_status'].includes(request.path)
           ? request.method === 'POST' && request.ownerFilter === null : request.ownerFilter === `eq.${owners.a}`))).toBe(true);
     expect(api.statusProofs()).toEqual(api.requests.filter((request) => request.path === '/rest/v1/rpc/ai_status')
       .map(() => ({ owner: owners.a, issuedBearer: true, emptyObject: true })));

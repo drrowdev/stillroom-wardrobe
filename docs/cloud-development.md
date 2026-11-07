@@ -2142,11 +2142,29 @@ nothing here is applied, deployed, consented or activated, and no provider is ca
   Remove, Undo, failure, cooldown, expiry, stale handling and owner isolation), `scripts/isolation-catalog.mjs` and the audit probes,
   `scripts/run-deletion-rehearsal.mjs`, `scripts/backend/ci-storage-guard.mjs`, `scripts/backend/local.mjs` (the function inventory).
 - **Rollout (each step a separate owner or coordinator gate; none is done by this packet).** 1. Confirm the Azure TPM/RPM quota of
-  the Terra deployment (the documented 20K TPM / 20 RPM is historical and unverified). 2. Apply `20261106090000` and
-  `20261106090100`. 3. **Activate the `stillroom-outfitgen-expire` job before the first trial:** a request whose reply is never
+  the Terra deployment (the documented 20K TPM / 20 RPM is historical and unverified). 2. Apply `20261106090000`, `20261106090100` and
+  `20261107090000` (Undo respects the cap of 40 pending suggestions; added by the 1b review). 3. **Activate the `stillroom-outfitgen-expire` job before the first trial:** a request whose reply is never
   finished (runtime termination is not covered by background work) stays held until it settles. 4. Deploy `outfit-generate`.
   5. OUTFITGEN1b (the app: Settings card, Suggested outfits list, triggers). 6. Bootstrap the owner's controls (manifest, notice 1,
   maximum request at least the reservation). 7. The owner consents and runs the trial.
 - **Owner trial plan.** With real photos: one manual run, review of the first ~30 suggestions (kept against removed, any clash,
   any duplicate), tokens, cost and time per call from the ledger, any 429, then a second run after adding two garments (only
   sets with the new garments should appear). Tuning (score bar, garments per call, prompt wording) is a new manifest version.
+
+## OUTFITGEN1b suggested outfits in the app - 6 November 2026
+
+Source packet for the app side of ADR31, after OUTFITGEN1a (merged). Contract details are in `blueprint/20`; this records the
+engineering evidence and what stays open. Nothing here is deployed or activated; the hosted rollout order of 1a still applies
+(Azure quota gate G1, migration, expiry job active before the first trial, Edge deploy, then the owner's consent), and a Pages
+deploy of this packet is a separate owner step.
+
+- **Files.** `src/domain/outfitgen-app.ts` (closed replies, view per state, automatic-run policy), `src/data/outfitgen.ts`,
+  `src/features/outfitgen/{outfitgen-store,outfitgen-trigger,use-outfitgen}`, `src/features/settings/outfitgen-settings.tsx`,
+  `src/features/outfits/suggested-outfits.tsx`, the lazy catalogue `src/i18n/outfitgen.json` (registered like try-on's), wiring in
+  `app.tsx`, `outfits-screen.tsx` and `ai-features.tsx` (plus the `outfits` spend source).
+- **Validation.** Unit: `tests/unit/outfitgen-app.test.ts`, `tests/unit/outfitgen-notice.test.ts`. Browser: `tests/browser/outfitgen.spec.ts`
+  on the mock backend (`outfitgenControl`), with the writes counter of `outfits.spec.ts` ignoring the read-only status and list calls.
+  `npm run check:translations`, typecheck and lint.
+- **Review fixes (Sol, PR #210).** A run is gated again right before the request is sent (consent change pending, consent off, limit, offline, newer Save), so Turn off can't race a run; a newer Save supersedes an older trigger even while it loads; a list read that began before a decision can't bring a decided card back; status and list parsers read counts above the server cap instead of refusing them; Undo answers PENDING_FULL when 40 suggestions are pending (forward migration `20261107090000_outfitgen_undo_capacity.sql`, its exact-body proof in `tests/unit/outfitgen-schema.test.ts` and a probe in `tests/integration/outfitgen.sessions.mjs`). Accepted residual (lean mode, one owner): two Undos, or an Undo racing a run's recording, at exactly the cap can overshoot to 41 pending; the parsers read such counts and nothing breaks. The notice now says that kept, removed and judged-but-not-suggested sets stay stored (reason and garment list; nothing expires on time) until one of their garments is permanently deleted or the account is.
+- **Not verified here.** Real Azure behaviour, how long a run takes on a phone, and whether a mobile browser keeps a 90-second
+  request alive while the app is in the background (a cut request ends as a quiet failure and the server expiry job settles it).

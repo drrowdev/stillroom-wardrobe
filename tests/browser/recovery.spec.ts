@@ -404,7 +404,7 @@ test('concise entry copy, accessible recovery and bounded synthetic entry eviden
       expect(api.profiles).toEqual(profiles);
       expect(api.requests.every((request) => request.method === 'GET')).toBe(true);
       expect(api.requests.filter((request) => request.path.startsWith('/rest/'))
-        .every((request) => request.owner === owners.a && request.ownerFilter === `eq.${owners.a}`)).toBe(true);
+        .every((request) => request.owner === owners.a && (request.ownerFilter === `eq.${owners.a}` || request.path === '/rest/v1/rpc/outfitgen_status' && request.ownerFilter === null))).toBe(true);
       expect(await page.evaluate(({ origin, language, surface, width }) => {
         const visible = (element: Element) => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
         // A checkbox's value is always "on"; only text fields must be empty.
