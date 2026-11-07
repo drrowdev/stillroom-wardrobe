@@ -1,5 +1,5 @@
 import '../../styles/outfit-flow.css';
-import { useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../app/icon';
 import { componentLabel, componentMeta, occasionLabel, type OutfitComponent } from '../../domain/outfits';
 import { itemCount, pluralText, type Language, type Translate } from '../../i18n';
@@ -12,6 +12,7 @@ import type { OutfitRecord } from '../../domain/outfits';
 import type { OutfitLifecycle } from './use-outfit-lifecycle';
 import { OutfitLifecycleDialog, OutfitWearCheck } from './lifecycle-controls';
 import { SuggestedOutfits } from './suggested-outfits';
+import { useCardPicture, useOutfitListPictures, type PictureLoader } from './card-pictures';
 
 function LoadedThumb({ path, alt, images, t }: { path: string; alt: string; images: PrivateImages; t: Translate }) {
   const { ref, url, failed } = usePrivateImage(images, path);
@@ -39,6 +40,26 @@ export function ComponentText({ component, t }: { component: OutfitComponent; t:
   </span>;
 }
 
+/**
+ * The card's picture box. The garment collage stays until the owner's own picture of the outfit (when there is one) has loaded and
+ * decoded, so the box never changes size; if the picture cannot be loaded the collage simply stays. Loaded only near the screen.
+ */
+function CardThumbs({ count, pictureId, loader, children }: { count: number; pictureId: string | null; loader: PictureLoader | null; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [near, setNear] = useState(typeof IntersectionObserver === 'undefined');
+  const [broken, setBroken] = useState<string | null>(null);
+  useEffect(() => {
+    if (near || pictureId === null || !ref.current) return;
+    const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) setNear(true); }, { rootMargin: '300px 0px' });
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [near, pictureId]);
+  const url = useCardPicture(loader, near && pictureId !== broken ? pictureId : null);
+  if (url) return <div className="outfit-card-thumbs outfit-card-picture" aria-hidden="true">
+    <img src={url} alt="" width="1024" height="1280" onError={() => setBroken(pictureId)} /></div>;
+  return <div ref={ref} className={`outfit-card-thumbs outfit-card-thumbs-${count}`} aria-hidden="true">{children}</div>;
+}
+
 type Props = {
   client: AppClient; scope: OwnerScope; invalidation: number;
   images: PrivateImages; online: boolean; language: Language; t: Translate;
@@ -48,6 +69,7 @@ type Props = {
 export function OutfitsScreen({ client, scope, invalidation, images, online, language, t, onCreate, onAddItem, onKept, lifecycle }: Props) {
   const list = useOutfitList(client, scope, online, invalidation);
   const data = list.data;
+  const { loader, pictures } = useOutfitListPictures(client, scope, online, data?.outfits ?? null, data?.components ?? null);
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
   const [confirmation, setConfirmation] = useState<OutfitRecord[] | null>(null);
@@ -86,10 +108,10 @@ export function OutfitsScreen({ client, scope, invalidation, images, online, lan
           const occasion = occasionLabel(outfit);
           const shown = outfit.links.flatMap(link => { const component = data.components.get(link.itemId); return component ? [{ id: link.itemId, component }] : []; }).slice(0, 4);
           const content = <>
-            <div className={`outfit-card-thumbs outfit-card-thumbs-${Math.max(shown.length, 1)}`} aria-hidden="true">
+            <CardThumbs count={Math.max(shown.length, 1)} pictureId={pictures.get(outfit.id) ?? null} loader={loader}>
               {shown.map(({ id, component }) => <OutfitThumb key={id} component={component} images={images} t={t} decorative />)}
               {shown.length === 3 && <div className="outfit-thumb-fill" />}
-            </div>
+            </CardThumbs>
             <div className="item-caption"><h2>{outfit.title}</h2>
               <span>{outfit.links.length ? itemCount(language, outfit.links.length) : t('outfits.noItems')}</span>
               {occasion && <span className="outfit-card-occasion">{t(occasion)}</span>}

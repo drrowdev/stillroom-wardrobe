@@ -33,6 +33,23 @@ export function plannedKey(steps: readonly { itemId: string }[]): string | null 
   return pictureKey(steps.map((step) => step.itemId));
 }
 
+/**
+ * K2: whether a saved result belongs to a saved outfit: its own result, or an idea picture (no outfit) of exactly the outfit's
+ * planned garment set (`sameSet`, from plannedKey; null when the outfit has no plan).
+ */
+export function belongsToOutfit(result: Pick<PictureResult, 'outfitId' | 'itemIds'>, outfitId: string, sameSet: string | null): boolean {
+  return result.outfitId === outfitId || (sameSet !== null && result.outfitId === null && pictureKey(result.itemIds) === sameSet);
+}
+
+/** The newest saved result that belongs to the outfit (see belongsToOutfit), or null. */
+export function newestOutfitPicture<R extends PictureResult>(results: readonly R[], outfitId: string, sameSet: string | null): R | null {
+  let newest: R | null = null;
+  for (const result of results) {
+    if (belongsToOutfit(result, outfitId, sameSet) && (newest === null || result.completedAtMs > newest.completedAtMs)) newest = result;
+  }
+  return newest;
+}
+
 /** The newest idea picture (a result without an outfit) of each garment set. */
 export function pictureIndex(results: readonly PictureResult[]): ReadonlyMap<string, PictureResult> {
   const found = new Map<string, PictureResult>();

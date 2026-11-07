@@ -21,9 +21,10 @@ function saves(page: Page) {
   page.on('request', (request) => {
     const url = new URL(request.url());
     if (url.origin !== 'http://127.0.0.1:54321') return;
-    // The suggested-outfits status and list are read-only calls that happen to be POSTs.
+    // The suggested-outfits and try-on status, list and picture calls are read-only calls that happen to be POSTs.
     if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method()) && url.pathname !== '/auth/v1/token'
-      && !['/rest/v1/rpc/outfitgen_status', '/rest/v1/rpc/outfitgen_list'].includes(url.pathname)) writes.push(url.pathname);
+      && !['/rest/v1/rpc/outfitgen_status', '/rest/v1/rpc/outfitgen_list', '/rest/v1/rpc/tryon_status', '/rest/v1/rpc/tryon_results_v1',
+        '/rest/v1/rpc/tryon_result_image_v1'].includes(url.pathname)) writes.push(url.pathname);
     if (url.pathname === '/rest/v1/rpc/save_outfit' && request.method() === 'POST') { bodies.push(request.postDataJSON() as Row); order.push('save'); }
     if (url.pathname === '/rest/v1/outfits' && request.method() === 'GET' && url.searchParams.has('id')) { rereads.push(url.searchParams.get('id')!); order.push('reread'); }
   });

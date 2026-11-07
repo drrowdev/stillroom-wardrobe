@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addStepSample, classifyFailure, estimateMinutesLeft, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKey, pictureTargets, plannedKey,
+  addStepSample, classifyFailure, estimateMinutesLeft, newestOutfitPicture, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKey, pictureTargets, plannedKey,
   removableResults, reserveBlock, reservedGate, slowStepMs, type PictureInputs, type PictureResult,
 } from '../../src/domain/outfitgen-pictures';
 import { parseSuggestionList } from '../../src/domain/outfitgen-app';
@@ -24,6 +24,18 @@ describe('finding a picture by its planned garments (OUTFITGEN2)', () => {
     const index = pictureIndex([result(1, [1, 2], 100), result(2, [2, 1], 300), result(3, [1, 2], 200, ID(99)), result(4, [3, 4], 50)]);
     expect([...index.keys()].sort()).toEqual([pictureKey([ID(1), ID(2)]), pictureKey([ID(3), ID(4)])].sort());
     expect(index.get(pictureKey([ID(1), ID(2)]))!.id).toBe(ID(2));
+  });
+  it('finds a saved outfit\'s newest picture: its own result or an idea picture of exactly its planned set (OUTFITS-PICTURES)', () => {
+    const set = pictureKey([ID(1), ID(2)]);
+    const own = result(1, [1, 2], 100, ID(90));
+    const idea = result(2, [2, 1], 300);
+    const other = result(3, [1, 2], 500, ID(91));
+    const differentSet = result(4, [1, 3], 600);
+    expect(newestOutfitPicture([own, idea, other, differentSet], ID(90), set)).toBe(idea);
+    expect(newestOutfitPicture([own, idea], ID(90), null)).toBe(own);
+    expect(newestOutfitPicture([idea, differentSet], ID(90), null)).toBeNull();
+    expect(newestOutfitPicture([other, differentSet], ID(90), set)).toBeNull();
+    expect(newestOutfitPicture([], ID(90), set)).toBeNull();
   });
 });
 

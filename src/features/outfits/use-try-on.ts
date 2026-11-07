@@ -8,7 +8,7 @@ import type { CancelResult, ChainStatus, StepInput, StepResponse, TryOnClient, T
 import { sha256Hex, TryOnError } from '../../data/tryon';
 import { selectTryOnSteps, TRYON_LIMITS, TRYON_MAX_STEPS, type TryOnCandidate, type TryOnSelection, type TryOnStep } from '../../domain/tryon';
 import type { OutfitComponent, OutfitRecord } from '../../domain/outfits';
-import { pictureKey } from '../../domain/outfitgen-pictures';
+import { belongsToOutfit } from '../../domain/outfitgen-pictures';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import { readTryOnStatus, type TryOnState, type TryOnStore } from '../settings/tryon-store';
 
@@ -447,7 +447,7 @@ export function useOutfitTryOns(api: TryOnClient | null, outfitId: string | null
     api.results(controller.signal).then(list => {
       if (controller.signal.aborted) return;
       if (list === 'missing') { setState({ kind: 'missing' }); return; }
-      setState({ kind: 'ready', results: list.filter(entry => entry.outfitId === outfitId || (outfitId !== null && sameSet !== null && entry.outfitId === null && pictureKey(entry.itemIds) === sameSet))
+      setState({ kind: 'ready', results: list.filter(entry => entry.outfitId === outfitId || (outfitId !== null && belongsToOutfit(entry, outfitId, sameSet)))
         .sort((a, b) => b.completedAtMs - a.completedAtMs) });
     }, () => { if (!controller.signal.aborted) setState({ kind: 'failed' }); });
     return () => controller.abort();
