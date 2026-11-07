@@ -128,6 +128,7 @@ const pictureLines: Record<LineKey, MessageKey> = {
   tryOnOff: 'outfitgen.pictureTryOnOff', noPhoto: 'outfitgen.pictureNoPhoto', full: 'outfitgen.pictureFull',
   budget: 'outfitgen.pictureBudget', retryLater: 'outfitgen.pictureRetry', otherWindow: 'outfitgen.pictureOtherWindow',
   otherPicture: 'outfitgen.pictureOtherPicture', ownTryOn: 'outfitgen.pictureOwnTryOn', cleanup: 'outfitgen.pictureCleanup',
+  stopping: 'outfitgen.pictureStopping', tryOnPaused: 'outfitgen.pictureTryOnPaused',
   unreadable: 'outfitgen.pictureUnreadable', noLocks: 'outfitgen.pictureNoLocks', offline: 'outfitgen.pictureOffline',
 };
 /** The overall count of the pictures being made, with the time left when it is known. */

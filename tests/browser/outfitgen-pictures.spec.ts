@@ -60,7 +60,7 @@ async function usablePhoto(page: Page) {
   }));
 }
 
-type Start = { beforeSignIn?: (api: Api) => void; shortPlan?: boolean; tryOn?: boolean; photo?: boolean; outfitConsent?: boolean; hash?: string; replies?: Api['tryonControl']['replies']; language?: Language };
+type Start = { beforeSignIn?: (api: Api) => void | Promise<void>; shortPlan?: boolean; tryOn?: boolean; photo?: boolean; outfitConsent?: boolean; hash?: string; replies?: Api['tryonControl']['replies']; language?: Language };
 async function start(page: Page, options: Start = {}, existing?: { api: Api; clothes: Clothes }) {
   // Playwright's WebKit route interception reports an empty body for Blob uploads, so there the try-on POST is re-sent as an ArrayBuffer.
   if (test.info().project.name === 'webkit-photo') {
@@ -94,7 +94,7 @@ async function start(page: Page, options: Start = {}, existing?: { api: Api; clo
     const jpeg = await usablePhoto(page);
     api.tryonControl.photos[owners.a] = { jpeg, sha256: createHash('sha256').update(jpeg).digest('hex'), savedAtMs: Date.now() - 86_400_000 };
   }
-  options.beforeSignIn?.(api);
+  await options.beforeSignIn?.(api);
   await page.goto(options.hash ?? '/#/outfits'); await signIn(page);
   await expectSignedIn(page);
   return { api, clothes };
@@ -675,6 +675,54 @@ test.describe('PICTURES-WAIT1 pictures wait, lines and progress', () => {
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await quiet(page, 1_500);
     expect(chains(api)).toHaveLength(2);
+  });
+
+  test('a plan too short for a picture is counted as an outfit without one, and nothing is made for it', async ({ page }) => {
+    const existing = await newApi(page);
+    withPictures(existing.api, existing.clothes);
+    const { api } = await start(page, { shortPlan: true }, existing);
+    await expect(cards(page)).toHaveCount(3);
+    await expect(statusLine(page)).toHaveText(text('outfitgen.pictureMissing_one', 'en', { count: 1 }), { timeout: 30_000 });
+    await quiet(page, 1_500);
+    expect(requestsOf(api)).toHaveLength(0);
+  });
+
+  test('a paused try-on service is not called "off", and the queue goes on once it is back', async ({ page }) => {
+    const { api } = await start(page, { beforeSignIn: (backend) => { backend.tryonControl.setup[owners.a] = { activated: true, providerAvailable: false }; } });
+    await expect(statusLine(page)).toContainText(timed('outfitgen.pictureTryOnPaused'), { timeout: 30_000 });
+    await expect(statusLine(page)).not.toContainText(text('outfitgen.pictureTryOnOff'));
+    expect(requestsOf(api)).toHaveLength(0);
+    // The service is back: the next look reads the status again before the earlier state blocks anything.
+    api.tryonControl.setup[owners.a] = { activated: true, providerAvailable: true };
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await picturesShown(page, 2);
+    expect(api.tryonControl.results).toHaveLength(2);
+  });
+
+  test('a given-up chain whose cancel could not be confirmed keeps the next chain from starting, whatever the foreign count says', async ({ page }) => {
+    const foreign: Chain = { id: randomUUID(), owner: owners.a, outfitId: null, steps: [], nextStep: 1, state: 'running', resultId: null, expiresAtMs: Date.now() + 1_800_000 };
+    // A chain of another device is running at the first look (baseline 1). The queue's first step reaches the server, its reply is lost,
+    // and the cancel of the given-up chain cannot get through.
+    const { api, clothes } = await start(page, { replies: [{ abort: true, commit: true }], beforeSignIn: async (backend) => {
+      backend.tryonControl.chains.push(foreign);
+      await page.route('**/rest/v1/rpc/tryon_cancel', (route) => route.abort('failed'));
+    } });
+    await expect.poll(() => api.tryonControl.chains.filter((chain) => chain.id !== foreign.id).length, { timeout: 30_000 }).toBe(1);
+    const lost = api.tryonControl.chains.find((chain) => chain.id !== foreign.id)!;
+    await expect(statusLine(page)).toContainText(timed('outfitgen.pictureStopping'), { timeout: 60_000 });
+    // The other chain finishes with a picture of its own: stored 2 (it and the lost chain's row), ready 1, so the gap equals the baseline again.
+    foreign.state = 'complete';
+    stored(api, null, [clothes.shirt.id, clothes.top2.id]);
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await quiet(page, 3_000);
+    expect(lost.state).toBe('running');
+    expect(chains(api)).toEqual([lost.id]);
+    // Once the cancel goes through, the chain is shown to be over and the queue goes on.
+    await page.unroute('**/rest/v1/rpc/tryon_cancel');
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await picturesShown(page, 2);
+    expect(lost.state).toBe('cancelled');
+    expect(chains(api).length).toBeGreaterThan(1);
   });
 
   test('says when no picture could be made for some outfits', async ({ page }) => {
