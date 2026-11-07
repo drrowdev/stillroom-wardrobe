@@ -153,12 +153,14 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
   const storageWrites = (from: number) => requests.slice(from).filter(({ method, url }) =>
     method !== 'GET' && method !== 'HEAD' && new URL(url).pathname.startsWith('/storage/v1/object/'));
   const reservations = (from: number) => requests.slice(from).filter(({ url }) => /\/rest\/v1\/rpc\/reserve_/.test(new URL(url).pathname));
-  // ai_status, stylist_status, enhance_status, tryon_status and outfitgen_status expire and close the owner's old AI requests and try-on chains
+  // ai_status, stylist_status, enhance_status and tryon_status expire and close the owner's old AI requests and try-on chains
   // (private state the snapshots can't see), so none of them is a read-only RPC.
   // The app's Settings initialization may call them; they must finish before the restore baseline, and any later call is
   // refused and fails.
   const STATUS_RPC_PATHS = new Set(['/rest/v1/rpc/ai_status', '/rest/v1/rpc/stylist_status', '/rest/v1/rpc/enhance_status',
-    '/rest/v1/rpc/tryon_status', '/rest/v1/rpc/outfitgen_status']);
+    '/rest/v1/rpc/tryon_status']);
+  // The suggested-outfits check is timer-driven (app open, after a Save), so it may fall after the baseline; it is refused there like the others but is not a drill failure.
+  const TIMED_STATUS_PATH = '/rest/v1/rpc/outfitgen_status';
   const isAiStatus = (request: import('@playwright/test').Request) =>
     request.method() === 'POST' && STATUS_RPC_PATHS.has(new URL(request.url()).pathname);
   const aiInFlight = new Set<import('@playwright/test').Request>();
@@ -172,6 +174,10 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
   const settle = (request: import('@playwright/test').Request) => { if (aiInFlight.delete(request)) aiFinished++; };
   page.on('requestfinished', settle); page.on('requestfailed', settle);
   // A URL predicate on the exact pathnames: a glob would miss `/rest/v1/rpc/ai_status?…`.
+  await page.route(url => url.pathname === TIMED_STATUS_PATH, async route => {
+    if (aiLocked && route.request().method() === 'POST') { await route.abort('blockedbyclient'); return; }
+    await route.fallback();
+  });
   await page.route(url => STATUS_RPC_PATHS.has(url.pathname), async route => {
     if (aiLocked && route.request().method() === 'POST') { lateAiStatus++; await route.abort('blockedbyclient'); return; }
     await route.fallback();
@@ -343,7 +349,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     aiLocked = true;
     // Negative control: a query-bearing POST to each status RPC from the page must be refused by the route and counted by both.
     check(lateAiStatus === 0 && postLockAiStatus === 0);
-    for (const name of ['ai_status', 'stylist_status', 'enhance_status', 'tryon_status', 'outfitgen_status']) {
+    for (const name of ['ai_status', 'stylist_status', 'enhance_status', 'tryon_status']) {
       aiProbes++;
       const probe = await page.evaluate(async url => {
         try { await fetch(url, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' }); return 'reached'; } catch { return 'refused'; }
@@ -357,7 +363,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     const signInAttempts = requests.slice(signInFrom).filter(({ method }) => !['GET', 'HEAD', 'OPTIONS'].includes(method))
       .map(({ method, url }) => ({ method, path: new URL(url).pathname }))
       .filter(({ method, path }) => !(path.startsWith('/auth/v1/') || method === 'PATCH' && path === '/rest/v1/profiles'
-        || method === 'POST' && (STATUS_RPC_PATHS.has(path) || READ_ONLY_RPCS.has(path.replace('/rest/v1/rpc/', ''))
+        || method === 'POST' && (STATUS_RPC_PATHS.has(path) || path === TIMED_STATUS_PATH || READ_ONLY_RPCS.has(path.replace('/rest/v1/rpc/', ''))
           && path.startsWith('/rest/v1/rpc/'))));
     if (signInAttempts.length) throw new Error(`Write attempts while signing in: ${signInAttempts.map(({ method, path }) => `${method} ${path}`).join(', ')}.`);
     const opened = await snapshot(a);
