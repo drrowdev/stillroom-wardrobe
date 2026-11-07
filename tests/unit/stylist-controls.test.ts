@@ -215,6 +215,9 @@ describe('ST1b stylist replies', () => {
     expect(sendFailure('TOO_LARGE').key).toBe('stylist.notSent');
     expect(sendFailure('INACTIVE')).toEqual({ key: 'stylist.failed', retry: true });
     expect(sendFailure('OFFLINE')).toEqual({ key: 'stylist.offline', retry: false });
+    // AI-GUARD1: a paused account is never retried by the app.
+    expect(sendFailure('PAUSED')).toEqual({ key: 'aiGuard.paused', retry: false });
+    expect(parseStylistAnswer(403, { code: 'PAUSED' })).toEqual({ code: 'PAUSED' });
   });
 
   it('rechecks an idea against the latest wardrobe and the weather it was asked with (M6)', () => {

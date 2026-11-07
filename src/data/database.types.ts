@@ -713,6 +713,9 @@ export type Database = {
         }
         Returns: Json
       }
+      ai_guard_resume_v1: { Args: never; Returns: Json }
+      ai_guard_status_v1: { Args: never; Returns: Json }
+      ai_guard_sweep: { Args: { p_limit: number }; Returns: Json }
       ai_mark_dispatched: {
         Args: { p_owner_id: string; p_request_id: string }
         Returns: Json

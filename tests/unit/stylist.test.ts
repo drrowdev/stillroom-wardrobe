@@ -306,7 +306,7 @@ describe('stylist handler (mocked Auth, RPC and provider)', () => {
   budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false } };
   const accounting = { basis: 'confirmed', amountMicro: '5000', currency: 'USD' };
   type Call = { url: string; body: Record<string, unknown> | null; auth: string | null; contract: string | null };
-  function backend(options: { status?: unknown; claim?: Record<string, unknown>; finish?: Record<string, unknown> } = {}) {
+  function backend(options: { status?: unknown; claim?: Record<string, unknown>; claimStatus?: number; finish?: Record<string, unknown> } = {}) {
     const calls: Call[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
       const parsed = typeof init.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null;
@@ -315,7 +315,8 @@ describe('stylist handler (mocked Auth, RPC and provider)', () => {
       if (url.endsWith('/auth/v1/user')) return Response.json({ id: OWNER, role: 'authenticated', is_anonymous: false });
       if (url.endsWith('/rpc/stylist_status')) return Response.json(options.status ?? status);
       if (url.endsWith('/rpc/stylist_claim')) return Response.json(options.claim ?? { code: 'OK', claimed: true,
-        manifestId: STYLIST_MANIFEST, dispatchBeforeMs: Date.now() + 5000, items: [item(1), item(2, { category: 'bottom' })] });
+        manifestId: STYLIST_MANIFEST, dispatchBeforeMs: Date.now() + 5000, items: [item(1), item(2, { category: 'bottom' })] },
+      options.claimStatus === undefined ? undefined : { status: options.claimStatus });
       if (url.endsWith('/rpc/stylist_finish')) return Response.json(options.finish ?? { code: 'OK', accounting });
       throw new Error(`unexpected fetch ${url}`);
     }));
@@ -332,6 +333,15 @@ describe('stylist handler (mocked Auth, RPC and provider)', () => {
   const post = (value: unknown, contract: string | null = '2') => new Request('http://127.0.0.1:54321/functions/v1/stylist-chat', { method: 'POST',
     headers: { Authorization: 'Bearer fictional.jwt.token',     ...(contract === null ? {} : { 'X-Stillroom-AI-Budget-Contract': contract }), 'Content-Type': 'application/json' }, body: JSON.stringify(value) });
   const replyContent = (refs: string[], reply = 'Here is one.') => JSON.stringify({ reply, outfits: [{ refs, note: 'Smart' }] });
+
+  it('answers PAUSED, with no provider call and no finish, when the spending guard refuses the claim (AI-GUARD1)', async () => {
+    const calls = backend({ claim: { code: 'AG001', message: 'AI spending guard is paused', details: null, hint: null }, claimStatus: 400 });
+    const { transport } = provider({ content: '{}' });
+    const response = await createStylistHandler(config, transport)(post(body()));
+    expect([response.status, await response.json()]).toEqual([403, { code: 'PAUSED' }]);
+    expect(transport).not.toHaveBeenCalled();
+    expect(calls.map((call) => call.url.split('/').pop())).toEqual(['user', 'stylist_status', 'stylist_claim']);
+  });
 
   it('uses only the three stylist RPCs', () => { expect(STYLIST_RPCS).toEqual(['stylist_status', 'stylist_claim', 'stylist_finish']); });
 

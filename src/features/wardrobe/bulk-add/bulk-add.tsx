@@ -215,6 +215,7 @@ export function BulkAdd({ client, scope, ai, currency, language, t, online, onDi
         {(ids.length > 0 || summary) && <div className="bulk-lines" role="status">
           {!online && <p className="notice notice-offline">{t('common.offline')}</p>}
           {halt === 'allowance' && <p className="notice">{t('aiC.limit')}</p>}
+          {halt === 'guard' && <p className="notice">{t('aiGuard.paused')}</p>}
           {snap.paused && <p className="notice">{t('bulk.paused')}</p>}
           {processing && !snap.stopped && <p className="fine muted">{t('bulk.keepOpen')}</p>}
           {summary && <p>{summary.saved > 0 && pluralText(language, 'bulk.saved', summary.saved)}{summary.saved > 0 && summary.left > 0 && ' '}

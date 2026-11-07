@@ -26,6 +26,10 @@ export function AnalysisStatus({ phase, checking, disabled, t, onRetry, onCheck,
       <button type="button" className="text-button" disabled={disabled || retryDisabled} onClick={onRetry}>{t('common.retry')}</button>
     </>}
     {phase === 'limit' && <p role="status">{t('aiC.limit')}</p>}
+    {phase === 'paused' && <>
+      <p role="status">{t('aiGuard.paused')}</p>
+      <a href="#/settings" className="text-button">{t('nav.settings')}</a>
+    </>}
     {phase === 'needsCheck' && <>
       <p role="status">{t('aiC.needsCheck')}</p>
       <div className="analysis-actions">

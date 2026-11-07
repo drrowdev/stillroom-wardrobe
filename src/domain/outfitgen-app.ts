@@ -151,7 +151,7 @@ export function parseDecision(value: unknown, kind: 'keep' | 'remove' | 'undo'):
 
 export const generateCodes = ['UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'INACTIVE', 'UNCONFIGURED', 'CONFIG_CHANGED', 'BUSY',
   'COOLDOWN', 'PENDING_FULL', 'ALLOWANCE', 'RATE_LIMIT', 'TERMINAL', 'CONFLICT', 'FILTERED', 'FAILED', 'TIMEOUT', 'INVALID_INPUT',
-  'TOO_LARGE', 'UNSUPPORTED_MEDIA'] as const;
+  'TOO_LARGE', 'UNSUPPORTED_MEDIA', 'PAUSED'] as const;
 export type GenerateCode = (typeof generateCodes)[number];
 /** NOT_SENT: the last check before the request found it no longer allowed, so nothing was sent. */
 export type GenerateReply = { code: 'OK'; suggested: number; judged: number; remaining: boolean } | { code: GenerateCode | 'NOT_SENT' };

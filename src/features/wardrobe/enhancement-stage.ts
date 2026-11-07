@@ -125,7 +125,7 @@ export type StageDeps = {
  * automatically), `skipped` is the user's Skip and `failed` covers every other definite failure. `deferred` is the one
  * reason without a sent request: the page was hidden at the send boundary, so the caller may run again once visible.
  */
-export type StageReason = 'busy' | 'allowance' | 'ambiguous' | 'filtered' | 'skipped' | 'failed' | 'deferred';
+export type StageReason = 'busy' | 'allowance' | 'ambiguous' | 'filtered' | 'skipped' | 'failed' | 'deferred' | 'guard';
 export type StageResult =
   | { kind: 'enhanced'; photo: PreparedPhoto; requestId: string; expireAt: number; metrics: CleanupMetrics }
   | { kind: 'available' }
@@ -135,6 +135,7 @@ function reasonForCode(code: Exclude<EnhanceCode, 'OK'>): StageReason {
   switch (code) {
     case 'BUSY': return 'busy';
     case 'ALLOWANCE': return 'allowance';
+    case 'PAUSED': return 'guard';
     case 'TIMEOUT': return 'ambiguous';
     case 'FILTERED': return 'filtered';
     default: return 'failed';
@@ -225,7 +226,7 @@ export async function runEnhancementStage(input: StageInput, deps: StageDeps): P
     const receivedAt = session.now();
     if (response.kind === 'code') {
       if (response.code === 'FAILED' || response.code === 'TIMEOUT') session.failed();
-      return outcome(response.code === 'ALLOWANCE' ? 'allowance' : 'generic', reasonForCode(response.code));
+      return outcome(response.code === 'ALLOWANCE' ? 'allowance' : response.code === 'PAUSED' ? 'paused' : 'generic', reasonForCode(response.code));
     }
     session.succeeded();
     const expireAt = expiryDeadline(anchor, response.usableUntilMs, receivedAt);

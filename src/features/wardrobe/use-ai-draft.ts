@@ -13,7 +13,7 @@ import { canAnalyze, type AiAnalysisReply, type AiCode } from '../../domain/ai-c
 import { defaultDescription } from '../../domain/item-details';
 import type { AnalysisGate, AnalysisTicket, Refusal } from './bulk-add/bulk-queue';
 
-export type AiPhase = 'none' | 'off' | 'working' | 'stillWorking' | 'ready' | 'failed' | 'unclear' | 'limit' | 'needsCheck' | 'manual';
+export type AiPhase = 'none' | 'off' | 'working' | 'stillWorking' | 'ready' | 'failed' | 'unclear' | 'limit' | 'paused' | 'needsCheck' | 'manual';
 export const terminalReasons = ['DISCARDED', 'EXPIRED', 'FAILED', 'UNAVAILABLE', 'INVALID_FACTS'] as const;
 export type TerminalReason = typeof terminalReasons[number];
 export type AiPhaseInput = Readonly<{
@@ -21,10 +21,11 @@ export type AiPhaseInput = Readonly<{
   working: boolean; polling: 'active' | 'exhausted' | null; manual: boolean; applied: boolean;
 }>;
 function unreachable(value: never): never { void value; throw new AppError('aiC.unavailable'); }
-export function phaseForCode(code: AiCode): 'failed' | 'off' | 'limit' {
+export function phaseForCode(code: AiCode): 'failed' | 'off' | 'limit' | 'paused' {
   switch (code) {
     case 'CONSENT_REQUIRED': case 'UNCONFIGURED': case 'INACTIVE': case 'CONFIG_CHANGED': return 'off';
     case 'ALLOWANCE': return 'limit';
+    case 'PAUSED': return 'paused';
     case 'OK': case 'UNAVAILABLE': case 'UNAUTHENTICATED': case 'INVALID_INPUT': case 'CONFLICT': case 'ACTIVE_DRAFT':
     case 'TERMINAL': case 'TOO_LARGE': case 'UNSUPPORTED_MEDIA': case 'ANALYSIS_FAILED': case 'TIMEOUT': return 'failed';
     default: return unreachable(code);
@@ -108,11 +109,11 @@ function mutable(state: AiDraftState): GarmentDraft {
 }
 const reasonOf = (value: string | undefined): TerminalReason | null => terminalReasons.find((reason) => reason === value) ?? null;
 export const ambiguousCodes: readonly AiCode[] = ['TIMEOUT', 'UNAVAILABLE'];
-const implicitPhases: readonly AiPhase[] = ['off', 'stillWorking', 'failed', 'unclear', 'limit'];
+const implicitPhases: readonly AiPhase[] = ['off', 'stillWorking', 'failed', 'unclear', 'limit', 'paused'];
 /** Codes the server returns without holding a reservation: they prove the request's accounting is settled. */
 export const refusalCodes: readonly AiCode[] = ['ALLOWANCE', 'CONSENT_REQUIRED', 'UNCONFIGURED', 'INACTIVE',
-  'CONFIG_CHANGED', 'ACTIVE_DRAFT'];
-const gateCodes = { allowance: 'ALLOWANCE', stopped: 'UNAVAILABLE', paused: 'UNAVAILABLE' } as const;
+  'CONFIG_CHANGED', 'ACTIVE_DRAFT', 'PAUSED'];
+const gateCodes = { allowance: 'ALLOWANCE', guard: 'PAUSED', stopped: 'UNAVAILABLE', paused: 'UNAVAILABLE' } as const;
 /**
  * BULK2b "Fill in again" after an expired clean-up: `sent` once the request goes out, `refused` when nothing was sent,
  * `settled` when the attempt is over either way (editing stays locked until then).

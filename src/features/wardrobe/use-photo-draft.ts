@@ -425,7 +425,7 @@ export function usePhotoDraft({ client, scope, currency, online, language, ai, o
         refused: (code) => {
           if (scope.signal.aborted) return;
           const phase = phaseForCode(code);
-          setRefillNote(phase === 'off' ? 'aiC.off' : phase === 'limit' ? 'aiC.limit' : 'aiC.fillFailed');
+          setRefillNote(phase === 'off' ? 'aiC.off' : phase === 'limit' ? 'aiC.limit' : phase === 'paused' ? 'aiGuard.paused' : 'aiC.fillFailed');
         },
         settled: () => { refillingRef.current = false; if (!scope.signal.aborted) setRefilling(false); },
       });

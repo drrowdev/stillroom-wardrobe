@@ -4,6 +4,7 @@ import {
 } from '../../../src/domain/tryon.ts';
 import { refusalFinishArgs } from '../../../src/domain/provider-refusal.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
+import { AI_GUARD_CODE, guardRefusal } from '../../../src/domain/ai-guard.ts';
 import { isPhotoInputJpeg } from '../../../src/images/restore-jpeg.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
 import { UUID, exact, object, ProtocolError, readBounded, readJson, sha256, validAccounting, type JsonObject } from '../analyze-clothing/protocol.ts';
@@ -15,7 +16,7 @@ const statusCodes: Record<string, number> = {
   INVALID_INPUT: 400, UNAUTHENTICATED: 401, UNAVAILABLE: 403, CONSENT_REQUIRED: 403, NOT_FOUND: 404, TERMINAL: 409,
   CONFLICT: 409, CHAIN_MISMATCH: 409, WITHDRAWN: 409, CANCELLED: 409, EXPIRED: 409, RESULTS_FULL: 409, TOO_LARGE: 413,
   UNSUPPORTED_MEDIA: 415, NO_GARMENTS: 422, FILTERED: 422, OUTPUT_REJECTED: 422, ALLOWANCE: 429,
-  FAILED: 502, UNCONFIGURED: 503, INACTIVE: 503, CONFIG_CHANGED: 503, BUSY: 503, TIMEOUT: 504,
+  FAILED: 502, UNCONFIGURED: 503, INACTIVE: 503, CONFIG_CHANGED: 503, BUSY: 503, TIMEOUT: 504, PAUSED: 403,
 };
 // Claim codes pass through; the dispatch mark and finish codes that are internal to the server map to the closed set.
 // BUSY is returned only for a refused claim: after a claim it becomes FAILED, which no caller may retry as unclaimed.
@@ -259,6 +260,7 @@ function rpcClient(config: TryOnConfig, bearer: string, timers: ReturnType<typeo
     const result = await readJson(response, 32768, dbSignal).catch((failure: unknown) => {
       throw failure instanceof ProtocolError ? new ProtocolError('FAILED') : failure;
     });
+    if (guardRefusal(response.ok, result)) throw new ProtocolError(AI_GUARD_CODE);
     if (!response.ok || !object(result) || typeof result.code !== 'string') throw new ProtocolError('FAILED');
     return result;
   };

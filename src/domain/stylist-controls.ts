@@ -185,7 +185,7 @@ export function stylistWeather(context: { setting?: 'indoors' | 'outdoors'; temp
 }
 
 export const stylistReplyCodes = ['INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'TERMINAL', 'TOO_LARGE',
-  'UNSUPPORTED_MEDIA', 'FILTERED', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'BUSY', 'TIMEOUT'] as const;
+  'UNSUPPORTED_MEDIA', 'FILTERED', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'BUSY', 'TIMEOUT', 'PAUSED'] as const;
 export type StylistReplyCode = (typeof stylistReplyCodes)[number];
 export type StylistIdea = { itemIds: string[]; note: string };
 export type StylistAnswer = { code: 'OK'; reply: string; outfits: StylistIdea[] } | { code: StylistReplyCode };
@@ -221,6 +221,7 @@ export function sendFailure(code: StylistReplyCode | 'OFFLINE'): SendFailure {
     case 'TOO_LARGE': case 'INVALID_INPUT': case 'UNSUPPORTED_MEDIA': return { key: 'stylist.notSent', retry: false };
     case 'UNAUTHENTICATED': return { key: 'auth.expired', retry: false };
     case 'ALLOWANCE': return { key: 'stylist.limitReached', retry: false };
+    case 'PAUSED': return { key: 'aiGuard.paused', retry: false };
     case 'OFFLINE': return { key: 'stylist.offline', retry: false };
     default: return { key: 'stylist.failed', retry: true };
   }

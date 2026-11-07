@@ -13,7 +13,7 @@ import { sessionOwner } from '../auth/auth-storage';
 
 export const enhanceCodes = ['OK', 'INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILABLE', 'CONSENT_REQUIRED', 'TERMINAL', 'TOO_LARGE',
   'UNSUPPORTED_MEDIA', 'FILTERED', 'OUTPUT_REJECTED', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE',
-  'CONFIG_CHANGED', 'BUSY', 'TIMEOUT'] as const;
+  'CONFIG_CHANGED', 'BUSY', 'TIMEOUT', 'PAUSED'] as const;
 export type EnhanceCode = (typeof enhanceCodes)[number];
 export class EnhanceError extends Error {
   constructor(readonly code: EnhanceCode) { super(code); this.name = 'EnhanceError'; }

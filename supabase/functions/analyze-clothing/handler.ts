@@ -1,5 +1,6 @@
 import { assertSanitizedJpeg, readJpegHeader } from '../../../src/images/jpeg.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
+import { AI_GUARD_CODE, guardRefusal } from '../../../src/domain/ai-guard.ts';
 import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MODEL,
   type AzureConfig, type AzureTransport } from './azure-openai.ts';
 import { azureProfileFor } from './azure-profiles.ts';
@@ -12,7 +13,7 @@ export type HandlerConfig = { supabaseUrl: string; publicKey: string; serviceKey
 const statusCodes: Record<string, number> = {
   INVALID_INPUT: 400, UNAUTHENTICATED: 401, UNAVAILABLE: 403, CONSENT_REQUIRED: 403,
   CONFLICT: 409, ACTIVE_DRAFT: 409, TERMINAL: 409, TOO_LARGE: 413, UNSUPPORTED_MEDIA: 415,
-  ALLOWANCE: 429, UNCONFIGURED: 503, INACTIVE: 503, CONFIG_CHANGED: 503,
+  ALLOWANCE: 429, UNCONFIGURED: 503, INACTIVE: 503, CONFIG_CHANGED: 503, PAUSED: 403,
   ANALYSIS_FAILED: 502, TIMEOUT: 504,
 };
 const allowedHeaders = ['authorization', 'apikey', 'content-type', 'x-client-info',
@@ -83,6 +84,7 @@ export function createHandler(config: HandlerConfig, azureTransport: AzureTransp
           body: JSON.stringify(body),
         });
         const result = await readJson(response, 32768, dbSignal);
+        if (guardRefusal(response.ok, result)) throw new ProtocolError(AI_GUARD_CODE);
         if (!response.ok || !object(result) || typeof result.code !== 'string') throw new ProtocolError('ANALYSIS_FAILED');
         return result;
       };

@@ -5,6 +5,7 @@ import {
 } from '../../../src/domain/stylist.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
+import { AI_GUARD_CODE, guardRefusal } from '../../../src/domain/ai-guard.ts';
 import { UUID, exact, object, ProtocolError, readBounded, readJson, validAccounting, type JsonObject } from '../analyze-clothing/protocol.ts';
 import { callStylist, type StylistOutcome } from './azure.ts';
 
@@ -13,7 +14,7 @@ export const STYLIST_RPCS = ['stylist_status', 'stylist_claim', 'stylist_finish'
 const statusCodes: Record<string, number> = {
   INVALID_INPUT: 400, UNAUTHENTICATED: 401, UNAVAILABLE: 403, CONSENT_REQUIRED: 403, TERMINAL: 409, TOO_LARGE: 413,
   UNSUPPORTED_MEDIA: 415, FILTERED: 422, ALLOWANCE: 429, FAILED: 502, UNCONFIGURED: 503, INACTIVE: 503,
-  CONFIG_CHANGED: 503, BUSY: 503, TIMEOUT: 504,
+  CONFIG_CHANGED: 503, BUSY: 503, TIMEOUT: 504, PAUSED: 403,
 };
 const finishCodes: Record<string, string> = {
   EXPIRED: 'TIMEOUT', NOT_DISPATCHED: 'FAILED', INVALID_USAGE: 'FAILED', USAGE_ANOMALY: 'FAILED', USAGE_CONFLICT: 'FAILED',
@@ -98,6 +99,7 @@ export function createStylistHandler(config: StylistConfig, azureTransport: Azur
           body: JSON.stringify(body),
         });
         const result = await readJson(response, limit, dbSignal);
+        if (guardRefusal(response.ok, result)) throw new ProtocolError(AI_GUARD_CODE);
         if (!response.ok || !object(result) || typeof result.code !== 'string') throw new ProtocolError('FAILED');
         return result;
       };

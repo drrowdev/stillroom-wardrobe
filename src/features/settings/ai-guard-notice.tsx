@@ -1,0 +1,59 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { AiClient } from '../../data/ai';
+import { AI_GUARD_RESUMED_EVENT, type AiGuardStatus } from '../../domain/ai-guard';
+import { usdCents } from '../../domain/ai-presentation';
+import type { Language, Translate } from '../../i18n';
+
+type Props = { ai: AiClient; language: Language; online: boolean; t: Translate };
+
+/**
+ * AI-GUARD1: shown at the top of the AI features card only while the spending guard has paused the account. It is read when
+ * Settings opens and when the page returns, never written by a read; Resume is the owner's explicit choice. A failed read
+ * says nothing (the guard is an emergency stop, not a status the owner needs to watch).
+ */
+export function AiGuardNotice({ ai, language, online, t }: Props) {
+  const [status, setStatus] = useState<AiGuardStatus | null>(null);
+  const [resuming, setResuming] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const reading = useRef<AbortController | null>(null);
+  const read = useCallback(async () => {
+    reading.current?.abort();
+    const controller = reading.current = new AbortController();
+    try {
+      const result = await ai.guardStatus(controller.signal);
+      if (!controller.signal.aborted) setStatus(result.kind === 'ready' ? result.status : null);
+    } catch { /* a failed read keeps what is shown */ }
+  }, [ai]);
+  useEffect(() => {
+    void read();
+    const refresh = () => { if (document.visibilityState === 'visible' && navigator.onLine) void read(); };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('online', refresh);
+    return () => {
+      reading.current?.abort();
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('online', refresh);
+    };
+  }, [read]);
+  const resume = async () => {
+    setResuming(true); setFailed(false);
+    try {
+      const result = await ai.resumeGuard();
+      if (result === 'OK') window.dispatchEvent(new Event(AI_GUARD_RESUMED_EVENT));
+      else setFailed(true);
+    } catch { setFailed(true); }
+    await read();
+    setResuming(false);
+    // The pressed button is gone once the notice leaves: keep focus on the page.
+    requestAnimationFrame(() => { if (!document.getElementById('ai-guard-resume')) document.getElementById('settings-title')?.focus(); });
+  };
+  if (!status?.paused) return null;
+  return <section className="notice ai-guard" aria-labelledby="ai-guard-title">
+    <h3 id="ai-guard-title">{t('aiGuard.title')}</h3>
+    <p>{t('aiGuard.body')}</p>
+    <p className="fine">{t('aiGuard.amounts', { spent: usdCents(status.spentMicro, language, 'used'), limit: usdCents(status.limitMicro, language, 'limit') })}</p>
+    {failed && <p role="alert" className="notice notice-error">{t('aiGuard.resumeFailed')}</p>}
+    <button id="ai-guard-resume" type="button" className="button button-primary" disabled={!online || resuming}
+      onClick={() => { void resume(); }}>{t(resuming ? 'common.saving' : 'aiGuard.resume')}</button>
+  </section>;
+}
