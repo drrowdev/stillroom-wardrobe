@@ -277,6 +277,28 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
     await expect(section(page).getByRole('button', { name: text('common.undo'), exact: true })).toBeEnabled();
   });
 
+  test('Remove sends the cancel again after it failed, and only a confirmed cancel clears the cleanup', async ({ page }) => {
+    const step = gate();
+    const { api } = await start(page, { replies: [{ hold: step.hold }] });
+    await expect.poll(() => requestsOf(api).length, { timeout: 30_000 }).toBe(1);
+    let failing = true;
+    await page.route('**/rest/v1/rpc/tryon_cancel', (route) => failing ? route.abort('failed') : route.fallback());
+    await cards(page).first().getByRole('button', { name: text('outfitgen.removeLabel', 'en', { title: 'Crisp navy' }), exact: true }).click();
+    await expect(section(page).getByText(text('outfitgen.pictureDeleteFailed'), { exact: false })).toBeVisible({ timeout: 30_000 });
+    await expect(section(page).getByRole('button', { name: text('common.undo'), exact: true })).toBeDisabled();
+    // The held step claims the chain; it is running on the server and nothing finishes it.
+    step.release();
+    await expect.poll(() => api.tryonControl.chains.map((chain) => chain.state)).toEqual(['running']);
+    const first = api.tryonControl.chains[0]!;
+    await quiet(page, 1_500);
+    await expect(section(page).getByRole('button', { name: text('common.undo'), exact: true })).toBeDisabled();
+    failing = false;
+    await section(page).getByRole('button', { name: text('common.retry'), exact: true }).click({ timeout: 3_000 }).catch(() => undefined);
+    await expect.poll(() => first.state, { timeout: 30_000 }).toBe('cancelled');
+    await expect(section(page).getByText(text('outfitgen.pictureDeleteFailed'), { exact: false })).toHaveCount(0);
+    await expect(section(page).getByRole('button', { name: text('common.undo'), exact: true })).toBeEnabled();
+    expect(api.tryonControl.deletes).toEqual([]);
+  });
   test('Remove and Undo on a plan too short for a picture finish at once', async ({ page }) => {
     await start(page, { shortPlan: true });
     await expect(cards(page)).toHaveCount(3);

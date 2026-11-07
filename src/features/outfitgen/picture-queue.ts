@@ -399,6 +399,8 @@ ull for a plan too short to get a picture, or 'unresolved' when the garments cou
     if (this.disposed || !ready) { this.poll(); return 'idle'; }
     if (pictureBlock(this.inputs()) !== null) return 'idle';
     if (status.results >= PICTURE_LIMITS.resultsStop) { this.emit({ line: 'full', waiting: new Set() }); return 'idle'; }
+    // A removed suggestion's chain that is not shown to be over may still claim: nothing new starts until it is.
+    if (this.openChains.size > 0) { this.poll(); return 'idle'; }
     const gate = reservedGate(this.reserved, status.results, ready.length, Date.now());
     this.reserved = gate.memory;
     if (gate.wait) { this.poll(); return 'idle'; }
