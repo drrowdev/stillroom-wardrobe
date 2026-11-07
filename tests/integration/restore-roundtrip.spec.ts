@@ -532,7 +532,7 @@ test('I26 restore drill: the same backup restored twice into A, hashes checked t
     if (lateAiStatus !== aiProbes || postLockAiStatus !== aiProbes) {
       throw new Error(`A status RPC called after the restore baseline: ${postLockAiStatus - aiProbes} seen, ${lateAiStatus - aiProbes} refused beyond the probe.`);
     }
-    tripped('Save or AI RPCs', paths(requests).filter(path => /\/rpc\/(reserve_item_save|reserve_analyzed_item_save|ai_|stylist_|enhance_)/.test(path)
+    tripped('Save or AI RPCs', paths(requests).filter(path => /\/rpc\/(reserve_item_save|reserve_analyzed_item_save|ai_(?!guard_status_v1$)|stylist_|enhance_)/.test(path)
       && !STATUS_RPC_PATHS.has(path)));
     unchanged('B', await snapshot(owner), bBefore);
   } catch (problem) {
