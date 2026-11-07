@@ -16,17 +16,25 @@ export function AiGuardNotice({ ai, language, online, t }: Props) {
   const [resuming, setResuming] = useState(false);
   const [failed, setFailed] = useState(false);
   const reading = useRef<AbortController | null>(null);
-  const read = useCallback(async () => {
+  // Set when the owner pressed Resume: once the notice has actually left the page, focus goes to the page title.
+  const refocus = useRef(false);
+  const read = useCallback(async (): Promise<AiGuardStatus | null> => {
     reading.current?.abort();
     const controller = reading.current = new AbortController();
     try {
       const result = await ai.guardStatus(controller.signal);
-      if (controller.signal.aborted) return;
+      if (controller.signal.aborted) return null;
       setStatus(result.kind === 'ready' ? result.status : null);
       // A confirmed unpaused account re-opens whatever stopped on PAUSED, however the pause ended (a Resume whose reply was lost included).
       if (result.kind === 'ready' && !result.status.paused) window.dispatchEvent(new Event(AI_GUARD_RESUMED_EVENT));
-    } catch { /* a failed read keeps what is shown */ }
+      return result.kind === 'ready' ? result.status : null;
+    } catch { return null; /* a failed read keeps what is shown */ }
   }, [ai]);
+  useEffect(() => {
+    if (status?.paused || !refocus.current) return;
+    refocus.current = false;
+    document.getElementById('settings-title')?.focus();
+  }, [status]);
   useEffect(() => {
     void read();
     const refresh = () => { if (document.visibilityState === 'visible' && navigator.onLine) void read(); };
@@ -39,16 +47,16 @@ export function AiGuardNotice({ ai, language, online, t }: Props) {
     };
   }, [read]);
   const resume = async () => {
-    setResuming(true); setFailed(false);
+    setResuming(true); setFailed(false); refocus.current = true;
     try {
       const result = await ai.resumeGuard();
       if (result !== 'OK') setFailed(true);
     } catch { setFailed(true); }
     // The status read decides what happened, whatever the Resume reply was.
-    await read();
+    const after = await read();
+    // Still paused (or unknown): the pressed button stays, so focus stays on it.
+    if (after?.paused !== false) refocus.current = false;
     setResuming(false);
-    // The pressed button is gone once the notice leaves: keep focus on the page.
-    requestAnimationFrame(() => { if (!document.getElementById('ai-guard-resume')) document.getElementById('settings-title')?.focus(); });
   };
   if (!status?.paused) return null;
   return <section className="notice ai-guard" aria-labelledby="ai-guard-title">
