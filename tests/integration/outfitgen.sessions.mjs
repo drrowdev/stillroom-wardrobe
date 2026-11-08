@@ -171,11 +171,15 @@ async function rateLimitProbes(h, { keep, signature, client }) {
     await wipe();
 
     note('rate-purposes');
-    // Another purpose's usage never counts toward the outfit limits, however much of it there is.
+    // Another purpose's usage never counts toward the outfit limits, however much of it there is. The manual claim is settled successfully
+    // (not as a failure, which would start the automatic cooldown) before the automatic one, which would otherwise meet the live batch (BUSY).
     await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
       select ${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp()-interval '1 minute',1001,1001,'settled','stylist'
       from generate_series(1,200);`);
-    equal([await code(a), await code(a, true)], ['OK', 'OK']);
+    const purposeClaim = randomUUID();
+    equal((await claimBy(a, purposeClaim)).code, 'OK');
+    equal((await finish(purposeClaim, 'OK', USAGE, [], null)).code, 'OK');
+    equal(await code(a, true), 'OK');
     await wipe();
 
     note('rate-sequence');
