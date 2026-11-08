@@ -7,8 +7,8 @@ import { outfitGenLimits, supportedOutfitGenPolicy, type GenerateReply, type Out
 import { reserveBlock } from './outfitgen-pictures';
 
 export const PASS_LIMITS = Object.freeze({
-  /** The server's own daily cap of outfit calls: no pass can usefully make more. */
-  maxCalls: 40,
+  /** The server's rolling-day cap of manual outfit calls (OUTFITGEN3-B2): no pass can usefully make more. */
+  maxCalls: 200,
   /** One garment has at most this many candidate sets, so it needs at most this many calls. */
   callsPerGarment: 8,
   /** Successful calls in a row after which the unchecked count has not fallen: the pass stops at its safety limit. */

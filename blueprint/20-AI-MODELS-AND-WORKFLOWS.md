@@ -331,8 +331,10 @@ Source only: the `outfit-generate` Edge function, `20261106090000_outfit_generat
   (good or skip, score 1-10, occasion, title, reason in the owner's language); a missing, duplicate, unknown or malformed verdict
   makes the whole reply unusable. A suggestion needs a good verdict at score 8 or more; this is a trial threshold, not evidence.
 - **Cost and limits.** Reservation 373,402 micro-USD (the 48,000 input / 8,192 output envelope at LongCo 4.40/19.80); recorded
-  usage is priced at ShortCo 2.20/13.20; the shared monthly allowance decides. One live batch per owner, 6 calls an hour, 40 a
-  day, 4 in ten minutes, automatic runs at most 3 per 6 hours and a 15-minute cooldown after any failure or expiry, at most 40
+  usage is priced at ShortCo 2.20/13.20; the shared monthly allowance decides. One live batch per owner; manual runs at most 40
+  calls in ten minutes, 120 an hour and 200 a rolling day, automatic runs at most 4, 6 and 40 (counted per mode; owner decision of
+  8 November 2026, OUTFITGEN3-B2, replacing the earlier 4 / 6 / 40 for every run), automatic runs also at most 3 per 6 hours and a
+  15-minute cooldown after any failure or expiry, at most 40
   pending suggestions across a whole batch. A reply with no usable metering keeps the reservation (nothing proves it was free)
   and does not switch the feature off; unreadable usage on a reply that did arrive does, as for the Stylist.
 - **Open Azure gate.** `docs/azure-garment-evaluation.md` records 20K TPM / 20 RPM for the eval deployment. That is historical and

@@ -7,8 +7,9 @@
 //     controls row, consent or activation changed.
 //   outfitgenProbes: plan, one live batch per owner, frozen signatures, finish (idempotent, conflict-safe, record-or-skip per row),
 //     the pending cap across a batch, dedupe against judged, saved, trashed and disliked sets, Keep, Remove and Undo, unmetered failure,
-//     cooldown, expiry, stale handling, deletion cascade and owner isolation.
+//     cooldown, expiry, stale handling, call limits per mode (OUTFITGEN3-B2), deletion cascade and owner isolation.
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { requireEvidence } from './preservation.sessions.mjs';
 import { intent, saveHarness } from './item-save.sessions.mjs';
@@ -37,6 +38,305 @@ const texts = (values) => `array[${values.map(literal).join(',')}]::text[]`;
 const USAGE = Object.freeze({ modelObservation: 'expected_snapshot', controlObservation: 'ordinary', input: 30000, output: 2000,
   total: 32000, reasoning: 500, cacheRead: 0, cacheWrite: 0 });
 const BODIES = ['private.admin_account_v3(private.approved_accounts,timestamptz,text[])', 'private.deletion_owner_rows_absent(uuid)'];
+const CLAIM = 'public.outfitgen_claim(uuid,uuid,text,boolean,text[],uuid[])';
+const FINISH = 'public.outfitgen_finish(uuid,uuid,text,jsonb,jsonb,uuid[])';
+
+// OUTFITGEN3-B2: the claim's call limits (manual 40 / 10 min, 120 / hour, 200 / rolling day; automatic 4 / 6 / 40), counted per owner and
+// mode, and the safety the replaced claim body must keep. Rows are seeded with privileged SQL in the shape a settled claim leaves
+// (an ai_usage row and its outfitgen_requests row, with a chosen age); claims go through the real function the way the Edge handler calls it.
+// Everything created here is removed in finally; the earlier probes' own rows (keep) are only moved back in time.
+async function rateLimitProbes(h, { keep, signature, client }) {
+  const { a, b, one, scalar, sql, rpc, finish } = h;
+  const lines = (text) => text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const claimBy = (owner, id, auto = false) => one(`select public.outfitgen_claim(${literal(owner.uid)},${literal(id)},${literal(MANIFEST)},
+    ${auto},${texts([signature])},${uuids([])});`);
+  const code = async (owner, auto = false) => (await claimBy(owner, randomUUID(), auto)).code;
+  const seed = (owner, mode, count, age, reason = null) => sql(`with u as (
+      insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose,closed_reason,closed_at)
+        select ${literal(owner.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp()-interval '${age}',1,1,'estimated','outfitgen',
+          ${reason ? `${literal(reason)}::text` : 'null::text'},${reason ? `clock_timestamp()-interval '${age}'` : 'null::timestamptz'} from generate_series(1,${count})
+        returning owner_id,request_id,created_at)
+      insert into private.outfitgen_requests(owner_id,request_id,mode,signatures,target_items,created_at)
+        select owner_id,request_id,${literal(mode)},'{}'::text[],'{}'::uuid[],created_at from u;`);
+  const seedUsage = (owner, id, age, mode) => sql(`with u as (
+      insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
+        values (${literal(owner.uid)},${literal(id)},to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp()-interval '${age}',1,1,'estimated','outfitgen')
+        returning owner_id,request_id,created_at)
+      insert into private.outfitgen_requests(owner_id,request_id,mode,signatures,target_items,created_at)
+        select owner_id,request_id,${literal(mode)},'{}'::text[],'{}'::uuid[],created_at from u;`);
+  const both = `${literal(a.uid)},${literal(b.uid)}`;
+  const kept = keep.length ? keep.map(literal).join(',') : "'00000000-0000-0000-0000-000000000000'";
+  const wipe = () => sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id in (${both}) and request_id not in (${kept});
+    delete from private.ai_usage where purpose='stylist' and reserved_micro=1001 and owner_id in (${both});`);
+  const counts = async (owner) => (await scalar(`select (select count(*) from private.ai_usage where owner_id=${literal(owner.uid)})||'/'||
+    (select count(*) from private.ai_usage_evidence where owner_id=${literal(owner.uid)})||'/'||
+    (select count(*) from private.outfitgen_requests where owner_id=${literal(owner.uid)});`));
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // Holds the owner's profile row lock in a separate, open transaction (the claim's own first lock, taken with NOWAIT), so a claim made
+  // meanwhile meets the contention deterministically. Returns the function that waits for the holder to finish and checks that it did.
+  const holdProfileLock = async (owner) => {
+    const seconds = 7;
+    const holder = sql(`begin; select 1 from public.profiles where owner_id=${literal(owner.uid)} for update; select pg_sleep(${seconds}); commit;`)
+      .then(() => null, (error) => error);
+    let started = false;
+    for (let attempt = 0; attempt < 40 && !started; attempt++) {
+      started = Number(await scalar(`select count(*) from pg_stat_activity where datname=current_database() and pid<>pg_backend_pid()
+        and query like '%pg_sleep(${seconds})%';`)) > 0;
+      if (!started) await sleep(250);
+    }
+    if (!started) { await holder; ok(false); }
+    return async () => { ok((await holder) === null); };
+  };
+  const was = await h.controls(a);
+  try {
+    note('rate-source');
+    // The installed body is the migration's text, and its properties and grants are those of the other service-only outfit function.
+    const migration = await readFile(new URL('../../supabase/migrations/20261108100000_outfitgen_call_limits.sql', import.meta.url), 'utf8');
+    const open = migration.indexOf('$$', migration.indexOf('function public.outfitgen_claim('));
+    const source = migration.slice(open + 2, migration.indexOf('$$', open + 2));
+    equal(lines(await scalar(`select prosrc from pg_proc where oid='${CLAIM}'::regprocedure;`)), lines(source));
+    const props = (name) => scalar(`select prosecdef::text||'|'||coalesce(array_to_string(proconfig,','),'')||'|'||pg_get_userbyid(proowner)||'|'||coalesce(proacl::text,'')||'|'||
+      prorettype::regtype::text from pg_proc where oid='${name}'::regprocedure;`);
+    const claimProps = await props(CLAIM);
+    ok(claimProps.startsWith('true|') && claimProps.includes('lock_timeout=2s'));
+    equal(claimProps.split('|').slice(0, 3), (await props(FINISH)).split('|').slice(0, 3));
+    equal(claimProps.split('|')[3], (await props(FINISH)).split('|')[3]);
+    equal(await scalar(`select has_function_privilege('service_role','${CLAIM}','execute')::text||has_function_privilege('authenticated','${CLAIM}','execute')::text||
+      has_function_privilege('anon','${CLAIM}','execute')::text||has_function_privilege('public','${CLAIM}','execute')::text;`), 'truefalsefalsefalse');
+
+    note('rate-setup');
+    // Earlier probes' claims, if any, would count in the windows below; they are moved two days back.
+    if (keep.length) {
+      await sql(`update private.ai_usage set created_at=created_at-interval '2 days' where request_id in (${kept});
+        update private.outfitgen_requests set created_at=created_at-interval '2 days' where request_id in (${kept});`);
+    }
+    await sql(`update private.ai_controls set outfitgen_activated=true,outfitgen_consent_revision=2,outfitgen_consented_at=clock_timestamp()
+      where owner_id in (${both});`);
+    await wipe();
+
+    note('rate-manual');
+    // Limit - 1 is admitted, the limit is refused, and a window that has passed no longer counts.
+    for (const [label, count, age, expected] of [
+      ['ten-39', 39, '1 minute', 'OK'], ['ten-40', 40, '1 minute', 'RATE_LIMIT'], ['ten-passed', 40, '11 minutes', 'OK'],
+      ['hour-119', 119, '20 minutes', 'OK'], ['hour-120', 120, '20 minutes', 'RATE_LIMIT'], ['hour-passed', 120, '61 minutes', 'OK'],
+      ['day-199', 199, '5 hours', 'OK'], ['day-200', 200, '5 hours', 'RATE_LIMIT'], ['day-passed', 200, '25 hours', 'OK'],
+    ]) {
+      note(`rate-manual-${label}`);
+      await seed(a, 'manual', count, age);
+      equal([label, await code(a)], [label, expected]);
+      await wipe();
+    }
+    note('rate-failed-counted');
+    // Failed, expired and unavailable claims are still claims: 14 + 13 + 13 closed rows reach the limit.
+    await seed(a, 'manual', 14, '1 minute', 'FAILED');
+    await seed(a, 'manual', 13, '1 minute', 'EXPIRED');
+    await seed(a, 'manual', 13, '1 minute', 'UNAVAILABLE');
+    equal(await code(a), 'RATE_LIMIT');
+    await wipe();
+
+    note('rate-auto');
+    // Automatic keeps 4 / 6 / 40. Its own 3-per-6-hours rule answers COOLDOWN before those limits can be reached with fewer rows.
+    for (const [label, count, age, expected] of [
+      ['ten-4', 4, '1 minute', 'RATE_LIMIT'], ['ten-3', 3, '1 minute', 'COOLDOWN'], ['ten-2', 2, '1 minute', 'OK'], ['ten-passed', 4, '11 minutes', 'COOLDOWN'],
+      ['hour-6', 6, '20 minutes', 'RATE_LIMIT'], ['hour-5', 5, '20 minutes', 'COOLDOWN'], ['day-40', 40, '5 hours', 'RATE_LIMIT'], ['day-39', 39, '5 hours', 'COOLDOWN'],
+    ]) {
+      note(`rate-auto-${label}`);
+      await seed(a, 'auto', count, age);
+      equal([label, await code(a, true)], [label, expected]);
+      await wipe();
+    }
+
+    note('rate-independent');
+    // Manual history never consumes automatic calls, and automatic history never consumes manual ones.
+    for (const [count, age] of [[40, '1 minute'], [120, '20 minutes'], [200, '5 hours']]) {
+      await seed(a, 'manual', count, age);
+      equal([count, await code(a), await code(a, true)], [count, 'RATE_LIMIT', 'OK']);
+      await wipe();
+    }
+    await seed(a, 'auto', 4, '1 minute');
+    equal([await code(a, true), await code(a)], ['RATE_LIMIT', 'OK']);
+    await wipe();
+
+    note('rate-owners');
+    // One owner's calls never limit another's, and a request id shared by two owners (the key is owner and request) is classified by its own
+    // owner's request row only: A has 39 manual rows plus one auto row under the shared id, B has a manual row under it, so A's manual count stays 39.
+    await seed(b, 'manual', 200, '1 minute');
+    equal([await code(b), await code(a)], ['RATE_LIMIT', 'OK']);
+    await wipe();
+    await seed(a, 'manual', 40, '1 minute');
+    equal([await code(a), await code(b)], ['RATE_LIMIT', 'OK']);
+    await wipe();
+    const shared = randomUUID();
+    await seed(a, 'manual', 39, '1 minute');
+    await seedUsage(a, shared, '1 minute', 'auto');
+    await seedUsage(b, shared, '1 minute', 'manual');
+    equal(await code(a), 'OK');
+    await wipe();
+    await seed(a, 'manual', 39, '1 minute');
+    await seedUsage(a, shared, '1 minute', 'manual');
+    await seedUsage(b, shared, '1 minute', 'auto');
+    equal(await code(a), 'RATE_LIMIT');
+    await wipe();
+
+    note('rate-unclassified');
+    // Recent outfit usage without a request row (never written by the claim) counts as manual, never as automatic.
+    await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
+      select ${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp()-interval '1 minute',1,1,'estimated','outfitgen'
+      from generate_series(1,40);`);
+    equal([await code(a), await code(a, true)], ['RATE_LIMIT', 'OK']);
+    await wipe();
+
+    note('rate-purposes');
+    // Another purpose's usage never counts toward the outfit limits, however much of it there is. The manual claim is settled successfully
+    // (not as a failure, which would start the automatic cooldown) before the automatic one, which would otherwise meet the live batch (BUSY).
+    await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
+      select ${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp()-interval '1 minute',1001,1001,'settled','stylist'
+      from generate_series(1,200);`);
+    const purposeClaim = randomUUID();
+    equal((await claimBy(a, purposeClaim)).code, 'OK');
+    equal((await finish(purposeClaim, 'OK', USAGE, [], null)).code, 'OK');
+    equal(await code(a, true), 'OK');
+    await wipe();
+
+    note('rate-sequence');
+    // Real claims, far beyond the old 4 in ten minutes and 6 in an hour: 40 are admitted and settle as failures, the 41st is refused,
+    // and once the window has passed one is admitted again.
+    const ids = [];
+    for (let index = 0; index < 40; index++) {
+      const id = randomUUID();
+      ids.push(id);
+      equal([index, (await claimBy(a, id)).code], [index, 'OK']);
+      equal([index, (await finish(id, 'FAILED', null, null, null)).code], [index, 'FAILED']);
+    }
+    equal(await code(a), 'RATE_LIMIT');
+    // A manual failure starts the automatic cooldown (any failed outfit call does), without touching the manual limit.
+    equal(await code(a, true), 'COOLDOWN');
+    const listed = ids.map(literal).join(',');
+    await sql(`update private.ai_usage set created_at=created_at-interval '11 minutes' where request_id in (${listed});
+      update private.outfitgen_requests set created_at=created_at-interval '11 minutes' where request_id in (${listed});`);
+    equal(await code(a), 'OK');
+    await wipe();
+
+    note('rate-last-slot');
+    // With one slot left: a claim that meets a held row lock is refused BUSY and writes nothing (the lock is held by a separate session so
+    // the contention is certain, not a race between two processes); the next claim takes the last slot; a second claim meets the live
+    // batch; once the batch settles the limit is reached and the next claim is refused.
+    note('rate-last-slot-seed');
+    await seed(a, 'manual', 39, '1 minute');
+    const baseline = await counts(a);
+    note('rate-last-slot-lock');
+    const release = await holdProfileLock(a);
+    note('rate-last-slot-contended');
+    equal((await claimBy(a, randomUUID())).code, 'BUSY');
+    equal(await counts(a), baseline);
+    note('rate-last-slot-release');
+    await release();
+    note('rate-last-slot-claim');
+    const slot = randomUUID();
+    equal((await claimBy(a, slot)).code, 'OK');
+    note('rate-last-slot-live');
+    equal(await code(a), 'BUSY');
+    note('rate-last-slot-settle');
+    equal((await finish(slot, 'FAILED', null, null, null)).code, 'FAILED');
+    note('rate-last-slot-limit');
+    equal(await code(a), 'RATE_LIMIT');
+    await wipe();
+
+    note('rate-safety');
+    // Replay and one live batch leave exactly the rows they should.
+    note('rate-safety-claim');
+    const live = randomUUID();
+    equal((await claimBy(a, live)).code, 'OK');
+    const afterLive = await counts(a);
+    note('rate-safety-busy');
+    equal(await code(a), 'BUSY');
+    note('rate-safety-terminal');
+    equal((await claimBy(a, live)).code, 'TERMINAL');
+    equal(await counts(a), afterLive);
+    note('rate-safety-settle');
+    equal((await finish(live, 'FAILED', null, null, null)).code, 'FAILED');
+    await wipe();
+
+    note('rate-allowance');
+    // The allowance is exact and shared: used + the reservation equal to it is admitted, one micro less is refused with nothing written,
+    // and another purpose's spend counts.
+    note('rate-allowance-spend');
+    await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
+      values (${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp(),1001,1001,'settled','stylist');`);
+    note('rate-allowance-used');
+    const used = BigInt(await scalar(`select private.ai_budget_used(${literal(a.uid)},clock_timestamp())::bigint;`));
+    const max = BigInt(was.outfitgen_max_request_micro);
+    note('rate-allowance-equal');
+    await sql(`update private.ai_controls set monthly_allowance_micro=${used + max} where owner_id=${literal(a.uid)};`);
+    equal(await code(a), 'OK');
+    await wipe();
+    note('rate-allowance-short');
+    await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
+      values (${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp(),1001,1001,'settled','stylist');
+      update private.ai_controls set monthly_allowance_micro=${used + max - 1n} where owner_id=${literal(a.uid)};`);
+    const before = await counts(a);
+    equal(await code(a), 'ALLOWANCE');
+    equal(await counts(a), before);
+    await wipe();
+    note('rate-allowance-restore');
+    await sql(`update private.ai_controls set monthly_allowance_micro=${was.monthly_allowance_micro} where owner_id=${literal(a.uid)};`);
+
+    note('rate-paused');
+    // A paused account is refused by the guard's SQLSTATE and every claim insert rolls back; settlement and expiry still work.
+    const held = randomUUID();
+    note('rate-paused-claim');
+    equal((await claimBy(a, held)).code, 'OK');
+    note('rate-paused-pause');
+    await sql(`update private.ai_usage set dispatched_at=clock_timestamp()-interval '7 minutes' where request_id=${literal(held)};
+      update private.ai_controls set ai_guard_paused_at=clock_timestamp(),ai_guard_limit_micro=1,ai_guard_window_micro=2 where owner_id=${literal(a.uid)};`);
+    const rowsBefore = await counts(a);
+    note('rate-paused-refused');
+    const refused = await scalar(`do $$ begin
+      perform public.outfitgen_claim(${literal(a.uid)},${literal(randomUUID())},${literal(MANIFEST)},false,${texts([signature])},${uuids([])});
+      raise exception 'NOT REFUSED';
+    exception when sqlstate 'AG001' then null; end $$; select 'REFUSED';`);
+    ok(refused.endsWith('REFUSED'));
+    equal(await counts(a), rowsBefore);
+    note('rate-paused-expire');
+    equal((await one(`select public.outfitgen_expire_due(10);`)).expired, 1);
+    note('rate-paused-late');
+    equal((await finish(held, 'OK', USAGE, [], null)).code, 'EXPIRED');
+    const settled = randomUUID();
+    note('rate-paused-resume');
+    await sql(`update private.ai_controls set ai_guard_paused_at=null,ai_guard_limit_micro=null,ai_guard_window_micro=null where owner_id=${literal(a.uid)};`);
+    equal((await claimBy(a, settled)).code, 'OK');
+    note('rate-paused-settle');
+    await sql(`update private.ai_controls set ai_guard_paused_at=clock_timestamp(),ai_guard_limit_micro=1,ai_guard_window_micro=2 where owner_id=${literal(a.uid)};`);
+    equal((await finish(settled, 'FAILED', null, null, null)).code, 'FAILED');
+    await sql(`update private.ai_controls set ai_guard_paused_at=null,ai_guard_limit_micro=null,ai_guard_window_micro=null where owner_id=${literal(a.uid)};`);
+    await wipe();
+
+    note('rate-consent');
+    // Withdrawn consent refuses with nothing written; consenting again admits.
+    note('rate-consent-withdraw');
+    await rpc(a, 'outfitgen_set_consent', { p_enabled: false, p_notice_revision: null });
+    const withdrawn = await counts(a);
+    note('rate-consent-refused');
+    equal(await code(a), 'CONSENT_REQUIRED');
+    equal(await counts(a), withdrawn);
+    note('rate-consent-again');
+    equal((await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 2 })).code, 'OK');
+    equal(await code(a), 'OK');
+    await wipe();
+
+    note('rate-denied');
+    // An ordinary session cannot call the service-only claim, whatever it sends.
+    const unchanged = await counts(a);
+    const denied = await client.request(a.token, '/rest/v1/rpc/outfitgen_claim', { method: 'POST', body: { p_owner_id: a.uid, p_request_id: randomUUID(),
+      p_manifest_id: MANIFEST, p_auto: false, p_signatures: [signature], p_targets: [] } });
+    ok(!denied.ok && denied.status === 403);
+    equal(await counts(a), unchanged);
+  } finally {
+    await sql(`update private.ai_controls set ai_guard_paused_at=null,ai_guard_limit_micro=null,ai_guard_window_micro=null,
+      monthly_allowance_micro=${was.monthly_allowance_micro} where owner_id=${literal(a.uid)};`);
+    await wipe();
+  }
+}
 
 function bulkSql(owner, newest, direction) {
   const ids = "select md5('outfitgen-bulk-'||n)::uuid id from generate_series(1,520) n";
@@ -336,6 +636,8 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal((await rpc(a, 'outfitgen_status')).pending, 2, 'only valid outfits count for the badge');
 
     note('rate-limit');
+    // The claim limits of this inventory are the original ones (4 / 6 / 40 for every outfit call); the raised manual limits are probed after
+    // their own migration (outfitgenLimitProbes).
     await sql(`delete from public.suggested_outfits where owner_id=${literal(a.uid)} and state='suggested';
       insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
         select ${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp(),1,1,'estimated','outfitgen' from generate_series(1,4);`);
@@ -413,5 +715,140 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     throw error;
   } finally {
     await h.restore(before, made);
+  }
+}
+
+const MIGRATIONS_DIR = new URL('../../supabase/migrations/', import.meta.url);
+const claimBodyLines = async (name) => {
+  const sqlText = await readFile(new URL(name, MIGRATIONS_DIR), 'utf8');
+  const open = sqlText.indexOf('$$', sqlText.indexOf('function public.outfitgen_claim('));
+  return sqlText.slice(open + 2, sqlText.indexOf('$$', open + 2)).split('\n').map((line) => line.trim()).filter(Boolean);
+};
+// The only lines the claim limits migration changes (trimmed): the original rate block and its replacement.
+const OLD_RATE_LINES = [
+  "select count(*) filter (where created_at>v_now-interval '1 hour'),count(*) filter (where created_at>v_now-interval '1 day'),",
+  "count(*) filter (where created_at>v_now-interval '10 minutes') into v_hour,v_day,v_ten",
+  "from private.ai_usage where owner_id=p.owner_id and purpose='outfitgen';",
+  "if v_hour>=6 or v_day>=40 or v_ten>=4 then return jsonb_build_object('code','RATE_LIMIT','claimed',false); end if;",
+];
+const NEW_RATE_LINES = [
+  "select count(*) filter (where u.created_at>v_now-interval '1 hour'),count(*) filter (where u.created_at>v_now-interval '1 day'),",
+  "count(*) filter (where u.created_at>v_now-interval '10 minutes') into v_hour,v_day,v_ten",
+  "from private.ai_usage u left join private.outfitgen_requests r on r.owner_id=u.owner_id and r.request_id=u.request_id",
+  "where u.owner_id=p.owner_id and u.purpose='outfitgen' and u.created_at>v_now-interval '1 day'",
+  "and coalesce(r.mode,'manual')=case when p_auto then 'auto' else 'manual' end;",
+  "if (p_auto and (v_hour>=6 or v_day>=40 or v_ten>=4)) or (not p_auto and (v_hour>=120 or v_day>=200 or v_ten>=40))",
+  "then return jsonb_build_object('code','RATE_LIMIT','claimed',false); end if;",
+];
+const replaceLines = (all, from, to) => {
+  const at = all.findIndex((_, index) => from.every((line, offset) => all[index + offset] === line));
+  return at < 0 ? null : [...all.slice(0, at), ...to, ...all.slice(at + from.length)];
+};
+// Everything an installation of the claim limits migration must leave alone, as one comparable document. The claim's own body is
+// excluded; its identity, owner, ACL, security configuration, volatility and the full definition and ACL of every other function in
+// the application schemas are included, with the rows of every table the claim reads or writes and every trigger.
+const rowsDigest = (table) => `select jsonb_build_object('count',count(*),'md5',md5(coalesce(string_agg(to_jsonb(t)::text,'|' order by to_jsonb(t)::text),'')))::text from ${table} t`;
+// One query per part, each answering a jsonb document as text, so a failure names the part (the rehearsal prints only the stage label).
+const LIMITS_STATE = {
+  claim: `select jsonb_build_object('oid',p.oid::bigint,'owner',pg_get_userbyid(p.proowner),'acl',p.proacl::text,'secdef',p.prosecdef,'config',p.proconfig,
+    'volatility',p.provolatile,'strict',p.proisstrict,'parallel',p.proparallel,'leakproof',p.proleakproof,'kind',p.prokind,'returns',p.prorettype::regtype::text,
+    'args',pg_get_function_identity_arguments(p.oid),'language',l.lanname,'cost',p.procost,'rows',p.prorows)::text
+    from pg_proc p join pg_language l on l.oid=p.prolang where p.oid='${CLAIM}'::regprocedure`,
+  functions: `select jsonb_build_object('count',count(*),'md5',md5(string_agg(p.oid::regprocedure::text||'|'||pg_get_functiondef(p.oid)||'|'||coalesce(p.proacl::text,''),E'\\n'
+    order by p.oid::regprocedure::text)))::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname in ('public','private') and p.prokind='f' and p.oid<>'${CLAIM}'::regprocedure`,
+  // The enabled flag is cast to text: text || "char" is an ambiguous operator.
+  triggers: `select to_jsonb(md5(string_agg(tgrelid::regclass::text||'|'||tgenabled::text||'|'||pg_get_triggerdef(oid),E'\\n' order by tgrelid::regclass::text,tgname)))::text
+    from pg_trigger where not tgisinternal`,
+  controls: rowsDigest('private.ai_controls'),
+  usage: rowsDigest('private.ai_usage'),
+  evidence: rowsDigest('private.ai_usage_evidence'),
+  requests: rowsDigest('private.outfitgen_requests'),
+  suggestions: rowsDigest('public.suggested_outfits'),
+  assessed: rowsDigest('private.outfit_assessed_items'),
+  manifests: rowsDigest('private.ai_execution_manifests'),
+};
+async function limitsState(one) {
+  const state = {};
+  for (const [part, text] of Object.entries(LIMITS_STATE)) {
+    note(`state-${part}`);
+    state[part] = await one(`${text};`);
+  }
+  return state;
+}
+
+// OUTFITGEN3-B2, before the claim limits migration (the predecessor inventory): one owner is configured and consented, one genuine claim is held
+// and everything the migration must not change is captured. The held request must survive the installation and settle afterwards.
+export async function outfitgenLimitsCheckpoint(snapshot, sql, mark = () => {}) {
+  note = (label) => { last = label; mark(label); };
+  const h = helpers(snapshot, sql);
+  const { a, one, scalar, claim } = h;
+  const before = await h.configure();
+  try {
+    note('configure');
+    await sql(`update private.ai_controls set outfitgen_activated=true,outfitgen_consent_revision=2,outfitgen_consented_at=clock_timestamp()
+      where owner_id=${literal(a.uid)};`);
+    note('claim');
+    const id = randomUUID();
+    const held = await claim(id, ['c'.repeat(64)]);
+    equal([held.code, held.claimed], ['OK', true]);
+    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(id)};`), 'held');
+    const state = await limitsState(one);
+    note('body');
+    return { before, id, state, body: lines(await scalar(`select prosrc from pg_proc where oid='${CLAIM}'::regprocedure;`)) };
+  } catch (error) {
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
+    await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(a.uid)};`);
+    await h.restore(before, []);
+    throw error;
+  }
+}
+const lines = (text) => text.split('\n').map((line) => line.trim()).filter(Boolean);
+
+// After the migration alone: only the claim's body differs (by exactly the rate block), the held request survives and settles, and the
+// configuration is restored.
+export async function outfitgenLimitsCompare(checkpoint, snapshot, sql, mark = () => {}) {
+  note = (label) => { last = label; mark(label); };
+  const h = helpers(snapshot, sql);
+  const { one, scalar, finish } = h;
+  try {
+    const state = await limitsState(one);
+    note('state-compare');
+    for (const part of Object.keys(LIMITS_STATE)) {
+      if (!isDeepStrictEqual(state[part], checkpoint.state[part])) { note(`state-differs-${part}`); requireEvidence(false); }
+    }
+    note('body');
+    const after = lines(await scalar(`select prosrc from pg_proc where oid='${CLAIM}'::regprocedure;`));
+    const sourceNow = await claimBodyLines('20261108100000_outfitgen_call_limits.sql');
+    equal(after, sourceNow);
+    equal(replaceLines(checkpoint.body, OLD_RATE_LINES, NEW_RATE_LINES), after);
+    equal(replaceLines(after, NEW_RATE_LINES, OLD_RATE_LINES), checkpoint.body);
+    equal(await claimBodyLines('20261106090000_outfit_generation.sql'), checkpoint.body);
+    note('held');
+    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(checkpoint.id)};`), 'held');
+    const done = await finish(checkpoint.id, 'OK', USAGE, [], null);
+    equal(done.code, 'OK');
+    equal(await scalar(`select charge_state||':'||accounted_micro from private.ai_usage where request_id=${literal(checkpoint.id)};`), `estimated:${30000 * 220 / 100 + 2000 * 1320 / 100}`);
+  } catch (error) {
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
+    throw error;
+  } finally {
+    await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(h.a.uid)} and charge_state='held';`);
+    await h.restore(checkpoint.before, []);
+  }
+}
+
+// OUTFITGEN3-B2 after the migration: the raised manual limits, the unchanged automatic ones and the preserved claim safety.
+export async function outfitgenLimitProbes(snapshot, sql, mark = () => {}) {
+  note = (label) => { last = label; mark(label); };
+  const h = helpers(snapshot, sql);
+  const before = await h.configure();
+  try {
+    await rateLimitProbes(h, { keep: [], client: snapshot.client, signature: 'd'.repeat(64) });
+  } catch (error) {
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
+    throw error;
+  } finally {
+    await h.restore(before, []);
   }
 }
