@@ -2531,5 +2531,17 @@ cap is untouched.
     unreadable until Pages is deployed; an old page stops its own runs at 40 pending, which makes that unlikely but not impossible, for example through repeated Undo.) **Backout:** a separately authorized compensating `create or replace` of the four old bodies in one
   transaction with readback, never replaying history; rows above 40 then only block new claims and Undo until decided, and the parsers read over-cap counts. If the B2 claim limits are ever backed out later, the
   claim to restore is this packet's body with the B2 rate block swapped back, not the original from `20261106090000`.
+- **Compatibility matrix (layers: Pages P, Edge E, database D; "old" enforces 40, "new" 100).** The three steps are done in one quiet window with the app idle (no run or picture chain in flight, no second device
+  open), and the owner refreshes the page afterwards. No state spends more than the old one; the partial states below are what the owner could meet if a step lags.
+  | State | Effect |
+  |---|---|
+  | P new, E old, D old | The page treats 40 to 99 as not full and sends a call; the old Edge refuses PENDING_FULL from the status before any claim. Nothing is reserved or spent; the page shows "Keep or remove some suggestions first." and ends a pass. Same outcome as today plus one refused request. |
+  | P new, E new, D old | The Edge passes its own gate, reads the plan and the photos, then the old claim refuses PENDING_FULL at 40 before any reservation. Admission-safe (no hold, no paid call) but not lossless: that work is wasted and the pass ends with the full line. Undo is refused at 40 by the old function. A call admitted below 40 records only the room the old function leaves (up to 40). |
+  | P new, E new, D new | Cap 100 everywhere. |
+  | After the switch, a page opened earlier and not refreshed (old P) | Its own gate stops its runs at 40 pending. The server now lets Undo restore up to 100, and the old page reads a list reply only up to 32 KB (about 70 rows): above that its list read fails and the section shows nothing until the page is refreshed. Spend is unchanged. This is why the owner refreshes afterwards. |
+  | A call in flight while D switches | A claim admitted under the old body settles under the new one: the record function simply sees room under 100. The quiet window avoids this case. |
+  | E old, D new (only if the order were reversed or the Edge lagged) | The old Edge refuses at 40 pending; its sanity bound would answer UNCONFIGURED only above 100 pending, which nothing can reach while it refuses at 40. The page cannot use the extra room until the Edge is redeployed. |
+  | Backout of D to 40 while 41 to 100 are pending (new P and E stay) | New claims and Undo are refused PENDING_FULL by the old functions (a claim before any reservation, so nothing is spent), a settling request records nothing for lack of room, and the new page and Edge read the over-cap list and counts. Decisions bring the count under 40 again. |
+  | Backout of E or P (stale clients) | An old Edge or page simply meets the cap of 40 on the page or in the Edge; with D at 100 the pending rows above 40 stay and are shown (the old page cannot read more than about 70 of them). |
 - **Validation.** Node 24.19.0: lint, typecheck, `check:translations`, the unit suites above, `outfitgen.spec.ts` and `outfitgen-pictures.spec.ts` on chromium, mobile and webkit-photo (216 passed). CI-only and not run
   locally: the preservation rehearsal and all integration suites.
