@@ -71,6 +71,22 @@ async function rateLimitProbes(h, { keep, signature, client }) {
   const counts = async (owner) => (await scalar(`select (select count(*) from private.ai_usage where owner_id=${literal(owner.uid)})||'/'||
     (select count(*) from private.ai_usage_evidence where owner_id=${literal(owner.uid)})||'/'||
     (select count(*) from private.outfitgen_requests where owner_id=${literal(owner.uid)});`));
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  // Holds the owner's profile row lock in a separate, open transaction (the claim's own first lock, taken with NOWAIT), so a claim made
+  // meanwhile meets the contention deterministically. Returns the function that waits for the holder to finish and checks that it did.
+  const holdProfileLock = async (owner) => {
+    const seconds = 7;
+    const holder = sql(`begin; select 1 from public.profiles where owner_id=${literal(owner.uid)} for update; select pg_sleep(${seconds}); commit;`)
+      .then(() => null, (error) => error);
+    let started = false;
+    for (let attempt = 0; attempt < 40 && !started; attempt++) {
+      started = Number(await scalar(`select count(*) from pg_stat_activity where datname=current_database() and pid<>pg_backend_pid()
+        and query like '%pg_sleep(${seconds})%';`)) > 0;
+      if (!started) await sleep(250);
+    }
+    if (!started) { await holder; ok(false); }
+    return async () => { ok((await holder) === null); };
+  };
   const was = await h.controls(a);
   try {
     note('rate-source');
@@ -202,41 +218,59 @@ async function rateLimitProbes(h, { keep, signature, client }) {
     await wipe();
 
     note('rate-last-slot');
-    // With one slot left, concurrent claims admit exactly one; once it settles the limit is reached and the next claim is refused.
+    // With one slot left: a claim that meets a held row lock is refused BUSY and writes nothing (the lock is held by a separate session so
+    // the contention is certain, not a race between two processes); the next claim takes the last slot; a second claim meets the live
+    // batch; once the batch settles the limit is reached and the next claim is refused.
+    note('rate-last-slot-seed');
     await seed(a, 'manual', 39, '1 minute');
-    const last = await Promise.all([claimBy(a, randomUUID()), claimBy(a, randomUUID())]);
-    equal(last.map((entry) => entry.code).sort(), ['BUSY', 'OK']);
-    equal(await scalar(`select count(*) from private.ai_usage where owner_id=${literal(a.uid)} and purpose='outfitgen' and created_at>clock_timestamp()-interval '30 seconds';`), '1');
-    const admitted = await scalar(`select request_id from private.ai_usage where owner_id=${literal(a.uid)} and charge_state='held';`);
-    equal((await finish(admitted, 'FAILED', null, null, null)).code, 'FAILED');
+    const baseline = await counts(a);
+    note('rate-last-slot-lock');
+    const release = await holdProfileLock(a);
+    note('rate-last-slot-contended');
+    equal((await claimBy(a, randomUUID())).code, 'BUSY');
+    equal(await counts(a), baseline);
+    note('rate-last-slot-release');
+    await release();
+    note('rate-last-slot-claim');
+    const slot = randomUUID();
+    equal((await claimBy(a, slot)).code, 'OK');
+    note('rate-last-slot-live');
+    equal(await code(a), 'BUSY');
+    note('rate-last-slot-settle');
+    equal((await finish(slot, 'FAILED', null, null, null)).code, 'FAILED');
+    note('rate-last-slot-limit');
     equal(await code(a), 'RATE_LIMIT');
     await wipe();
 
     note('rate-safety');
-    // Replay, one live batch, concurrency and the claim's refusals leave exactly the rows they should.
+    // Replay and one live batch leave exactly the rows they should.
+    note('rate-safety-claim');
     const live = randomUUID();
     equal((await claimBy(a, live)).code, 'OK');
     const afterLive = await counts(a);
+    note('rate-safety-busy');
     equal(await code(a), 'BUSY');
+    note('rate-safety-terminal');
     equal((await claimBy(a, live)).code, 'TERMINAL');
     equal(await counts(a), afterLive);
+    note('rate-safety-settle');
     equal((await finish(live, 'FAILED', null, null, null)).code, 'FAILED');
-    await wipe();
-    const racers = await Promise.all([claimBy(a, randomUUID()), claimBy(a, randomUUID())]);
-    equal(racers.map((racer) => racer.code).sort(), ['BUSY', 'OK']);
-    equal(await scalar(`select count(*) from private.ai_usage where owner_id=${literal(a.uid)} and purpose='outfitgen' and charge_state='held';`), '1');
     await wipe();
 
     note('rate-allowance');
     // The allowance is exact and shared: used + the reservation equal to it is admitted, one micro less is refused with nothing written,
     // and another purpose's spend counts.
+    note('rate-allowance-spend');
     await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
       values (${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp(),1001,1001,'settled','stylist');`);
+    note('rate-allowance-used');
     const used = BigInt(await scalar(`select private.ai_budget_used(${literal(a.uid)},clock_timestamp())::bigint;`));
     const max = BigInt(was.outfitgen_max_request_micro);
+    note('rate-allowance-equal');
     await sql(`update private.ai_controls set monthly_allowance_micro=${used + max} where owner_id=${literal(a.uid)};`);
     equal(await code(a), 'OK');
     await wipe();
+    note('rate-allowance-short');
     await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
       values (${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp(),1001,1001,'settled','stylist');
       update private.ai_controls set monthly_allowance_micro=${used + max - 1n} where owner_id=${literal(a.uid)};`);
@@ -244,26 +278,34 @@ async function rateLimitProbes(h, { keep, signature, client }) {
     equal(await code(a), 'ALLOWANCE');
     equal(await counts(a), before);
     await wipe();
+    note('rate-allowance-restore');
     await sql(`update private.ai_controls set monthly_allowance_micro=${was.monthly_allowance_micro} where owner_id=${literal(a.uid)};`);
 
     note('rate-paused');
     // A paused account is refused by the guard's SQLSTATE and every claim insert rolls back; settlement and expiry still work.
     const held = randomUUID();
+    note('rate-paused-claim');
     equal((await claimBy(a, held)).code, 'OK');
+    note('rate-paused-pause');
     await sql(`update private.ai_usage set dispatched_at=clock_timestamp()-interval '7 minutes' where request_id=${literal(held)};
       update private.ai_controls set ai_guard_paused_at=clock_timestamp(),ai_guard_limit_micro=1,ai_guard_window_micro=2 where owner_id=${literal(a.uid)};`);
     const rowsBefore = await counts(a);
+    note('rate-paused-refused');
     const refused = await scalar(`do $$ begin
       perform public.outfitgen_claim(${literal(a.uid)},${literal(randomUUID())},${literal(MANIFEST)},false,${texts([signature])},${uuids([])});
       raise exception 'NOT REFUSED';
     exception when sqlstate 'AG001' then null; end $$; select 'REFUSED';`);
     ok(refused.endsWith('REFUSED'));
     equal(await counts(a), rowsBefore);
+    note('rate-paused-expire');
     equal((await one(`select public.outfitgen_expire_due(10);`)).expired, 1);
+    note('rate-paused-late');
     equal((await finish(held, 'OK', USAGE, [], null)).code, 'EXPIRED');
     const settled = randomUUID();
+    note('rate-paused-resume');
     await sql(`update private.ai_controls set ai_guard_paused_at=null,ai_guard_limit_micro=null,ai_guard_window_micro=null where owner_id=${literal(a.uid)};`);
     equal((await claimBy(a, settled)).code, 'OK');
+    note('rate-paused-settle');
     await sql(`update private.ai_controls set ai_guard_paused_at=clock_timestamp(),ai_guard_limit_micro=1,ai_guard_window_micro=2 where owner_id=${literal(a.uid)};`);
     equal((await finish(settled, 'FAILED', null, null, null)).code, 'FAILED');
     await sql(`update private.ai_controls set ai_guard_paused_at=null,ai_guard_limit_micro=null,ai_guard_window_micro=null where owner_id=${literal(a.uid)};`);
@@ -271,10 +313,13 @@ async function rateLimitProbes(h, { keep, signature, client }) {
 
     note('rate-consent');
     // Withdrawn consent refuses with nothing written; consenting again admits.
+    note('rate-consent-withdraw');
     await rpc(a, 'outfitgen_set_consent', { p_enabled: false, p_notice_revision: null });
     const withdrawn = await counts(a);
+    note('rate-consent-refused');
     equal(await code(a), 'CONSENT_REQUIRED');
     equal(await counts(a), withdrawn);
+    note('rate-consent-again');
     equal((await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 2 })).code, 'OK');
     equal(await code(a), 'OK');
     await wipe();

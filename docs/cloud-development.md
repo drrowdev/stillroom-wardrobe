@@ -2406,8 +2406,9 @@ the coordinator's approval are applied.
   unavailable rows count; recent outfit usage without a request row counts as manual; other purposes' usage does not count; automatic limits (its
   3-per-6-hours rule answers COOLDOWN before limit - 1 can be reached, asserted as such) and the manual failure to automatic cooldown; manual and automatic
   independent; owners independent; one request id under two owners with different modes never cross-classifies; a real sequence of 40 claims
-  settled as failures, the 41st refused, admitted again after the window; with one slot left, concurrent claims admit one and refuse one, and the next claim
-  after settlement is RATE_LIMIT; replay TERMINAL, a live batch BUSY with no rows written, the allowance exact (used + reservation admitted, one micro
+  settled as failures, the 41st refused, admitted again after the window; with one slot left, a claim that meets a profile row lock held by a separate
+    session is refused BUSY and writes nothing (deterministic contention, not a race between two processes), the next claim takes the last slot, a second claim meets the live
+    batch, and after settlement the next claim is RATE_LIMIT; replay TERMINAL, a live batch BUSY with no rows written, the allowance exact (used + reservation admitted, one micro
   less refused with nothing written, another purpose's spend counted), the guard's `AG001` with no row written and settlement and expiry still
   working while paused, withdrawn consent, and an ordinary session denied. Scratch run (not in the repository, as for AI-GUARD1): PGlite with stubs for the
   helper functions ran the real migration body through the boundaries, independence, sequence, replay and allowance cases; the same harness against the old body
