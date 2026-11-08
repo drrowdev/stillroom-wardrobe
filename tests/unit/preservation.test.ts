@@ -146,6 +146,7 @@ const baseTable = [
   '   `20261107090000` | ` `              | `2026-11-07 09:00:00` ',
   '   `20261107100000` | ` `              | `2026-11-07 10:00:00` ',
   '   `20261107100100` | ` `              | `2026-11-07 10:01:00` ',
+  '   `20261108100000` | ` `              | `2026-11-08 10:00:00` ',
   '',
   '',
 ].join('\n');
@@ -198,12 +199,13 @@ const targetTable = [
   '   `20261107090000` | `20261107090000` | `2026-11-07 09:00:00` ',
   '   `20261107100000` | `20261107100000` | `2026-11-07 10:00:00` ',
   '   `20261107100100` | `20261107100100` | `2026-11-07 10:01:00` ',
+  '   `20261108100000` | `20261108100000` | `2026-11-08 10:00:00` ',
   '',
   '',
 ].join('\n');
 const pendingRow = (table: string, version: string) => table.replace(`\`${version}\` | \`${version}\``, `\`${version}\` | \` \`             `);
 // Historical stages remain pending for later migrations; target includes the new lifecycle.
-const outfitgenPriorTable = pendingRow(pendingRow(pendingRow(pendingRow(pendingRow(targetTable, '20261107100100'), '20261107100000'), '20261107090000'), '20261106090100'), '20261106090000');
+const outfitgenPriorTable = pendingRow(pendingRow(pendingRow(pendingRow(pendingRow(pendingRow(targetTable, '20261108100000'), '20261107100100'), '20261107100000'), '20261107090000'), '20261106090100'), '20261106090000');
 const tryonV3PriorTable = pendingRow(outfitgenPriorTable, '20261102090000');
 const limitsPriorTable = pendingRow(tryonV3PriorTable, '20261101200000');
 const budget2PriorTable = pendingRow(limitsPriorTable, '20261101090000');
@@ -449,7 +451,7 @@ describe('CI-only preservation guards', () => {
     // Each feature only appends: the frozen history stays in order and the newest migrations close the list.
     expect(versions).toEqual([...versions].sort());
     expect(versions.slice(0, 2)).toEqual(['20260905000000', '20260906000000']);
-    expect(versions.slice(-7)).toEqual(['20261101200000', '20261102090000', '20261106090000', '20261106090100', '20261107090000', '20261107100000', '20261107100100']);
+    expect(versions.slice(-8)).toEqual(['20261101200000', '20261102090000', '20261106090000', '20261106090100', '20261107090000', '20261107100000', '20261107100100', '20261108100000']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
     for (const index of inventory().keys()) for (const [key, value] of [

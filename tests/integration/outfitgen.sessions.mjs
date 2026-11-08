@@ -7,8 +7,9 @@
 //     controls row, consent or activation changed.
 //   outfitgenProbes: plan, one live batch per owner, frozen signatures, finish (idempotent, conflict-safe, record-or-skip per row),
 //     the pending cap across a batch, dedupe against judged, saved, trashed and disliked sets, Keep, Remove and Undo, unmetered failure,
-//     cooldown, expiry, stale handling, deletion cascade and owner isolation.
+//     cooldown, expiry, stale handling, call limits per mode (OUTFITGEN3-B2), deletion cascade and owner isolation.
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { requireEvidence } from './preservation.sessions.mjs';
 import { intent, saveHarness } from './item-save.sessions.mjs';
@@ -37,6 +38,207 @@ const texts = (values) => `array[${values.map(literal).join(',')}]::text[]`;
 const USAGE = Object.freeze({ modelObservation: 'expected_snapshot', controlObservation: 'ordinary', input: 30000, output: 2000,
   total: 32000, reasoning: 500, cacheRead: 0, cacheWrite: 0 });
 const BODIES = ['private.admin_account_v3(private.approved_accounts,timestamptz,text[])', 'private.deletion_owner_rows_absent(uuid)'];
+const CLAIM = 'public.outfitgen_claim(uuid,uuid,text,boolean,text[],uuid[])';
+const FINISH = 'public.outfitgen_finish(uuid,uuid,text,jsonb,jsonb,uuid[])';
+
+// OUTFITGEN3-B2: the claim's call limits (manual 40 / 10 min, 120 / hour, 200 / rolling day; automatic 4 / 6 / 40), counted per owner and
+// mode, and the safety the replaced claim body must keep. Rows are seeded with privileged SQL in the shape a settled claim leaves
+// (an ai_usage row and its outfitgen_requests row, with a chosen age); claims go through the real function the way the Edge handler calls it.
+// Everything created here is removed in finally; the earlier probes' own rows (keep) are only moved back in time.
+async function rateLimitProbes(h, { keep, signature, client }) {
+  const { a, b, one, scalar, sql, rpc, finish } = h;
+  const lines = (text) => text.split('\n').map((line) => line.trim()).filter(Boolean);
+  const claimBy = (owner, id, auto = false) => one(`select public.outfitgen_claim(${literal(owner.uid)},${literal(id)},${literal(MANIFEST)},
+    ${auto},${texts([signature])},${uuids([])});`);
+  const code = async (owner, auto = false) => (await claimBy(owner, randomUUID(), auto)).code;
+  const seed = (owner, mode, count, age, reason = null) => sql(`with u as (
+      insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose,closed_reason,closed_at)
+        select ${literal(owner.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp()-interval '${age}',1,1,'estimated','outfitgen',
+          ${reason ? `${literal(reason)}::text` : 'null::text'},${reason ? `clock_timestamp()-interval '${age}'` : 'null::timestamptz'} from generate_series(1,${count})
+        returning owner_id,request_id,created_at)
+      insert into private.outfitgen_requests(owner_id,request_id,mode,signatures,target_items,created_at)
+        select owner_id,request_id,${literal(mode)},'{}'::text[],'{}'::uuid[],created_at from u;`);
+  const both = `${literal(a.uid)},${literal(b.uid)}`;
+  const kept = keep.map(literal).join(',');
+  const wipe = () => sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id in (${both}) and request_id not in (${kept});
+    delete from private.ai_usage where purpose='stylist' and reserved_micro=1001 and owner_id in (${both});`);
+  const counts = async (owner) => (await scalar(`select (select count(*) from private.ai_usage where owner_id=${literal(owner.uid)})||'/'||
+    (select count(*) from private.ai_usage_evidence where owner_id=${literal(owner.uid)})||'/'||
+    (select count(*) from private.outfitgen_requests where owner_id=${literal(owner.uid)});`));
+  const was = await h.controls(a);
+  try {
+    note('rate-source');
+    // The installed body is the migration's text, and its properties and grants are those of the other service-only outfit function.
+    const migration = await readFile(new URL('../../supabase/migrations/20261108100000_outfitgen_call_limits.sql', import.meta.url), 'utf8');
+    const open = migration.indexOf('$$', migration.indexOf('function public.outfitgen_claim('));
+    const source = migration.slice(open + 2, migration.indexOf('$$', open + 2));
+    equal(lines(await scalar(`select prosrc from pg_proc where oid='${CLAIM}'::regprocedure;`)), lines(source));
+    const props = (name) => scalar(`select prosecdef::text||'|'||coalesce(array_to_string(proconfig,','),'')||'|'||pg_get_userbyid(proowner)||'|'||coalesce(proacl::text,'')||'|'||
+      prorettype::regtype::text from pg_proc where oid='${name}'::regprocedure;`);
+    const claimProps = await props(CLAIM);
+    ok(claimProps.startsWith('true|') && claimProps.includes('lock_timeout=2s'));
+    equal(claimProps.split('|').slice(0, 3), (await props(FINISH)).split('|').slice(0, 3));
+    equal(claimProps.split('|')[3], (await props(FINISH)).split('|')[3]);
+    equal(await scalar(`select has_function_privilege('service_role','${CLAIM}','execute')::text||has_function_privilege('authenticated','${CLAIM}','execute')::text||
+      has_function_privilege('anon','${CLAIM}','execute')::text||has_function_privilege('public','${CLAIM}','execute')::text;`), 'truefalsefalsefalse');
+
+    note('rate-setup');
+    // The earlier probes' claims would count in the windows below; they are moved two days back.
+    await sql(`update private.ai_usage set created_at=created_at-interval '2 days' where request_id in (${kept});
+      update private.outfitgen_requests set created_at=created_at-interval '2 days' where request_id in (${kept});`);
+    await sql(`update private.ai_controls set outfitgen_activated=true where owner_id=${literal(b.uid)};`);
+    equal((await rpc(b, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 2 })).code, 'OK');
+    await wipe();
+
+    note('rate-manual');
+    // Limit - 1 is admitted, the limit is refused, and a window that has passed no longer counts.
+    for (const [label, count, age, expected] of [
+      ['ten-39', 39, '1 minute', 'OK'], ['ten-40', 40, '1 minute', 'RATE_LIMIT'], ['ten-passed', 40, '11 minutes', 'OK'],
+      ['hour-119', 119, '20 minutes', 'OK'], ['hour-120', 120, '20 minutes', 'RATE_LIMIT'], ['hour-passed', 120, '61 minutes', 'OK'],
+      ['day-199', 199, '5 hours', 'OK'], ['day-200', 200, '5 hours', 'RATE_LIMIT'], ['day-passed', 200, '25 hours', 'OK'],
+    ]) {
+      note(`rate-manual-${label}`);
+      await seed(a, 'manual', count, age);
+      equal([label, await code(a)], [label, expected]);
+      await wipe();
+    }
+    note('rate-failed-counted');
+    // Failed, expired and unavailable claims are still claims: 14 + 13 + 13 closed rows reach the limit.
+    await seed(a, 'manual', 14, '1 minute', 'FAILED');
+    await seed(a, 'manual', 13, '1 minute', 'EXPIRED');
+    await seed(a, 'manual', 13, '1 minute', 'UNAVAILABLE');
+    equal(await code(a), 'RATE_LIMIT');
+    await wipe();
+
+    note('rate-auto');
+    // Automatic keeps 4 / 6 / 40. Its own 3-per-6-hours rule answers COOLDOWN before those limits can be reached with fewer rows.
+    for (const [label, count, age, expected] of [
+      ['ten-4', 4, '1 minute', 'RATE_LIMIT'], ['ten-3', 3, '1 minute', 'COOLDOWN'], ['ten-2', 2, '1 minute', 'OK'], ['ten-passed', 4, '11 minutes', 'COOLDOWN'],
+      ['hour-6', 6, '20 minutes', 'RATE_LIMIT'], ['hour-5', 5, '20 minutes', 'COOLDOWN'], ['day-40', 40, '5 hours', 'RATE_LIMIT'], ['day-39', 39, '5 hours', 'COOLDOWN'],
+    ]) {
+      note(`rate-auto-${label}`);
+      await seed(a, 'auto', count, age);
+      equal([label, await code(a, true)], [label, expected]);
+      await wipe();
+    }
+
+    note('rate-independent');
+    // Manual history never consumes automatic calls, and automatic history never consumes manual ones.
+    for (const [count, age] of [[40, '1 minute'], [120, '20 minutes'], [200, '5 hours']]) {
+      await seed(a, 'manual', count, age);
+      equal([count, await code(a), await code(a, true)], [count, 'RATE_LIMIT', 'OK']);
+      await wipe();
+    }
+    await seed(a, 'auto', 4, '1 minute');
+    equal([await code(a, true), await code(a)], ['RATE_LIMIT', 'OK']);
+    await wipe();
+
+    note('rate-owners');
+    // One owner's calls never limit another's.
+    await seed(b, 'manual', 200, '1 minute');
+    equal([await code(b), await code(a)], ['RATE_LIMIT', 'OK']);
+    await wipe();
+    await seed(a, 'manual', 40, '1 minute');
+    equal([await code(a), await code(b)], ['RATE_LIMIT', 'OK']);
+    await wipe();
+
+    note('rate-sequence');
+    // Real claims, far beyond the old 4 in ten minutes and 6 in an hour: 40 are admitted and settle as failures, the 41st is refused,
+    // and once the window has passed one is admitted again.
+    const ids = [];
+    for (let index = 0; index < 40; index++) {
+      const id = randomUUID();
+      ids.push(id);
+      equal([index, (await claimBy(a, id)).code], [index, 'OK']);
+      equal([index, (await finish(id, 'FAILED', null, null, null)).code], [index, 'FAILED']);
+    }
+    equal(await code(a), 'RATE_LIMIT');
+    const listed = ids.map(literal).join(',');
+    await sql(`update private.ai_usage set created_at=created_at-interval '11 minutes' where request_id in (${listed});
+      update private.outfitgen_requests set created_at=created_at-interval '11 minutes' where request_id in (${listed});`);
+    equal(await code(a), 'OK');
+    await wipe();
+
+    note('rate-safety');
+    // Replay, one live batch, concurrency and the claim's refusals leave exactly the rows they should.
+    const live = randomUUID();
+    equal((await claimBy(a, live)).code, 'OK');
+    const afterLive = await counts(a);
+    equal(await code(a), 'BUSY');
+    equal((await claimBy(a, live)).code, 'TERMINAL');
+    equal(await counts(a), afterLive);
+    equal((await finish(live, 'FAILED', null, null, null)).code, 'FAILED');
+    await wipe();
+    const racers = await Promise.all([claimBy(a, randomUUID()), claimBy(a, randomUUID())]);
+    equal(racers.map((racer) => racer.code).sort(), ['BUSY', 'OK']);
+    equal(await scalar(`select count(*) from private.ai_usage where owner_id=${literal(a.uid)} and purpose='outfitgen' and charge_state='held';`), '1');
+    await wipe();
+
+    note('rate-allowance');
+    // The allowance is exact and shared: used + the reservation equal to it is admitted, one micro less is refused with nothing written,
+    // and another purpose's spend counts.
+    await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
+      values (${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp(),1001,1001,'settled','stylist');`);
+    const used = BigInt(await scalar(`select private.ai_budget_used(${literal(a.uid)},clock_timestamp())::bigint;`));
+    const max = BigInt(was.outfitgen_max_request_micro);
+    await sql(`update private.ai_controls set monthly_allowance_micro=${used + max} where owner_id=${literal(a.uid)};`);
+    equal(await code(a), 'OK');
+    await wipe();
+    await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
+      values (${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp(),1001,1001,'settled','stylist');
+      update private.ai_controls set monthly_allowance_micro=${used + max - 1n} where owner_id=${literal(a.uid)};`);
+    const before = await counts(a);
+    equal(await code(a), 'ALLOWANCE');
+    equal(await counts(a), before);
+    await wipe();
+    await sql(`update private.ai_controls set monthly_allowance_micro=${was.monthly_allowance_micro} where owner_id=${literal(a.uid)};`);
+
+    note('rate-paused');
+    // A paused account is refused by the guard's SQLSTATE and every claim insert rolls back; settlement and expiry still work.
+    const held = randomUUID();
+    equal((await claimBy(a, held)).code, 'OK');
+    await sql(`update private.ai_usage set dispatched_at=clock_timestamp()-interval '7 minutes' where request_id=${literal(held)};
+      update private.ai_controls set ai_guard_paused_at=clock_timestamp(),ai_guard_limit_micro=1,ai_guard_window_micro=2 where owner_id=${literal(a.uid)};`);
+    const rowsBefore = await counts(a);
+    const refused = await scalar(`do $$ begin
+      perform public.outfitgen_claim(${literal(a.uid)},${literal(randomUUID())},${literal(MANIFEST)},false,${texts([signature])},${uuids([])});
+      raise exception 'NOT REFUSED';
+    exception when sqlstate 'AG001' then null; end $$; select 'REFUSED';`);
+    ok(refused.endsWith('REFUSED'));
+    equal(await counts(a), rowsBefore);
+    equal((await one(`select public.outfitgen_expire_due(10);`)).expired, 1);
+    equal((await finish(held, 'OK', USAGE, [], null)).code, 'EXPIRED');
+    const settled = randomUUID();
+    await sql(`update private.ai_controls set ai_guard_paused_at=null,ai_guard_limit_micro=null,ai_guard_window_micro=null where owner_id=${literal(a.uid)};`);
+    equal((await claimBy(a, settled)).code, 'OK');
+    await sql(`update private.ai_controls set ai_guard_paused_at=clock_timestamp(),ai_guard_limit_micro=1,ai_guard_window_micro=2 where owner_id=${literal(a.uid)};`);
+    equal((await finish(settled, 'FAILED', null, null, null)).code, 'FAILED');
+    await sql(`update private.ai_controls set ai_guard_paused_at=null,ai_guard_limit_micro=null,ai_guard_window_micro=null where owner_id=${literal(a.uid)};`);
+    await wipe();
+
+    note('rate-consent');
+    // Withdrawn consent refuses with nothing written; consenting again admits.
+    await rpc(a, 'outfitgen_set_consent', { p_enabled: false, p_notice_revision: null });
+    const withdrawn = await counts(a);
+    equal(await code(a), 'CONSENT_REQUIRED');
+    equal(await counts(a), withdrawn);
+    equal((await rpc(a, 'outfitgen_set_consent', { p_enabled: true, p_notice_revision: 2 })).code, 'OK');
+    equal(await code(a), 'OK');
+    await wipe();
+
+    note('rate-denied');
+    // An ordinary session cannot call the service-only claim, whatever it sends.
+    const unchanged = await counts(a);
+    const denied = await client.request(a.token, '/rest/v1/rpc/outfitgen_claim', { method: 'POST', body: { p_owner_id: a.uid, p_request_id: randomUUID(),
+      p_manifest_id: MANIFEST, p_auto: false, p_signatures: [signature], p_targets: [] } });
+    ok(!denied.ok && denied.status === 403);
+    equal(await counts(a), unchanged);
+  } finally {
+    await sql(`update private.ai_controls set ai_guard_paused_at=null,ai_guard_limit_micro=null,ai_guard_window_micro=null,
+      monthly_allowance_micro=${was.monthly_allowance_micro} where owner_id=${literal(a.uid)};`);
+    await wipe();
+  }
+}
 
 function bulkSql(owner, newest, direction) {
   const ids = "select md5('outfitgen-bulk-'||n)::uuid id from generate_series(1,520) n";
@@ -336,11 +538,8 @@ export async function outfitgenProbes(snapshot, sql, mark = () => {}) {
     equal((await rpc(a, 'outfitgen_status')).pending, 2, 'only valid outfits count for the badge');
 
     note('rate-limit');
-    await sql(`delete from public.suggested_outfits where owner_id=${literal(a.uid)} and state='suggested';
-      insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
-        select ${literal(a.uid)},gen_random_uuid(),to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp(),1,1,'estimated','outfitgen' from generate_series(1,4);`);
-    equal((await claim(randomUUID(), [await sig([fresh[2], bottom, shoes])], { targets: [fresh[2]] })).code, 'RATE_LIMIT');
-    await sql(`delete from private.ai_usage where purpose='outfitgen' and reserved_micro=1 and owner_id=${literal(a.uid)};`);
+    await sql(`delete from public.suggested_outfits where owner_id=${literal(a.uid)} and state='suggested';`);
+    await rateLimitProbes(h, { client, keep: [R1, R3, R4, R5], signature: await sig([fresh[2], bottom, shoes]) });
 
     note('undo-capacity');
     // Undo puts a suggestion back among the pending ones, so it respects the same cap of 40: with 41 pending rows, one Remove leaves

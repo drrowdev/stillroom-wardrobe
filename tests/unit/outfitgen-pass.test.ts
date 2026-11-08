@@ -19,9 +19,9 @@ const after = (over: Partial<PassMemory> = {}): PassMemory => ({ start: 10, unas
 const stopOf = (mem: PassMemory | null, s: OutfitGenStatus | null, l: PassLocal = local()) => passNext(mem, s, l).stop;
 
 describe('a pass over the unchecked garments: how many calls it may make', () => {
-  it('is bounded by the wardrobe (one garment needs at most eight calls) and by the server cap of 40; none unchecked means one call', () => {
-    expect([0, 1, 2, 5, 6, 100].map(passCeiling)).toEqual([1, 8, 16, 40, 40, 40]);
-    expect(PASS_LIMITS.maxCalls).toBe(40);
+  it('is bounded by the wardrobe (one garment needs at most eight calls) and by the server cap of 200 a day; none unchecked means one call', () => {
+    expect([0, 1, 2, 5, 24, 25, 26, 100].map(passCeiling)).toEqual([1, 8, 16, 40, 192, 200, 200, 200]);
+    expect(PASS_LIMITS.maxCalls).toBe(200);
   });
 });
 
