@@ -7,7 +7,11 @@
 //     controls row, consent or activation changed.
 //   outfitgenProbes: plan, one live batch per owner, frozen signatures, finish (idempotent, conflict-safe, record-or-skip per row),
 //     the pending cap across a batch, dedupe against judged, saved, trashed and disliked sets, Keep, Remove and Undo, unmetered failure,
-//     cooldown, expiry, stale handling, call limits per mode (OUTFITGEN3-B2), deletion cascade and owner isolation.
+//     cooldown, expiry, stale handling, call limits per mode (OUTFITGEN3-B2), deletion cascade and owner isolation. These run at the
+//     predecessor inventory, so their pending cap is still 40.
+//   outfitgenLimitsCheckpoint / outfitgenLimitsCompare / outfitgenLimitProbes: the claim limits migration (OUTFITGEN3-B2).
+//   outfitgenCapCheckpoint / outfitgenCapCompare / outfitgenCapProbes: the cap of 100 pending suggestions (OUTFITGEN-PENDING100):
+//     four bodies differ by exactly their cap line, then the plan, claim, recording and Undo are probed at 99, 100 and 101.
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
@@ -768,9 +772,9 @@ const LIMITS_STATE = {
   assessed: rowsDigest('private.outfit_assessed_items'),
   manifests: rowsDigest('private.ai_execution_manifests'),
 };
-async function limitsState(one) {
+async function limitsState(one, parts = LIMITS_STATE) {
   const state = {};
-  for (const [part, text] of Object.entries(LIMITS_STATE)) {
+  for (const [part, text] of Object.entries(parts)) {
     note(`state-${part}`);
     state[part] = await one(`${text};`);
   }
@@ -850,5 +854,250 @@ export async function outfitgenLimitProbes(snapshot, sql, mark = () => {}) {
     throw error;
   } finally {
     await h.restore(before, []);
+  }
+}
+
+// OUTFITGEN-PENDING100: the cap of pending suggestions is 100. The four replaced functions, each with the single line that changes
+// (trimmed), the migration that held its latest body before, and its identity.
+const CAP_MIGRATION = '20261109090000_outfitgen_pending_100.sql';
+const CAP_CHANGES = [
+  { name: 'public.outfitgen_claim', sig: CLAIM, before: '20261108100000_outfitgen_call_limits.sql',
+    from: "if (select count(*) from public.suggested_outfits where owner_id=p.owner_id and state='suggested')>=40 then",
+    to: "if (select count(*) from public.suggested_outfits where owner_id=p.owner_id and state='suggested')>=100 then" },
+  { name: 'public.outfitgen_undo_remove', sig: 'public.outfitgen_undo_remove(uuid)', before: '20261107090000_outfitgen_undo_capacity.sql',
+    from: "if (select count(*) from public.suggested_outfits where owner_id=v_owner and state='suggested')>=40 then",
+    to: "if (select count(*) from public.suggested_outfits where owner_id=v_owner and state='suggested')>=100 then" },
+  { name: 'public.outfitgen_plan', sig: 'public.outfitgen_plan(uuid)', before: '20261106090000_outfit_generation.sql',
+    from: "'pendingRoom',greatest(0,40-(select count(*) from public.suggested_outfits where owner_id=p_owner_id and state='suggested')));",
+    to: "'pendingRoom',greatest(0,100-(select count(*) from public.suggested_outfits where owner_id=p_owner_id and state='suggested')));" },
+  { name: 'private.outfitgen_record', sig: 'private.outfitgen_record(uuid,uuid,jsonb,uuid[],private.ai_execution_manifests)', before: '20261106090000_outfit_generation.sql',
+    from: "select 40-count(*) into v_room from public.suggested_outfits where owner_id=p_owner and state='suggested';",
+    to: "select 100-count(*) into v_room from public.suggested_outfits where owner_id=p_owner and state='suggested';" },
+];
+const bodyLinesOf = async (file, name) => {
+  const sqlText = await readFile(new URL(file, MIGRATIONS_DIR), 'utf8');
+  const start = sqlText.indexOf(`function ${name}(`);
+  const open = sqlText.indexOf('$$', start);
+  return lines(sqlText.slice(open + 2, sqlText.indexOf('$$', open + 2)));
+};
+const CAPPED = CAP_CHANGES.map((change) => `'${change.sig}'::regprocedure`).join(',');
+const PROC_PROPS = (where) => `select jsonb_agg(jsonb_build_object('signature',p.oid::regprocedure::text,'oid',p.oid::bigint,'owner',pg_get_userbyid(p.proowner),
+    'acl',p.proacl::text,'secdef',p.prosecdef,'config',p.proconfig,'volatility',p.provolatile,'strict',p.proisstrict,'parallel',p.proparallel,
+    'leakproof',p.proleakproof,'kind',p.prokind,'returns',p.prorettype::regtype::text,'args',pg_get_function_identity_arguments(p.oid),
+    'language',l.lanname,'cost',p.procost,'rows',p.prorows) order by p.oid::regprocedure::text)::text
+    from pg_proc p join pg_language l on l.oid=p.prolang where ${where}`;
+// The same document as the claim limits comparison, with the four replaced functions excluded from the function digest and listed by
+// identity instead.
+const CAP_STATE = Object.freeze({
+  replaced: PROC_PROPS(`p.oid in (${CAPPED})`),
+  functions: `select jsonb_build_object('count',count(*),'md5',md5(string_agg(p.oid::regprocedure::text||'|'||pg_get_functiondef(p.oid)||'|'||coalesce(p.proacl::text,''),E'\\n'
+    order by p.oid::regprocedure::text)))::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname in ('public','private') and p.prokind='f' and p.oid not in (${CAPPED})`,
+  ...Object.fromEntries(Object.entries(LIMITS_STATE).filter(([part]) => part !== 'claim' && part !== 'functions')),
+});
+
+// Before the cap migration (the predecessor inventory, the 45 migrations through 20261108100000): one owner is configured and consented,
+// one genuine claim is held and everything the migration must not change is captured. The held request must survive and settle.
+export async function outfitgenCapCheckpoint(snapshot, sql, mark = () => {}) {
+  note = (label) => { last = label; mark(label); };
+  const h = helpers(snapshot, sql);
+  const { a, one, scalar, claim } = h;
+  const before = await h.configure();
+  try {
+    note('configure');
+    await sql(`update private.ai_controls set outfitgen_activated=true,outfitgen_consent_revision=2,outfitgen_consented_at=clock_timestamp()
+      where owner_id=${literal(a.uid)};`);
+    note('claim');
+    const id = randomUUID();
+    const held = await claim(id, ['c'.repeat(64)]);
+    equal([held.code, held.claimed], ['OK', true]);
+    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(id)};`), 'held');
+    const state = await limitsState(one, CAP_STATE);
+    const bodies = {};
+    for (const change of CAP_CHANGES) {
+      note(`body-${change.name.split('.')[1]}`);
+      bodies[change.name] = lines(await scalar(`select prosrc from pg_proc where oid='${change.sig}'::regprocedure;`));
+    }
+    return { before, id, state, bodies };
+  } catch (error) {
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
+    await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(a.uid)};`);
+    await h.restore(before, []);
+    throw error;
+  }
+}
+
+// After the cap migration alone: only the four bodies differ, each by exactly its cap line and each equal to the migration; the held
+// request survives and settles; the configuration is restored.
+export async function outfitgenCapCompare(checkpoint, snapshot, sql, mark = () => {}) {
+  note = (label) => { last = label; mark(label); };
+  const h = helpers(snapshot, sql);
+  const { one, scalar, finish } = h;
+  try {
+    const state = await limitsState(one, CAP_STATE);
+    note('state-compare');
+    for (const part of Object.keys(CAP_STATE)) {
+      if (!isDeepStrictEqual(state[part], checkpoint.state[part])) { note(`state-differs-${part}`); requireEvidence(false); }
+    }
+    for (const change of CAP_CHANGES) {
+      const short = change.name.split('.')[1];
+      note(`body-${short}`);
+      const after = lines(await scalar(`select prosrc from pg_proc where oid='${change.sig}'::regprocedure;`));
+      const was = checkpoint.bodies[change.name];
+      note(`body-${short}-installed-before`);
+      ok(isDeepStrictEqual(was, await bodyLinesOf(change.before, change.name)));
+      note(`body-${short}-equals-migration`);
+      ok(isDeepStrictEqual(after, await bodyLinesOf(CAP_MIGRATION, change.name)));
+      note(`body-${short}-only-cap-line`);
+      ok(isDeepStrictEqual(replaceLines(was, [change.from], [change.to]), after));
+      ok(isDeepStrictEqual(replaceLines(after, [change.to], [change.from]), was));
+    }
+    note('held');
+    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(checkpoint.id)};`), 'held');
+    const done = await finish(checkpoint.id, 'OK', USAGE, [], null);
+    equal(done.code, 'OK');
+    equal(await scalar(`select charge_state||':'||accounted_micro from private.ai_usage where request_id=${literal(checkpoint.id)};`), `estimated:${30000 * 220 / 100 + 2000 * 1320 / 100}`);
+  } catch (error) {
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
+    throw error;
+  } finally {
+    await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(h.a.uid)} and charge_state='held';`);
+    await h.restore(checkpoint.before, []);
+  }
+}
+
+// OUTFITGEN-PENDING100 after the migration: the cap of 100 in the plan, the claim, the recording of a settled request and Undo.
+export async function outfitgenCapProbes(snapshot, sql, mark = () => {}) {
+  note = (label) => { last = label; mark(label); };
+  const h = helpers(snapshot, sql);
+  const { a, one, scalar, rpc, sig, plan, claim, finish, result } = h;
+  const before = await h.configure();
+  const made = [];
+  try {
+    note('setup');
+    await sql(`update private.ai_controls set outfitgen_activated=true,outfitgen_consent_revision=2,outfitgen_consented_at=clock_timestamp()
+      where owner_id=${literal(a.uid)};`);
+    // Seven garments give 119 distinct sets of two to six garments: the pending rows. Three more tops, each with the same bottom and
+    // shoes, are the batch that settles (never among the pending rows).
+    const base = [];
+    for (const category of ['top', 'bottom', 'footwear', 'layer', 'top', 'top', 'layer']) base.push(await h.garment(category));
+    const tops = [await h.garment('top'), await h.garment('top'), await h.garment('top')];
+    made.push(...base, ...tops);
+    const ids = [...base].sort();
+    const combos = [];
+    for (let mask = 1; mask < 1 << ids.length; mask++) {
+      const set = ids.filter((_, index) => mask & (1 << index));
+      if (set.length >= 2 && set.length <= 6) combos.push(set);
+    }
+    ok(combos.length >= 102);
+    const pending = async () => Number(await scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)} and state='suggested';`));
+    const setPending = async (count) => {
+      note(`pending-${count}`);
+      await sql(`delete from public.suggested_outfits where owner_id=${literal(a.uid)};
+        delete from public.suggestion_feedback where owner_id=${literal(a.uid)} and item_ids && ${uuids(made)};`);
+      if (count > 0) await sql(`insert into public.suggested_outfits(owner_id,item_ids,state,title,reason,occasion,score,fingerprint,manifest_id,prompt_version,request_id)
+        select ${literal(a.uid)},x.ids,'suggested','capfill','r','smart',9,repeat('d',64),${literal(MANIFEST)},1,gen_random_uuid()
+        from (values ${combos.slice(0, count).map((set) => `(${uuids(set)})`).join(',')}) x(ids);`);
+      equal(await pending(), count);
+    };
+    const addRow = (index) => sql(`insert into public.suggested_outfits(owner_id,item_ids,state,title,reason,occasion,score,fingerprint,manifest_id,prompt_version,request_id)
+      values (${literal(a.uid)},${uuids(combos[index])},'suggested','capfill','r','smart',9,repeat('d',64),${literal(MANIFEST)},1,gen_random_uuid());`);
+    const batch = tops.map((top) => [top, base[1], base[2]]);
+    const signatures = await Promise.all(batch.map((set) => sig(set)));
+    const verdicts = batch.map((set, index) => result(set, 'suggested', 10 - index));
+    const recordedOf = (signature) => scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)} and signature=${literal(signature)};`);
+    const settle = (id) => finish(id, 'OK', USAGE, verdicts, tops);
+    const pendingId = () => scalar(`select id from public.suggested_outfits where owner_id=${literal(a.uid)} and title='capfill' and state='suggested' order by id limit 1;`);
+
+    note('plan');
+    await setPending(0);
+    equal((await plan()).pendingRoom, 100);
+    await setPending(37);
+    equal((await plan()).pendingRoom, 63);
+    await setPending(100);
+    equal((await plan()).pendingRoom, 0);
+    await addRow(100);
+    equal((await plan()).pendingRoom, 0);
+
+    note('claim-99');
+    await setPending(99);
+    const first = randomUUID();
+    const admitted = await claim(first, signatures, { targets: tops });
+    equal([admitted.code, admitted.claimed], ['OK', true]);
+    // Only one of the three good verdicts fits: the best-scored. The others are neither recorded nor lost for a later call.
+    const room1 = await settle(first);
+    equal(room1.code, 'OK');
+    equal(room1.recorded.suggested, 1);
+    equal(await pending(), 100);
+    equal([await recordedOf(signatures[0]), await recordedOf(signatures[1]), await recordedOf(signatures[2])], ['1', '0', '0']);
+
+    note('claim-100');
+    const refused = randomUUID();
+    const full = await claim(refused, signatures, { targets: tops });
+    equal([full.code, full.claimed], ['PENDING_FULL', false]);
+    equal(await scalar(`select count(*) from private.ai_usage where request_id=${literal(refused)};`), '0');
+    equal(await pending(), 100);
+
+    note('record-raced');
+    // A claim admitted at 99 whose room is taken before it settles records nothing.
+    await setPending(99);
+    const raced = randomUUID();
+    equal((await claim(raced, signatures, { targets: tops })).code, 'OK');
+    await addRow(99);
+    const none = await settle(raced);
+    equal(none.code, 'OK');
+    equal(none.recorded.suggested, 0);
+    equal(await pending(), 100);
+    equal(await recordedOf(signatures[0]), '0');
+
+    note('record-room');
+    await setPending(98);
+    const two = randomUUID();
+    equal((await claim(two, signatures, { targets: tops })).code, 'OK');
+    equal((await settle(two)).recorded.suggested, 2);
+    equal(await pending(), 100);
+    equal([await recordedOf(signatures[0]), await recordedOf(signatures[1]), await recordedOf(signatures[2])], ['1', '1', '0']);
+    await setPending(0);
+    const roomy = randomUUID();
+    equal((await claim(roomy, signatures, { targets: tops })).code, 'OK');
+    equal((await settle(roomy)).recorded.suggested, 3);
+    equal(await pending(), 3);
+
+    note('free-room');
+    await setPending(100);
+    equal((await claim(randomUUID(), signatures, { targets: tops })).code, 'PENDING_FULL');
+    equal((await rpc(a, 'outfitgen_remove', { p_id: await pendingId() })).code, 'OK');
+    equal(await pending(), 99);
+    const again = randomUUID();
+    equal((await claim(again, signatures, { targets: tops })).code, 'OK');
+    await sql(`delete from private.ai_usage where request_id=${literal(again)};`);
+
+    note('undo');
+    await setPending(100);
+    const r1 = await pendingId();
+    equal((await rpc(a, 'outfitgen_remove', { p_id: r1 })).code, 'OK');
+    equal(await pending(), 99);
+    equal((await rpc(a, 'outfitgen_undo_remove', { p_id: r1 })).code, 'OK');
+    equal([await pending(), await scalar(`select state from public.suggested_outfits where id=${literal(r1)};`)], [100, 'suggested']);
+    // Rows beyond the cap (what a race between two Undos can leave): claims and Undo are refused, Remove still works, and nothing changes.
+    await addRow(100);
+    equal(await pending(), 101);
+    equal((await claim(randomUUID(), signatures, { targets: tops })).code, 'PENDING_FULL');
+    const r2 = await pendingId();
+    equal((await rpc(a, 'outfitgen_remove', { p_id: r2 })).code, 'OK');
+    equal(await pending(), 100);
+    equal((await rpc(a, 'outfitgen_undo_remove', { p_id: r2 })).code, 'PENDING_FULL');
+    equal([await pending(), await scalar(`select state from public.suggested_outfits where id=${literal(r2)};`)], [100, 'removed']);
+    const r3 = await pendingId();
+    equal((await rpc(a, 'outfitgen_remove', { p_id: r3 })).code, 'OK');
+    equal((await rpc(a, 'outfitgen_undo_remove', { p_id: r3 })).code, 'OK');
+    equal((await rpc(a, 'outfitgen_undo_remove', { p_id: r2 })).code, 'PENDING_FULL');
+    equal(await pending(), 100);
+    equal((await one(`select public.outfitgen_plan(${literal(a.uid)});`)).pendingRoom, 0);
+  } catch (error) {
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
+    throw error;
+  } finally {
+    await h.restore(before, made);
   }
 }

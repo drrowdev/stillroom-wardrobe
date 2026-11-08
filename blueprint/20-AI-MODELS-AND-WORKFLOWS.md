@@ -368,7 +368,7 @@ makes no call to `outfit-generate`.
   or refusal ends it and starts a 15-minute local cooldown (the server keeps its own); nothing is retried; offline, hidden or failed
   automatic runs say nothing. "Find new outfits" is one manual call per tap. The client sends only `{requestId, mode auto|manual,
   language}`.
-- **Retention (disclosed).** Suggestion rows of every state stay stored with their garment list (kept and removed ones also with their reason) so a removed set never returns; nothing expires on time. They are deleted when one of their garments is permanently deleted, or with the account. Undo is refused (PENDING_FULL) when 40 suggestions are already pending.
+- **Retention (disclosed).** Suggestion rows of every state stay stored with their garment list (kept and removed ones also with their reason) so a removed set never returns; nothing expires on time. They are deleted when one of their garments is permanently deleted, or with the account. Undo is refused (PENDING_FULL) when 100 suggestions are already pending (the cap was 40 until OUTFITGEN-PENDING100, 8 November 2026).
 - **Consent.** A Settings card like the Stylist's (switch, consent sheet, Turn off whenever consent is on, status and limit lines).
   The notice keys are in `OUTFITGEN_NOTICE_KEYS` and pinned with their sha256 in `tests/unit/outfitgen-notice.test.ts`; provider,
   region, training and retention sentences are the wording already approved for the same Terra deployment (Stylist and photo

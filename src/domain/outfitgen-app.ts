@@ -49,7 +49,7 @@ export function parseOutfitGenStatus(value: unknown): OutfitGenStatus | null {
     || !(c.consentedAt === null || typeof c.consentedAt === 'string') || (c.consentedAt === null) !== (c.noticeRevision === null)) return null;
   const budget = parseOptionalAiBudget(value.budget);
   if (!budget.ok) return null;
-  // A count above the server's cap of 40 is read as it is, never refused: an over-cap number must not hide Settings or Turn off.
+  // A count above the server's cap of 100 is read as it is, never refused: an over-cap number must not hide Settings or Turn off.
   if (!count(value.pending, 1_000_000) || !count(value.unassessed, 1_000_000) || !count(value.autoUnassessed, 1_000_000)
     || !count(value.autoCallsLeft, 3) || typeof value.live !== 'boolean'
     || !(value.cooldownUntilMs === null || count(value.cooldownUntilMs, 2 ** 53 - 1))) return null;

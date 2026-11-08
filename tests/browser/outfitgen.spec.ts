@@ -31,7 +31,7 @@ const sets = (clothes: Clothes) => [
   { itemIds: [clothes.shirt.id, clothes.trousers.id, clothes.boots.id], title: 'Crisp navy', reason: 'Quiet colours that stay calm together.', occasion: 'smart', score: 9 },
   { itemIds: [clothes.dress.id, clothes.boots.id], title: 'Green day', reason: 'One piece and dark boots.', occasion: 'everyday', score: 8 },
 ];
-type StartOptions = { language?: Language; missing?: boolean; setup?: Partial<OutfitGenSetup>; consent?: boolean; hash?: string; suggestions?: boolean; autoUnassessed?: number };
+type StartOptions = { language?: Language; missing?: boolean; setup?: Partial<OutfitGenSetup>; consent?: boolean; hash?: string; suggestions?: boolean; autoUnassessed?: number; many?: number };
 /** `setup` left out means an account the feature is not set up for; `missing` is a backend without it; `{}` is configured and active. */
 async function start(page: Page, options: StartOptions = {}) {
   const language = options.language ?? 'en';
@@ -42,6 +42,12 @@ async function start(page: Page, options: StartOptions = {}) {
   if (options.setup) control.setup[owners.a] = { configured: true, activated: true, ...options.setup };
   if (options.consent) control.consent[owners.a] = OUTFITGEN_NOTICE_REVISION;
   if (options.suggestions) for (const entry of sets(clothes)) control.suggestions.push({ id: crypto.randomUUID(), owner: owners.a, state: 'suggested', ...entry });
+  // Full-size rows (a 40-character title, a 160-character reason) so that a long list is also a long reply.
+  for (let index = 0; index < (options.many ?? 0); index++) {
+    const reason = 'Quiet colours that stay calm together. '.repeat(5).slice(0, 160).trim();
+    control.suggestions.push({ id: crypto.randomUUID(), owner: owners.a, state: 'suggested', itemIds: sets(clothes)[index % 2]!.itemIds,
+      title: `${String(index).padStart(3, '0')} ${'Navy day '.repeat(5)}`.slice(0, 40).trim(), reason, occasion: 'smart', score: 8 });
+  }
   control.autoUnassessed = options.autoUnassessed ?? 0;
   control.unassessed = control.autoUnassessed;
   await page.clock.install();
@@ -544,4 +550,57 @@ test.describe('OUTFITGEN3 one press works through the unchecked garments', () =>
       await expect(button(page)).toHaveText(stopLabel(language));
     });
   }
+});
+
+// OUTFITGEN-PENDING100: the waiting list holds 100 suggestions.
+test.describe('OUTFITGEN-PENDING100 the waiting list of 100', () => {
+  test('lists 100 suggestions from a reply far above 32 KB, and fits 320 px at 200% text', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true, many: 100 });
+    const reply = JSON.stringify(api.outfitgenControl.suggestions.map((entry) => ({ id: entry.id, itemIds: entry.itemIds, title: entry.title, reason: entry.reason,
+      occasion: entry.occasion, score: entry.score, createdAt: '2026-11-06T10:00:00Z' })));
+    expect(reply.length).toBeGreaterThan(32_768);
+    await expect(section(page).getByRole('heading', { level: 2 })).toHaveText(text('outfitgen.titleCount', 'en', { count: 100 }));
+    await expect(cards(page)).toHaveCount(100);
+    await page.setViewportSize({ width: 320, height: 900 });
+    for (const zoomed of [false, true]) {
+      if (zoomed) await page.addStyleTag({ content: zoom });
+      await noOverflow(page, 320);
+      await cards(page).nth(99).scrollIntoViewIfNeeded();
+      await axe(page);
+    }
+  });
+
+  test('a press with 100 waiting suggestions sends nothing and says the list is full', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true, many: 100 });
+    api.outfitgenControl.unassessed = 6;
+    await expect(cards(page)).toHaveCount(100);
+    await find(page).click();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.full'));
+    await expectNothingLater(page, api.outfitgenControl, 0, 0);
+  });
+
+  test('a press with 99 waiting suggestions still checks, and the list then holds 100', async ({ page }) => {
+    const { api, clothes } = await start(page, { setup: {}, consent: true, many: 99 });
+    api.outfitgenControl.unassessed = 2;
+    api.outfitgenControl.replies.push({ ...ok(1, 2, false), add: [sets(clothes)[0]!], unassessed: 0 });
+    await expect(cards(page)).toHaveCount(99);
+    await find(page).click();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.passAll'));
+    await expect(cards(page)).toHaveCount(100);
+    expect(api.outfitgenControl.runs).toHaveLength(1);
+  });
+
+  test('Undo at 100 says the list is full, and works again once there is room', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true, many: 100 });
+    await expect(cards(page)).toHaveCount(100);
+    const title = api.outfitgenControl.suggestions[0]!.title as string;
+    await cards(page).first().getByRole('button', { name: text('outfitgen.removeLabel', 'en', { title }), exact: true }).click();
+    await expect(cards(page)).toHaveCount(99);
+    api.outfitgenControl.undoCodes.push('PENDING_FULL');
+    await section(page).getByRole('button', { name: text('common.undo'), exact: true }).click();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.full'));
+    await expect(cards(page)).toHaveCount(99);
+    await section(page).getByRole('button', { name: text('common.undo'), exact: true }).click();
+    await expect(cards(page)).toHaveCount(100);
+  });
 });

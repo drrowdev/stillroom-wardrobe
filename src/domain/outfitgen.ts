@@ -19,7 +19,7 @@ export const OUTFITGEN_LIMITS = Object.freeze({
   bodyBytes: 512, items: 500, garments: 8, candidates: 24, perAnchor: 8, imageBytes: 3_145_728, singleImageBytes: 512_000,
   inputTokens: 48_000, plannedInputTokens: 40_000, textTokens: 8_000, imageTokens: 3_300, outputTokens: 8_192,
   responseBytes: 262_144, contentBytes: 32_768, requestMs: 75_000, handlerMs: 120_000, downloadMs: 20_000, dispatchMs: 60_000,
-  title: 40, reason: 160, scoreBar: 8, pending: 40, declinedCache: 5_000, setSize: 6,
+  title: 40, reason: 160, scoreBar: 8, pending: 100, declinedCache: 5_000, setSize: 6,
 });
 /** The quality bar is a trial threshold, not quality evidence: the owner trial decides whether it is right. */
 export const OUTFITGEN_SCORE_BAR = OUTFITGEN_LIMITS.scoreBar;

@@ -149,7 +149,7 @@ export function createOutfitGenHandler(config: OutfitGenConfig, registrar: Outfi
       if (!object(consent) || consent.enabled !== true || consent.noticeRevision !== policy.noticeRevision) return error('CONSENT_REQUIRED');
       if (policy.noticeRevision !== OUTFITGEN_NOTICE_REVISION || policy.manifestId !== OUTFITGEN_MANIFEST || policy.modelId !== OUTFITGEN_MODEL
         || !microText(policy.maxRequestMicro) || BigInt(policy.maxRequestMicro as string) < BigInt(OUTFITGEN_RESERVATION_MICRO)
-        || !azureConfigured(config.azure) || !count(preflight.pending, 100) || !count(preflight.autoCallsLeft, 3)
+        || !azureConfigured(config.azure) || !count(preflight.pending) || !count(preflight.autoCallsLeft, 3)
         || !count(preflight.autoUnassessed, 1_000_000) || typeof preflight.live !== 'boolean' || !count(preflight.serverTimeMs, 2 ** 53)
         || !(preflight.cooldownUntilMs === undefined || preflight.cooldownUntilMs === null || count(preflight.cooldownUntilMs, 2 ** 53))) return error('UNCONFIGURED');
       // W1: without a way to keep the claimed work alive, nothing is claimed.

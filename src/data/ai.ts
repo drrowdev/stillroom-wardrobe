@@ -85,6 +85,8 @@ export class AiClient {
         throw new AiError('UNAVAILABLE');
       }
       const reader = response.body.getReader();
+      // The suggestion list can hold 100 rows of up to about 1 KB; every other reply is small.
+      const limit = path === '/rest/v1/rpc/outfitgen_list' ? 262_144 : 32_768;
       let failed = false, cleanupFailed = false, text = '', bytes = 0;
       let failure: unknown, cleanupFailure: unknown, value: unknown;
       const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -93,7 +95,7 @@ export class AiClient {
           const part = await wait(reader.read());
           if (part.done) break;
           bytes += part.value.byteLength;
-          if (bytes > 32768) throw new AiError('UNAVAILABLE');
+          if (bytes > limit) throw new AiError('UNAVAILABLE');
           text += decoder.decode(part.value, { stream: true });
         }
         value = JSON.parse(text + decoder.decode());

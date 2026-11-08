@@ -42,7 +42,7 @@ describe('outfit claim call limits (OUTFITGEN3-B2; source proofs, the SQL itself
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
     const definers: string[] = [];
     for (const name of names) if ((await read(name)).includes('function public.outfitgen_claim(')) definers.push(name);
-    expect(definers).toEqual([ORIGINAL, FORWARD]);
+    expect(definers).toEqual([ORIGINAL, FORWARD, '20261109090000_outfitgen_pending_100.sql']);
     const sql = await read(FORWARD);
     const code = sql.split('\n').filter((line) => !line.startsWith('--')).join('\n');
     expect(code.trimStart().startsWith('begin;')).toBe(true);

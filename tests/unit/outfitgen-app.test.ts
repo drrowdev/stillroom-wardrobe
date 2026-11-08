@@ -37,9 +37,9 @@ describe('suggested outfits: closed replies', () => {
     expect(parseOutfitGenStatus({ code: 'INACTIVE' })).toBeNull();
     expect(parseOutfitGenStatus({ ...raw(), extra: 1 })).toBeNull();
     // A count above the server's cap is read as it is, so it can never hide Settings or Turn off.
-    expect(parseOutfitGenStatus(raw({ pending: 41 }))).toMatchObject({ code: 'OK', pending: 41 });
-    expect(outfitGenView({ kind: 'ready', status: status({ pending: 41 }) }, true, false)).toMatchObject({ kind: 'on', turnOff: true, card: true });
-    expect(autoBlock(status({ pending: 41 }), local())).toBe('full');
+    expect(parseOutfitGenStatus(raw({ pending: 101 }))).toMatchObject({ code: 'OK', pending: 101 });
+    expect(outfitGenView({ kind: 'ready', status: status({ pending: 101 }) }, true, false)).toMatchObject({ kind: 'on', turnOff: true, card: true });
+    expect(autoBlock(status({ pending: 101 }), local())).toBe('full');
     expect(parseOutfitGenStatus(raw({ autoCallsLeft: 4 }))).toBeNull();
     expect(parseOutfitGenStatus(raw({ live: 'no' }))).toBeNull();
     expect(parseOutfitGenStatus(raw({ cooldownUntilMs: -1 }))).toBeNull();
@@ -104,7 +104,9 @@ describe('suggested outfits: when an automatic run may start', () => {
     expect(autoBlock(status({}, 'INACTIVE', true), local())).toBe('unavailable');
     expect(autoBlock(status({ autoUnassessed: 0 }), local())).toBe('nothing-new');
     expect(autoBlock(status({ live: true }), local())).toBe('live');
-    expect(autoBlock(status({ pending: 40 }), local())).toBe('full');
+    expect(autoBlock(status({ pending: 100 }), local())).toBe('full');
+    expect(autoBlock(status({ pending: 99 }), local())).toBeNull();
+    expect(autoBlock(status({ pending: 40 }), local())).toBeNull();
     expect(autoBlock(status({ autoCallsLeft: 0 }), local())).toBe('calls');
     expect(autoBlock(status({ budget: { ...BUDGET, usedMicro: '17900000', remainingMicro: '40000' } }), local())).toBe('limit');
   });
@@ -598,7 +600,7 @@ describe('suggested outfits: one press works through the garments', () => {
       ['control: nothing changed', 'outfitgen.passAll', () => null, () => undefined],
       ['the reserve is no longer there (the monthly allowance still permits the request)', 'outfitgen.passReserve', () => left(5, { budget: near }), () => undefined],
       ['a call went live elsewhere', 'outfitgen.busy', () => left(5, { live: true }), () => undefined],
-      ['the list became full', 'outfitgen.full', () => left(5, { pending: 40 }), () => undefined],
+      ['the list became full', 'outfitgen.full', () => left(5, { pending: 100 }), () => undefined],
       ['the spending guard paused', 'aiGuard.paused', () => null, (h) => { h.store.guardPaused = true; }],
     ];
     for (const [name, line, newer, other] of cases) {
@@ -770,7 +772,7 @@ describe('suggested outfits: one press works through the garments', () => {
     expect(offline.fake.generate).toHaveBeenCalledTimes(1);
 
     page();
-    const full = primed([left(6), left(5, { pending: 40 })]);
+    const full = primed([left(6), left(5, { pending: 100 })]);
     full.fake.generate.mockResolvedValueOnce(more());
     await runPass(full.store, 'en');
     expect(full.fake.generate).toHaveBeenCalledTimes(1);
