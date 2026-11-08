@@ -825,4 +825,28 @@ describe('suggested outfits: one press works through the garments', () => {
     expect(h.fake.generate.mock.calls.length).toBeLessThanOrEqual(16);
     expect(h.store.passActive).toBe(false);
   });
+  // OUTFITGEN3-B2: the server admits 200 manual calls a day, and so does one pass. A garment needs about two calls, so a large wardrobe
+  // runs well past the earlier ceiling of 40 calls.
+  it('checks a large wardrobe in one press: 120 calls, far past the earlier ceiling of 40', async () => {
+    const h = primed([left(60)]);
+    let calls = 0;
+    h.fake.outfitGenStatus.mockImplementation(async () => ({ kind: 'ready' as const, status: left(Math.max(0, 60 - Math.floor(calls / 2))) }));
+    h.fake.generate.mockImplementation(async () => { calls++; return calls >= 120 ? last(1) : more(1, 5); });
+    await runPass(h.store, 'en');
+    expect(calls).toBe(120);
+    expect(h.fake.generate).toHaveBeenCalledTimes(120);
+    expect(new Set(h.fake.generate.mock.calls.map((call) => (call[0] as { requestId: string }).requestId)).size).toBe(120);
+    expect(keys(h)[0]).toBe('outfitgen.passAll');
+    expect(h.store.passActive).toBe(false);
+  });
+  it('stops at the 200-call ceiling when the count keeps falling too slowly to finish', async () => {
+    const h = primed([left(150)]);
+    let calls = 0;
+    h.fake.outfitGenStatus.mockImplementation(async () => ({ kind: 'ready' as const, status: left(150 - Math.floor(calls / 2)) }));
+    h.fake.generate.mockImplementation(async () => { calls++; return more(0, 5); });
+    await runPass(h.store, 'en');
+    expect(calls).toBe(200);
+    expect(keys(h).at(-1)).toBe('outfitgen.passSafety');
+    expect(h.store.passActive).toBe(false);
+  });
 });

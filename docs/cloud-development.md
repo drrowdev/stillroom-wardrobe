@@ -2323,7 +2323,7 @@ Edge change, no manifest or prompt change, no new cap. Rollout is a Pages deploy
 - **Rules (`src/domain/outfitgen-pass.ts`, pure; `runPass` in the store).** Status is read before every call. Stops: Stop, leaving the
   Suggested outfits screen, the page going away, consent off or unsupported (fail closed), offline, the monthly allowance, the **reserve**
   (best-effort headroom, not an escrow: calls after the first leave 15 % of the allowance unreserved, counted at the outfit policy's
-  `maxRequestMicro`), a call already live, 40 pending, nothing left, and the **ceiling** `min(40, 8 x unchecked)` (one garment has at most eight
+  `maxRequestMicro`), a call already live, 40 pending, nothing left, and the **ceiling** `min(200, 8 x unchecked)` (since OUTFITGEN3-B2; it was `min(40, ...)`; one garment has at most eight
   candidate sets; one when nothing is unchecked). **Progress is only a fresh fall of the unchecked count**; eight successful calls in a row
   without one end the pass at its safety limit ("Stopped at this pass's safety limit"), whatever the replies judged. **Any failed or lost call
   ends the pass at once** (no repeat, no new request id); the list and status are read again, and nothing continues while the server may still
@@ -2337,18 +2337,17 @@ Edge change, no manifest or prompt change, no new cap. Rollout is a Pages deploy
   and changes no counters). The Find/Stop button is only marked `aria-disabled` (never natively disabled), so it keeps focus when a pass ends. A hidden tab, `pagehide` or leaving the screen ends the pass for good; coming back or restoring the page
   never restarts it. A request already sent settles on the server whatever happens to the page. Stop lets that paid call finish and sends
   nothing more; sign-out ends the pass at once.
-- **Why the pass does not finish a large wardrobe in one press (measured on synthetic wardrobes, not on real data).** A call judges at most 24
+- **How many calls a large wardrobe needs, and what limited a press (measured on synthetic wardrobes, not on real data).** A call judges at most 24
   sets from at most 8 garments, and a garment counts as checked only when all of its (up to 8, deliberately varied) sets are judged. With
   the real `buildBatch` that took about 11 calls for 15 garments, ~40 for 30, 99 for 60 and 182 for 100 (about 1.8 calls per garment; with
-  4 sets per garment about half). The server also refuses more than 4 outfit calls in 10 minutes, 6 in an hour and 40 in a day
-  (`outfitgen_claim`, RATE_LIMIT). So one press makes at most 4 calls today and says how far it got. Raising the caps (migration) or needing
-  fewer calls per garment (Edge/candidate change, manifest and quality decisions) are separate owner decisions, not part of this packet.
-  (Since 8 November 2026 the manual caps are raised and the pass ceiling is `min(200, 8 x unchecked)`: see OUTFITGEN3-B2 below.)
-- **Cost.** Reservation USD 0.37 per call (48,000 input x 4.40 + 8,192 output x 19.80 per million, the long-context rate). Metered at the
-  short-context rate (2.20 input, 13.20 output per million) and the planned maximum, a call is about USD 0.21; the ledger will show less,
-  and no typical figure is claimed before the owner trial. A press today, at most 4 calls: reserve USD 1.49, metered about USD 0.85. The
-  most one pass can make without the server caps, 40 calls: reserve USD 14.94, metered about USD 8.55. No daily cap; the allowance, the
-  reserve, the 40-pending cap and AI-GUARD1 bound it.
+  4 sets per garment about half). This packet shipped against server limits of 4 outfit calls in 10 minutes, 6 an hour and 40 a day, so a
+  press made at most 4 calls. **Superseded by OUTFITGEN3-B2 (8 November 2026):** manual calls are now limited to 40 in 10 minutes, 120 an hour
+  and 200 a rolling day, the pass ceiling is `min(200, 8 x unchecked)`, and the cost figures below are replaced by the table in that section.
+  Needing fewer calls per garment (Edge/candidate change, manifest and quality decisions) remains a separate owner decision.
+- **Cost (as of this packet; superseded by the OUTFITGEN3-B2 table).** Reservation USD 0.37 per call (48,000 input x 4.40 + 8,192 output x 19.80
+  per million, the long-context rate). Metered at the short-context rate (2.20 input, 13.20 output per million) and the planned maximum, a
+  call is about USD 0.21; the ledger will show less, and no typical figure is claimed before the owner trial. The allowance, the reserve, the
+  40-pending cap and AI-GUARD1 bound a pass.
 - **Pictures (OUTFITGEN2).** No new lock and no new coupling in the client. Outfit calls and picture steps use different purposes and rows,
   but the server's claims take the same per-owner locks, so a picture step in flight can make an outfit claim answer BUSY (which ends the
   pass with the busy line) and the reverse. The picture queue keeps its own 15 % gate and single flight and reacts to the growing list;
@@ -2371,15 +2370,21 @@ Edge change, no manifest or prompt change, no new cap. Rollout is a Pages deploy
 
 Owner decision of 8 November 2026, after learning that the server allowed 4 outfit checks in 10 minutes, 6 an hour and 40 a day: "Also raise
 the call limits so a full pass can run in one go." Personal two-person app: cost limits are loosened, integrity bounds stay. One migration
-(`20261108100000_outfitgen_call_limits.sql`) and one client constant; no Edge, manifest, prompt, copy or type change.
+(`20261108100000_outfitgen_call_limits.sql`) and one client constant; no Edge, manifest, prompt, copy or type change. Plan amendments A1-A7 of
+the coordinator's approval are applied.
 
 - **Limits.** Per owner and per mode: **manual 40 in 10 minutes, 120 an hour, 200 in a rolling day**; automatic unchanged at 4, 6 and 40,
   plus its 3-per-6-hours rule and the 15-minute failure cooldown. Counted from `private.ai_usage` rows of purpose `outfitgen` joined to
   `outfitgen_requests.mode`, so failed, expired and unmetered claims count (they are rows); a row without a request row (fixtures only) counts
   as manual. Manual history no longer consumes automatic calls and the reverse (before, every outfit call counted toward 4 / 6 / 40). Nothing is derived
-  from the monthly allowance, which is enforced separately and atomically in the same claim. Reasons for the numbers: 120 an hour equals the
-  AI-GUARD1 pause (USD 25 in 60 minutes) at the maximum metered cost (25 / 0.2137 = about 117 calls), so a higher count would be pre-empted by
-  the guard; 200 a day covers about 100 garments (about 182 calls measured at ~1.8 calls per garment).
+  from the monthly allowance, which is enforced separately and atomically in the same claim.
+- **Why 40 / 120 / 200 (a justification, not a measurement).** They are fixed integrity bounds, independent of the allowance. Sequential requests
+  impose no spacing of their own, and the Azure quota is not an application pacer (it answers 429 whenever it likes), so these counters are not
+  expected to bind a normal pass. 200 a day covers about 100 garments at the ~1.8 calls per garment measured on synthetic wardrobes. The AI-GUARD1
+  threshold (USD 25 in 60 minutes) is crossed near call 117 if every call meters at the planned maximum (25 / 0.2137); calls that meter less
+  need not trigger it at 120 an hour, so the guard does not replace this limit. Whether the real shared quota and call latency let a pass
+  run on without interruption is an **owner rollout trial gate**, not a result of this packet; completing a whole wardrobe in one press is
+  conditional, not guaranteed.
 - **Migration.** `create or replace public.outfitgen_claim` with its latest (and only) body from `20261106090000` and only the rate block replaced.
   The one `IF` uses `(p_auto and (...)) or (not p_auto and (...))` and not a `CASE`: plpgsql ends an `IF` condition at its first `THEN`, so a `CASE` in
   it is a syntax error (found by the scratch run below). `create or replace` keeps owner, security definer, `search_path`, `lock_timeout` and the
@@ -2387,41 +2392,69 @@ the call limits so a full pass can run in one go." Personal two-person app: cost
 - **Proofs.** Unit (`tests/unit/outfitgen-limits-schema.test.ts`): the new body with the new block swapped back for the old block is
   string-identical to the original body, so the signature, locks, expiry, replay, consent and configuration checks, input validation, pending
   cap, allowance, the three inserts and the response shape are unchanged by construction; only that migration defines the claim after the original;
-  no grant, revoke, cron or other statement. CI (`tests/integration/outfitgen.sessions.mjs`, probe `rateLimitProbes`, replacing the hard-coded four-row
-  probe): the installed `prosrc` equals the migration, with the same security definer, configuration, owner and ACL as `outfitgen_finish` and
-  execute for `service_role` only; manual limit - 1 / limit / passed window at 10 minutes, one hour and one day; failed, expired and unavailable rows count; automatic limits (its
-  3-per-6-hours rule answers COOLDOWN before limit - 1 can be reached, asserted as such); manual and automatic independent; owners independent;
-  a real sequence of 40 claims settled as failures, the 41st refused, admitted again after the window; replay TERMINAL, a live batch BUSY with no
-  rows written, concurrent claims (one OK, one BUSY, one row), the allowance exact (used + reservation admitted, one micro less refused with
-  nothing written, another purpose's spend counted), the guard's `AG001` with no row written and settlement and expiry still working while paused,
-  withdrawn consent, and an ordinary session denied. Scratch run (not in the repository, as for AI-GUARD1): PGlite with stubs for the helper
-  functions ran the real migration body through the boundaries, independence, sequence, replay and allowance cases; the same harness against the old body
-  refuses at 4. That is a smoke test of the block, not the CI rehearsal (no Docker here; the integration stage is CI-only).
-- **Client.** `PASS_LIMITS.maxCalls` 40 to **200** (the new manual day cap), so the pass ceiling is `min(200, 8 x unchecked)` and a wardrobe of
-  up to about 100 garments can finish in one press. The stall stop, the reserve gate, the visibility rule and every other stop are unchanged. The RATE_LIMIT line
-  ("Too many checks just now. Try again later.") names no number and still reads right.
+  no grant, revoke, cron or other statement. Store-level (`tests/unit/outfitgen-app.test.ts`): a pass completes 120 calls for a 60-garment
+  wardrobe, far past the earlier ceiling of 40, and stops at exactly the 200-call ceiling when the count falls too slowly; the ceiling table is in `outfitgen-pass.test.ts`.
+  **Preservation rehearsal (CI-only, `scripts/preservation-rehearsal.mjs`):** an explicit predecessor to target pair. The predecessor stage
+  `claim-prior` is the 44 source migrations through `20261107100100`; the old four-row rate probe runs there unchanged (`outfitgenProbes`).
+  Then `outfitgenLimitsCheckpoint` configures and consents one owner, makes one genuine held claim and captures: the claim's identity (oid), owner, ACL,
+  security definer and configuration, volatility and other properties; the full definition and ACL of every other function in `public` and
+  `private`; triggers; and the rows of controls (consent), usage, evidence, requests, suggestions, assessed items and manifests. Only the new migration is applied
+  (45, stage `target`), and `outfitgenLimitsCompare` requires all of it equal, the claim body to differ by exactly the old and new rate lines and to equal the
+  migration, the held request to survive the installation and then settle (`OK`), and the configuration to be restored. Only then does `outfitgenLimitProbes`
+  (`rateLimitProbes`) run, at the target inventory: the installed `prosrc` equals the migration and its properties and grants those of
+  `outfitgen_finish` (execute for `service_role` only); manual limit - 1 / limit / passed window at 10 minutes, one hour and one day; failed, expired and
+  unavailable rows count; recent outfit usage without a request row counts as manual; other purposes' usage does not count; automatic limits (its
+  3-per-6-hours rule answers COOLDOWN before limit - 1 can be reached, asserted as such) and the manual failure to automatic cooldown; manual and automatic
+  independent; owners independent; one request id under two owners with different modes never cross-classifies; a real sequence of 40 claims
+  settled as failures, the 41st refused, admitted again after the window; with one slot left, concurrent claims admit one and refuse one, and the next claim
+  after settlement is RATE_LIMIT; replay TERMINAL, a live batch BUSY with no rows written, the allowance exact (used + reservation admitted, one micro
+  less refused with nothing written, another purpose's spend counted), the guard's `AG001` with no row written and settlement and expiry still
+  working while paused, withdrawn consent, and an ordinary session denied. Scratch run (not in the repository, as for AI-GUARD1): PGlite with stubs for the
+  helper functions ran the real migration body through the boundaries, independence, sequence, replay and allowance cases; the same harness against the old body
+  refuses at 4. That is a smoke test of the block, not the CI rehearsal (no Docker here; the integration stages are CI-only).
+- **Client.** `PASS_LIMITS.maxCalls` 40 to **200** (the new manual day cap, mandatory: at 40 a wardrobe above roughly 22 garments could not finish in one
+  press), so the pass ceiling is `min(200, 8 x unchecked)`. The stall stop, the reserve gate, the visibility rule, `full` (PENDING_FULL) and every other
+  stop are unchanged: **a pass runs until it completes or until a pending-cap, budget, guard or other stop applies, and continues on the next press after the owner has
+  decided suggestions** (or the budget or pause has cleared). The RATE_LIMIT line ("Too many checks just now. Try again later.") names no number and
+  still reads right.
 - **Provider quota.** The outfit call is made once with no retry. Any non-200 reply from Azure, 429 included, is classified FAILED; with no usage
-  counters in it `outfitgen_finish` keeps the whole reservation (USD 0.373, feature stays on) and the Edge function answers 502 FAILED. The pass
-  treats a failed call as terminal (it ends at once, reads status again and never repeats). Manual calls have no failure cooldown, so a later press
-  may try again (automatic runs wait 15 minutes). Nothing is added. The Terra deployment (100K TPM, shared by analysis, Stylist and outfit calls)
-  carries about 1 to 2 worst-case calls a minute (about 56K tokens), so a sequential pass stays far below 40 in 10 minutes and the Azure quota, not
-  these counters, is the practical throttle. Higher counts do not guarantee an uninterrupted pass; a pass can end on a quota error or on the 40-pending cap.
-- **Worst-case spend** at the reservation of 373,402 micro-USD per call, and metered at ShortCo 2.20 / 13.20 per million for the planned
-  maximum (about USD 0.2137 a call): 40 calls USD 14.94 reserved, USD 8.55 metered; 120 calls USD 44.81, USD 25.64; 200 calls USD 74.68, USD 42.74.
-  Reserved is the worst case in which every call fails without metering. Bounds: the **monthly allowance** (USD 50) is checked atomically in the
-  claim (used + reservation above the allowance answers ALLOWANCE), so no month passes it whatever the counts; **AI-GUARD1** latches when the trailing
-  60-minute spend across purposes passes USD 25 (swept each minute; it works once the hosted job is active) and then refuses every admission until
-  Resume; the **15 % reserve** is only the client's best-effort gate (pass and pictures), not a server rule. Honest runaway bound: one live held
-  batch blocks the next claim, so only fast claim-and-settle loops matter, and the 10-minute cap now limits what a loop can add between sweeps to USD 14.94
-  (it was USD 1.49 at 4), so the contrived worst case before a pause is about USD 25 + 15 within the hour, then nothing until Resume, never past the allowance.
-  A full pass that meters near the planned maximum can itself trip the guard at about 117 calls an hour; the owner then presses Resume.
-- **Residuals and open decisions.** (1) The cap of 40 pending suggestions ends a pass (PENDING_FULL, "list full") long before the call limits
-  until suggestions are decided; changing it is a separate owner decision. (2) A 200-call pass takes long at 1 to 2 calls a minute and ends when the tab is
-  hidden, by design. (3) Per-call reserve and cost per garment are unchanged.
-- **Rollout (coordinator and owner gates; the source packet does none of it).** 1. The coordinator installs this one migration with the guarded
-  hosted install. The Edge bundle needs **no redeploy** (`outfit-generate` only maps the closed codes; RATE_LIMIT stays 429). 2. A Pages deploy brings the 200-call
-  ceiling (either order is safe: an old page on the new database ends a pass at its own ceiling of 40; a new page on the old database ends it with the
-  RATE_LIMIT line at the old caps). Backout: run the original `outfitgen_claim` body from `20261106090000` as `create or replace function` in a transaction.
-- **Validation.** Node 24.19.0: lint, typecheck, `check:translations`, the exact-body proof, the registries (`preservation`, `ci-storage-guard`,
-  `ai-purge-schedule`), `outfitgen-pass` and the outfit unit suites, the outfit browser specs on three projects. CI-only and not run locally: the preservation
-  rehearsal and its outfit probes, the isolation audit.
+  counters in it `outfitgen_finish` keeps the whole reservation (the configured `outfitgen_max_request_micro`, USD 0.373 at 373,402; the feature stays on) and the Edge
+  function answers 502 FAILED. The pass treats a failed call as terminal (it ends at once, reads status again and never repeats). Manual calls have no
+  failure cooldown, so a later press may try again (automatic runs wait 15 minutes). Nothing is added. The Terra deployment (100K TPM, shared by
+  analysis, Stylist and outfit calls) carries roughly 1 to 2 worst-case calls a minute (about 56K tokens), so the Azure quota, not these counters, is the practical
+  throttle. Higher counts do not guarantee an uninterrupted pass; a pass can end on a quota error or on the 40-pending cap.
+- **Worst-case spend (read the assumptions).** Per call the claim reserves the **configured** `outfitgen_max_request_micro`: the figures below use
+  373,402 micro-USD (the policy minimum); at the bootstrap value of 400,000 a 40-call burst is USD 16.00, not 14.94. Metered at ShortCo 2.20 / 13.20 per
+  million for the planned maximum a call is about USD 0.2137. 40 calls: USD 14.94 reserved, USD 8.55 metered; 120 calls: USD 44.81, USD 25.64; 200 calls:
+  USD 74.68, USD 42.74. "Reserved" is the case in which every call fails without metering.
+  - The **monthly allowance** (USD 50) is checked atomically inside the claim (used + reservation above the allowance answers ALLOWANCE). It is an
+    atomic **admission** accounting check for outfit calls, not an invoice ceiling: unreserved analysis and anomaly settlements can record more than
+    their reservation, and the ledger is the app's view, not Azure's invoice.
+  - **AI-GUARD1** latches when the trailing 60-minute spend **across all purposes** passes USD 25, swept once a minute, and then refuses every
+    admission until Resume. The sweep skips a controls row that a claim holds, so a latch is **not guaranteed within a minute**; and the guard counts every
+    purpose while the call counters here bound **manual outfit claims only**.
+  - The **15 % reserve** is only the client's best-effort gate (pass and pictures), not a server rule.
+  - Conditional bound: one live held batch blocks the next claim, so only fast claim-and-settle loops matter; with the 10-minute cap of 40 a loop can add at most one
+    burst of 40 calls (USD 14.94 at 373,402) between a spend of USD 25 and a successful next sweep: about **USD 39.94** in the hour (it was about USD 1.49
+    of burst at 4 calls), manual calls only, then nothing until Resume. Other purposes in the same hour, a skipped or dead sweep, or a larger configured
+    request raise that number; the monthly allowance is the only hard stop. A full pass that meters near the planned maximum can itself trip the guard at about 117 calls an
+    hour; the owner then presses Resume.
+- **Residuals and open decisions.** (1) The cap of 40 pending suggestions stays (PENDING_FULL, "list full"): it ends a pass long before the call limits
+  until suggestions are decided, and the next press continues; changing it is a separate owner decision. (2) A 200-call pass takes long at 1 to 2 calls a
+  minute and ends when the tab is hidden, by design. (3) Per-call reserve and cost per garment are unchanged.
+- **Rollout (coordinator and owner gates; the source packet does none of it).** Gate before the longer passes are exposed (the Pages deploy of the 200-call
+  ceiling): **the AI-GUARD1 cron job `stillroom-ai-guard` is active and `cron.job_run_details` shows successful runs**. Then: 1. The coordinator installs
+  this one migration with the guarded hosted install: (a) check the hosted predecessor, which is the ledger ending at `20261107100100` with no later
+  version, the original `outfitgen_claim` body from `20261106090000` and its security definer, `search_path`, `lock_timeout`, owner and `service_role`-only ACL;
+  (b) the inner SQL runs under the guarded generator with the outer `begin` and `commit` stripped (the file has no `$mig$` or `$w$` tag); (c) the ledger row is inserted in the
+  same transaction (atomic); (d) read back the new body (`prosrc` equal to the migration), the properties and ACL, and the ledger. 2. Pages. The Edge bundle needs
+  **no redeploy** (`outfit-generate` only maps the closed codes; RATE_LIMIT stays 429). Migration first, then Pages, is enforcement-safe: an old page on the new
+  database ends a pass at its own ceiling of 40 calls, and a page must never be deployed ahead of the migration (it would end with the RATE_LIMIT line at the old caps). 3. The
+  shared quota and real latency are the owner's trial gate (first long pass watched).
+  **Backout** restores only the old claim function, through a separately authorized, recorded compensating operation (`create or replace function` with the original body from
+  `20261106090000`, inside a transaction, with a readback). It never replays the original migration, never repairs or edits ledger history, and keeps AI-GUARD1 and the later
+  Undo capacity fix in place.
+- **Validation.** Node 24.19.0: lint, typecheck, `check:translations`, the exact-body proof, the registries and the stage tests (`preservation`,
+  `ci-storage-guard`, `ai-purge-schedule`), `outfitgen-pass` and the outfit unit suites, the outfit browser specs (`outfitgen.spec.ts`,
+  `outfitgen-pictures.spec.ts`; the config runs them on chromium and mobile). CI-only and not run locally: the preservation rehearsal with its predecessor/target stage
+  and probes, the isolation audit.
