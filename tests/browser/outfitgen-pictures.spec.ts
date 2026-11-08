@@ -791,4 +791,26 @@ test.describe('PICTURES-WAIT1 pictures wait, lines and progress', () => {
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await expect(statusLine(page)).toContainText(timed('outfitgen.pictureUnreadable'), { timeout: 30_000 });
   });
+
+  test('stays readable at 320 px and 200% text with pictures being made and a pass running at once', async ({ page }) => {
+    await page.clock.install({ time: Date.now() });
+    await page.setViewportSize({ width: 320, height: 740 });
+    const picture = gate();
+    const pass = gate();
+    const { api } = await start(page, { replies: [{ hold: picture.hold }] });
+    await expect(cards(page).first().locator('.suggested-wait')).toContainText(text('outfitgen.pictureStep', 'en', { step: 1, steps: 3 }), { timeout: 30_000 });
+    api.outfitgenControl.unassessed = 6;
+    api.outfitgenControl.replies.push({ status: 200, body: { code: 'OK', suggested: 0, judged: 4, remaining: true }, unassessed: 4, hold: pass.hold });
+    await section(page).locator('#suggested-find').click();
+    await expect(section(page).locator('.suggested-pass')).toBeVisible();
+    await expect(statusLine(page)).toContainText(text('outfitgen.pictureProgress', 'en', { done: 0, total: 2 }));
+    await page.addStyleTag({ content: zoom });
+    expect(await noOverflow(page)).toBe(true);
+    await axe(page);
+    // The pass adds one status region (its start and result); its progress is plain text, and the pictures keep their own polite line.
+    await expect(section(page).locator('[role="status"]')).toHaveCount(1);
+    expect(await section(page).locator('.suggested-pass').evaluate((node) => node.closest('[aria-live], [role="status"]') === null)).toBe(true);
+    pass.release();
+    picture.release();
+  });
 });
