@@ -545,7 +545,9 @@ export type OutfitGenSetup = { configured: boolean; activated: boolean; noticeRe
   maxRequestMicro: string; totalAllowanceMicro: string; totalMicro: string };
 export type MockSuggestion = { id: string; owner: string; itemIds: string[]; title: string; reason: string; occasion: string; score: number;
   state: 'suggested' | 'kept' | 'removed' | 'declined'; createdAt?: string };
-export type OutfitGenReply = { status: number; body: unknown; add?: Omit<MockSuggestion, 'owner' | 'state' | 'id'>[]; hold?: Promise<void> };
+export type OutfitGenReply = { status: number; body: unknown; add?: Omit<MockSuggestion, 'owner' | 'state' | 'id'>[]; hold?: Promise<void>;
+  /** The number of unchecked garments the server reports once this reply has been answered. */
+  unassessed?: number };
 const outfitGenDefaults: OutfitGenSetup = { configured: false, activated: false, noticeRevision: OUTFITGEN_NOTICE_REVISION, manifestId: OUTFITGEN_MANIFEST, modelId: OUTFITGEN_MODEL,
   maxRequestMicro: '373402', totalAllowanceMicro: '17940000', totalMicro: '0' };
 function outfitGenStatus(setup: OutfitGenSetup, consent: number | null, counts: { pending: number; unassessed: number; autoUnassessed: number;
@@ -1115,6 +1117,7 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
       const next = outfitgenControl.replies.shift() ?? { status: 200, body: { code: 'OK', suggested: 0, judged: 0, remaining: false } };
       if (next.hold) await next.hold;
       for (const entry of next.add ?? []) outfitgenControl.suggestions.push({ id: randomUUID(), owner, state: 'suggested', ...entry });
+      if (next.unassessed !== undefined) outfitgenControl.unassessed = next.unassessed;
       try { await json(next.body, next.status); } catch { /* The page may have gone away while the reply was held. */ }
       return;
     }

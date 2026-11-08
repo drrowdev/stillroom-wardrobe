@@ -3,7 +3,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { OUTFITGEN_NOTICE_REVISION } from '../../src/domain/outfitgen';
 import { pluralText, translate, type Language, type MessageKey } from '../../src/i18n/all';
 import { mockBackend, owners, signIn, type OutfitGenSetup } from './mock-backend';
-import { expectSignedIn } from './shell-support';
+import { expectNoIdentity, expectSignedIn, signOutThroughMenu } from './shell-support';
 
 type Api = Awaited<ReturnType<typeof mockBackend>>;
 type Row = Record<string, unknown>;
@@ -190,15 +190,15 @@ test.describe('OUTFITGEN1b suggested outfits', () => {
     await find(page).click();
     await expect(cards(page)).toHaveCount(1);
     await expect(section(page).getByRole('status')).toContainText(pluralText('en', 'outfitgen.found', 1));
-    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.more'));
     expect(api.outfitgenControl.runs).toHaveLength(1);
     const body = api.outfitgenControl.runs[0]!.body as Row;
     expect(Object.keys(body).sort()).toEqual(['language', 'mode', 'requestId']);
     expect(body).toMatchObject({ mode: 'manual', language: 'en' });
-    api.outfitgenControl.replies.push({ status: 502, body: { code: 'FAILED' } });
+    // A first failure is tried once more with a new request; a second one in a row ends the press.
+    api.outfitgenControl.replies.push({ status: 502, body: { code: 'FAILED' } }, { status: 502, body: { code: 'FAILED' } });
     await find(page).click();
     await expect(section(page).getByRole('status')).toHaveText(text('outfitgen.failed'));
-    expect(api.outfitgenControl.runs).toHaveLength(2);
+    expect(api.outfitgenControl.runs).toHaveLength(3);
     api.outfitgenControl.replies.push({ status: 503, body: { code: 'BUSY' } });
     await find(page).click();
     await expect(section(page).getByRole('status')).toHaveText(text('outfitgen.busy'));
@@ -260,6 +260,159 @@ test.describe('OUTFITGEN1b suggested outfits', () => {
       await expect(find(page, language)).toBeVisible();
       await expect(cards(page).first().getByRole('button', { name: text('outfitgen.keepLabel', language, { title: 'Crisp navy' }), exact: true })).toBeVisible();
       await expect(cards(page).first()).toContainText(text('occasion.smart', language));
+    });
+  }
+});
+
+/** A reply that waits until the test lets it go, so the state in between can be looked at. */
+function gate() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => { release = resolve; });
+  return { promise, release };
+}
+const ok = (suggested: number, judged: number, remaining: boolean) => ({ status: 200, body: { code: 'OK', suggested, judged, remaining } });
+const progressLine = (language: Language, done: number, total: number, found: number) => text('outfitgen.passProgress', language, {
+  checked: text('outfitgen.passChecked_other', language, { done, count: total }), found: pluralText(language, 'outfitgen.passFound', found) });
+const stopButton = (page: Page, language: Language = 'en') => section(page).getByRole('button', { name: text('outfitgen.passStop', language), exact: true });
+
+test.describe('OUTFITGEN3 one press works through the unchecked garments', () => {
+  test('calls one at a time with progress, shows what it found at once, and ends with one result', async ({ page }) => {
+    const { api, clothes } = await start(page, { setup: {}, consent: true });
+    const control = api.outfitgenControl;
+    control.unassessed = 6;
+    const held = gate();
+    control.replies.push(
+      { ...ok(1, 5, true), add: [sets(clothes)[0]!], unassessed: 4 },
+      { ...ok(0, 4, true), unassessed: 2, hold: held.promise },
+      { ...ok(1, 3, false), add: [sets(clothes)[1]!], unassessed: 0 });
+    await find(page).click();
+    await expect(section(page).locator('.suggested-progress')).toHaveText(progressLine('en', 2, 6, 1));
+    await expect(stopButton(page)).toBeEnabled();
+    await expect(find(page)).toHaveCount(0);
+    await expect(cards(page)).toHaveCount(1);
+    expect(control.runs).toHaveLength(2);
+    held.release();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.passAll'));
+    await expect(section(page).getByRole('status')).toContainText(pluralText('en', 'outfitgen.found', 2));
+    await expect(cards(page)).toHaveCount(2);
+    await expect(section(page).locator('.suggested-progress')).toHaveCount(0);
+    await expect(find(page)).toBeEnabled();
+    expect(control.runs).toHaveLength(3);
+    const ids = control.runs.map((run) => (run.body as Row).requestId);
+    expect(new Set(ids).size).toBe(3);
+    expect(control.runs.every((run) => (run.body as Row).mode === 'manual')).toBe(true);
+  });
+
+  test('Stop lets the check in flight finish and sends nothing more', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true });
+    const control = api.outfitgenControl;
+    control.unassessed = 6;
+    const held = gate();
+    control.replies.push({ ...ok(0, 4, true), unassessed: 5, hold: held.promise }, { ...ok(0, 4, true), unassessed: 3 });
+    await find(page).click();
+    await stopButton(page).click();
+    await expect(section(page).getByRole('button', { name: text('outfitgen.passStopping'), exact: true })).toBeDisabled();
+    held.release();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.passContinue'));
+    await expect(find(page)).toBeEnabled();
+    await page.waitForTimeout(300);
+    expect(control.runs).toHaveLength(1);
+    // The next press picks up where this one stopped.
+    await find(page).click();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.passAll'));
+    expect(control.runs).toHaveLength(3);
+  });
+
+  const stops: [string, { status: number; body: unknown }, MessageKey][] = [
+    ['the list is full', { status: 409, body: { code: 'PENDING_FULL' } }, 'outfitgen.full'],
+    ['another check is running', { status: 503, body: { code: 'BUSY' } }, 'outfitgen.busy'],
+    ['the server limits the calls', { status: 429, body: { code: 'RATE_LIMIT' } }, 'outfitgen.rateLimit'],
+    ['the monthly budget is used', { status: 429, body: { code: 'ALLOWANCE' } }, 'outfitgenC.limit'],
+    ['the spending guard has paused', { status: 403, body: { code: 'PAUSED' } }, 'aiGuard.paused'],
+  ];
+  for (const [name, reply, key] of stops) {
+    test(`stops with its own line, and no further call, when ${name}`, async ({ page }) => {
+      const { api } = await start(page, { setup: {}, consent: true });
+      api.outfitgenControl.unassessed = 6;
+      api.outfitgenControl.replies.push({ ...ok(0, 4, true), unassessed: 4 }, reply);
+      await find(page).click();
+      await expect(section(page).getByRole('status')).toContainText(text(key));
+      await expect(section(page).getByRole('status')).toContainText(text('outfitgen.passSummary_other', 'en', { done: 2, count: 6 }));
+      await expect(find(page)).toBeVisible();
+      await page.waitForTimeout(300);
+      expect(api.outfitgenControl.runs).toHaveLength(2);
+    });
+  }
+
+  test('stops on the second failure in a row and never repeats a request', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true });
+    api.outfitgenControl.unassessed = 6;
+    api.outfitgenControl.replies.push({ status: 502, body: { code: 'FAILED' } }, { status: 502, body: { code: 'FAILED' } });
+    await find(page).click();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.failed'));
+    await page.waitForTimeout(300);
+    const ids = api.outfitgenControl.runs.map((run) => (run.body as Row).requestId);
+    expect(ids).toHaveLength(2);
+    expect(new Set(ids).size).toBe(2);
+  });
+
+  test('stops before the next call when consent is turned off meanwhile', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true });
+    const control = api.outfitgenControl;
+    control.unassessed = 6;
+    const held = gate();
+    control.replies.push({ ...ok(0, 4, true), unassessed: 5, hold: held.promise });
+    await find(page).click();
+    await expect(stopButton(page)).toBeVisible();
+    control.consent[owners.a] = null;
+    held.release();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.off'));
+    await page.waitForTimeout(300);
+    expect(control.runs).toHaveLength(1);
+  });
+
+  test('signing out mid-run sends nothing more and leaves nothing behind for the next owner', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true });
+    const control = api.outfitgenControl;
+    control.unassessed = 6;
+    const held = gate();
+    control.replies.push({ ...ok(1, 4, true), unassessed: 5, hold: held.promise });
+    await find(page).click();
+    await expect(stopButton(page)).toBeVisible();
+    await signOutThroughMenu(page);
+    await expectNoIdentity(page);
+    held.release();
+    await page.waitForTimeout(300);
+    expect(control.runs).toHaveLength(1);
+    await signIn(page);
+    await expectSignedIn(page);
+    await expect(section(page).locator('.suggested-progress')).toHaveCount(0);
+    await expect(find(page)).toBeEnabled();
+    expect(control.runs).toHaveLength(1);
+  });
+
+  test('fits 320 px at 200% text and passes axe while it runs', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true, suggestions: true });
+    api.outfitgenControl.unassessed = 6;
+    api.outfitgenControl.replies.push({ ...ok(0, 4, true), unassessed: 4, hold: gate().promise });
+    await page.setViewportSize({ width: 320, height: 900 });
+    await find(page).click();
+    await expect(section(page).locator('.suggested-progress')).toHaveText(progressLine('en', 0, 6, 0));
+    for (const zoomed of [false, true]) {
+      if (zoomed) await page.addStyleTag({ content: zoom });
+      await noOverflow(page, 320);
+      await axe(page);
+    }
+  });
+
+  for (const language of ['fi', 'sv'] as const) {
+    test(`shows progress and Stop in ${language}`, async ({ page }) => {
+      const { api } = await start(page, { language, setup: {}, consent: true });
+      api.outfitgenControl.unassessed = 6;
+      api.outfitgenControl.replies.push({ ...ok(0, 4, true), unassessed: 4, hold: gate().promise });
+      await find(page, language).click();
+      await expect(section(page).locator('.suggested-progress')).toHaveText(progressLine(language, 0, 6, 0));
+      await expect(stopButton(page, language)).toBeVisible();
     });
   }
 });

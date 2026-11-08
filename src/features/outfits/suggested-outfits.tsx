@@ -12,7 +12,7 @@ import '../../i18n/tryon';
 import type { PrivateImages } from '../../images/private-images';
 import { usePrivateImage } from '../../images/use-private-image';
 import {
-  keepSuggestion, outfitGenStoreFor, readList, removeSuggestion, runManual, statusOf, undoRemoval, viewOf, type OutfitGenStore,
+  keepSuggestion, outfitGenStoreFor, readList, removeSuggestion, runPass, statusOf, stopPass, undoRemoval, viewOf, type OutfitGenStore,
 } from '../outfitgen/outfitgen-store';
 import { pictureQueueFor, type PictureLine, type PictureQueue, type PictureState } from '../outfitgen/picture-queue';
 import { useOutfitGen, useOutfitGenStatus } from '../outfitgen/use-outfitgen';
@@ -87,22 +87,32 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
       if (queue && card && store.get().removed?.id === id) await queue.discard(card);
     }).finally(() => { release?.(); settle(); });
   };
-  const line = (key: MessageKey, count?: number) => key === 'outfitgen.found_other' && count !== undefined
-    ? pluralText(language, 'outfitgen.found', count) : t(key);
+  const pass = state.pass;
+  const plural = (base: 'outfitgen.found' | 'outfitgen.passFound' | 'outfitgen.passChecked' | 'outfitgen.passSummary', count: number, extra: Record<string, string | number> = {}) =>
+    t(`${base}_${new Intl.PluralRules(locales[language]).select(count) === 'one' ? 'one' : 'other'}` as MessageKey,
+      { count: new Intl.NumberFormat(locales[language]).format(count), ...extra });
+  const line = (key: MessageKey, count?: number, done?: number) => count === undefined ? t(key)
+    : key === 'outfitgen.passSummary_other' ? plural('outfitgen.passSummary', count, { done: new Intl.NumberFormat(locales[language]).format(done ?? 0) })
+      : plural('outfitgen.found', count);
   return <section className="suggested" aria-labelledby="suggested-title">
     <div className="suggested-head">
       <h2 id="suggested-title" ref={heading} tabIndex={-1}>{suggestions.length ? t('outfitgen.titleCount', { count: suggestions.length }) : t('outfitgen.title')}</h2>
-      {view.run && <button type="button" className="button button-secondary" disabled={!online || running || limits?.reached === true}
-        onClick={() => { void runManual(store, language); }}>{t(state.running === 'manual' ? 'outfitgen.finding' : 'outfitgen.find')}</button>}
+      {view.run && <button type="button" className="button button-secondary"
+        disabled={pass ? pass.stopping : !online || running || limits?.reached === true}
+        onClick={() => { if (pass) stopPass(store); else void runPass(store, language); }}>
+        {t(pass ? (pass.stopping ? 'outfitgen.passStopping' : 'outfitgen.passStop') : state.running === 'manual' ? 'outfitgen.finding' : 'outfitgen.find')}</button>}
     </div>
     <div role="status" className="suggested-notices">
-      {state.running === 'auto' && <p>{t('outfitgen.finding')}</p>}
+      {state.running !== null && <p>{t('outfitgen.finding')}</p>}
       {state.notices.map((notice) => notice.key === 'outfitgen.removed' && state.removed
         ? <p key={notice.at}>{t(notice.key)}{' '}<button type="button" className="text-button"
           disabled={state.deciding.has(state.removed.id) || pics?.deleting.has(state.removed.id) === true || !online}
           onClick={() => { void undoRemoval(store); }}>{t('common.undo')}</button></p>
-        : <p key={notice.at}>{line(notice.key, notice.count)}</p>)}
+        : <p key={notice.at}>{line(notice.key, notice.count, notice.done)}</p>)}
     </div>
+    {pass && pass.total > 0 && <p className="suggested-progress">{t('outfitgen.passProgress', {
+      checked: plural('outfitgen.passChecked', pass.total, { done: new Intl.NumberFormat(locales[language]).format(pass.done) }),
+      found: plural('outfitgen.passFound', pass.found) })}</p>}
     {(view.kind === 'off' || view.kind === 'renew') && <p><span>{t('outfitgen.off')}</span>{' '}<a className="text-button" href="#/settings">{t('aiC.turnOn')}</a></p>}
     {on && limits?.reached && <p className="notice">{t('outfitgenC.limit')}</p>}
     {on && suggestions.length > 0 && <div aria-live="polite" className="suggested-picture-status">
