@@ -2332,7 +2332,9 @@ Edge change, no manifest or prompt change, no new cap. Rollout is a Pages deploy
   A press that meets an automatic run in flight says busy instead of doing nothing.
 - **The last check before each request.** The client authenticates before the request leaves, so everything is checked again at that moment
   (`beforeSend`): Stop, leaving the screen, the page going away, that this is still the same pass, consent (no change pending), the limit,
-  the network and the owner scope. A hidden tab, `pagehide` or leaving the screen ends the pass for good; coming back or restoring the page
+  the network and the owner scope, and, from the newest status the store holds (one a picture chain's spending may have caused meanwhile),
+  the reserve for calls after the first, a live call, a full list and a spending guard that paused (`passSendGate`; it keeps its stop reason
+  and changes no counters). The Find/Stop button is only marked `aria-disabled` (never natively disabled), so it keeps focus when a pass ends. A hidden tab, `pagehide` or leaving the screen ends the pass for good; coming back or restoring the page
   never restarts it. A request already sent settles on the server whatever happens to the page. Stop lets that paid call finish and sends
   nothing more; sign-out ends the pass at once.
 - **Why the pass does not finish a large wardrobe in one press (measured on synthetic wardrobes, not on real data).** A call judges at most 24

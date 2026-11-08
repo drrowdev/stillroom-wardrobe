@@ -465,6 +465,43 @@ test.describe('OUTFITGEN3 one press works through the unchecked garments', () =>
     await expectNothingLater(page, control, 1, 1);
   });
 
+  test('keeps focus on the one button when the pass ends because the budget is used up or the network is gone', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true });
+    const control = api.outfitgenControl;
+    control.unassessed = 6;
+    const held = gate();
+    control.replies.push({ ...ok(0, 4, true), unassessed: 5, hold: held.promise }, { ...ok(0, 4, true), unassessed: 3 });
+    await find(page).click();
+    await expect(button(page)).toHaveText(stopLabel());
+    control.setup[owners.a] = { ...control.setup[owners.a], totalMicro: '17900000' };
+    held.release();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgenC.limit'));
+    await expect(button(page)).toHaveText(text('outfitgen.find'));
+    await expect(button(page)).toHaveAttribute('aria-disabled', 'true');
+    await expect(button(page)).toBeFocused();
+    await expectNothingLater(page, control, 1, 1);
+    // Nothing happens when the marked button is pressed.
+    await button(page).dispatchEvent('click');
+    await expectNothingLater(page, control, 1, 1);
+  });
+
+  test('keeps focus on the one button when the network goes while the last call is in flight', async ({ page }) => {
+    const { api } = await start(page, { setup: {}, consent: true });
+    const control = api.outfitgenControl;
+    control.unassessed = 6;
+    const held = gate();
+    control.replies.push({ ...ok(0, 4, true), unassessed: 5, hold: held.promise }, { ...ok(0, 4, true), unassessed: 3 });
+    await find(page).click();
+    await expect(button(page)).toHaveText(stopLabel());
+    await page.evaluate(() => { Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => false }); dispatchEvent(new Event('offline')); });
+    held.release();
+    await expect(section(page).getByRole('status')).toContainText(text('outfitgen.passContinue'));
+    await expect(button(page)).toHaveText(text('outfitgen.find'));
+    await expect(button(page)).toHaveAttribute('aria-disabled', 'true');
+    await expect(button(page)).toBeFocused();
+    await expectNothingLater(page, control, 1, 1);
+  });
+
   test('pressing twice quickly makes one pass', async ({ page }) => {
     const { api } = await start(page, { setup: {}, consent: true });
     api.outfitgenControl.unassessed = 0;

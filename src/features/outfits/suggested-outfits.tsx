@@ -95,14 +95,15 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
       { count: new Intl.NumberFormat(locales[language]).format(count) });
   const line = (key: MessageKey, count?: number) => count === undefined ? t(key)
     : key === 'outfitgen.passStopped_other' ? plural('outfitgen.passStopped', count) : plural('outfitgen.found', count);
-  // One button for Find, Stop and the moments between: it is never disabled while it has focus, only marked so.
+  // One button for Find, Stop and the moments between. It is never natively disabled, so it keeps focus when a pass ends: it is only
+  // marked aria-disabled, and activation is ignored while it is waiting, offline or over the limit.
   const waiting = running && (pass === null || pass.stopping);
+  const blocked = waiting || (!running && (!online || limits?.reached === true));
   return <section className="suggested" aria-labelledby="suggested-title">
     <div className="suggested-head">
       <h2 id="suggested-title" ref={heading} tabIndex={-1}>{suggestions.length ? t('outfitgen.titleCount', { count: suggestions.length }) : t('outfitgen.title')}</h2>
-      {view.run && <button type="button" className="button button-secondary" id="suggested-find"
-        disabled={!running && (!online || limits?.reached === true)} aria-disabled={waiting || undefined}
-        onClick={() => { if (waiting) return; if (pass) stopPass(store); else if (!running) void runPass(store, language); }}>
+      {view.run && <button type="button" className="button button-secondary" id="suggested-find" aria-disabled={blocked || undefined}
+        onClick={() => { if (blocked) return; if (pass) stopPass(store); else if (!running) void runPass(store, language); }}>
         {t(pass ? (pass.stopping ? 'outfitgen.passStopping' : 'outfitgen.passStop') : state.running === 'manual' ? 'outfitgen.finding' : 'outfitgen.find')}</button>}
     </div>
     <div role="status" className="suggested-notices">

@@ -55,14 +55,24 @@ export function passNext(mem: PassMemory | null, status: OutfitGenStatus | null,
     if (!local.online) return 'offline';
     if (!local.visible) return 'hidden';
     if (outfitGenLimits(status).reached) return 'limit';
-    if (next.calls > 0 && reserveBlock(status.budget, status.policy?.maxRequestMicro ?? null, 1)) return 'reserve';
-    if (status.live) return 'live';
-    if (status.pending >= OUTFITGEN_LIMITS.pending) return 'full';
-    if (next.stalls >= PASS_LIMITS.stallStop) return 'stalled';
-    if (next.calls >= passCeiling(next.start)) return 'ceiling';
-    return null;
+    return passSendGate(status, next.calls === 0, false) ?? (next.stalls >= PASS_LIMITS.stallStop ? 'stalled'
+      : next.calls >= passCeiling(next.start) ? 'ceiling' : null);
   })();
   return { stop, mem: next };
+}
+
+/**
+ * The synchronous part of the last check right before a request leaves, from the latest status the store holds (a newer read, such
+ * as one a picture chain's spending caused, may have landed while the client authenticated): the reserve (for calls after the first),
+ * a call already live, a full list and, for calls after the first, a spending guard that paused meanwhile. It changes no counters.
+ */
+export function passSendGate(status: OutfitGenStatus | null, first: boolean, guardPaused: boolean): PassStop | null {
+  if (!status) return 'unavailable';
+  if (!first && guardPaused) return 'paused';
+  if (!first && reserveBlock(status.budget, status.policy?.maxRequestMicro ?? null, 1)) return 'reserve';
+  if (status.live) return 'live';
+  if (status.pending >= OUTFITGEN_LIMITS.pending) return 'full';
+  return null;
 }
 
 /** The call about to be sent counts at once; a call that was never sent (NOT_SENT) takes it back. */

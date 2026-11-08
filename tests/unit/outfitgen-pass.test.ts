@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION } from '../../src/domain/outfitgen';
 import { parseOutfitGenStatus, type GenerateReply, type OutfitGenStatus } from '../../src/domain/outfitgen-app';
 import {
-  PASS_LIMITS, passCeiling, passLines, passNext, passReply, passSending, type PassLocal, type PassMemory, type PassStop,
+  PASS_LIMITS, passCeiling, passLines, passNext, passReply, passSendGate, passSending, type PassLocal, type PassMemory, type PassStop,
 } from '../../src/domain/outfitgen-pass';
 
 const BUDGET = { monthlyAllowanceMicro: '50000000', usedMicro: '0', remainingMicro: '50000000', warning: false };
@@ -83,6 +83,17 @@ describe('a pass over the unchecked garments: whether the next call may be sent'
     expect(passNext(same.mem, status({ unassessed: 10 }), local())).toMatchObject({ stop: 'stalled', mem: { stalls: 8 } });
     // More unchecked than before (a garment was added) is not progress either.
     expect(passNext(after({ unassessed: 10, stalls: 7 }), status({ unassessed: 11 }), local()).stop).toBe('stalled');
+  });
+  it('the send gate re-checks reserve, live, pending and the guard from the newest status, and the first call keeps its own rules', () => {
+    const near = { monthlyAllowanceMicro: '50000000', usedMicro: '42500000', remainingMicro: '7500000', warning: false };
+    expect(passSendGate(status({ budget: near }), false, false)).toBe('reserve');
+    expect(passSendGate(status({ budget: near }), true, false)).toBeNull();
+    expect(passSendGate(status({ live: true }), true, false)).toBe('live');
+    expect(passSendGate(status({ pending: 40 }), false, false)).toBe('full');
+    expect(passSendGate(status(), false, true)).toBe('paused');
+    expect(passSendGate(status(), true, true)).toBeNull();
+    expect(passSendGate(status(), false, false)).toBeNull();
+    expect(passSendGate(null, true, false)).toBe('unavailable');
   });
   it('a garment that needs five calls is not cut short (neither by progress nor by the ceiling)', () => {
     let mem = passNext(null, status({ unassessed: 1 }), local()).mem!;

@@ -11,7 +11,7 @@ import {
   outfitGenView, outfitGenLimits, shownOutfitGenView, AUTO_SCOPE_CALLS, autoBlock,
   type GenerateReply, type OutfitGenRead, type OutfitGenStatus, type OutfitGenView, type Suggestion,
 } from '../../domain/outfitgen-app';
-import { passLines, passNext, passReply, passSending, type PassMemory, type PassStop } from '../../domain/outfitgen-pass';
+import { passLines, passNext, passReply, passSendGate, passSending, type PassMemory, type PassStop } from '../../domain/outfitgen-pass';
 import type { OutfitGenLanguage, OutfitGenMode } from '../../domain/outfitgen';
 import type { MessageKey } from '../../i18n';
 import '../../i18n/outfitgen';
@@ -328,10 +328,17 @@ export async function runPass(store: OutfitGenStore, language: OutfitGenLanguage
       if (step.stop !== null || mem === null) { stop = step.stop ?? 'failed'; break; }
       mem = passSending(mem);
       const controller = store.runController = new AbortController();
+      const first = mem.calls === 1;
+      const gated: { stop: PassStop | null } = { stop: null };
       let reply: GenerateReply;
       try {
-        reply = await store.api.generate({ requestId: crypto.randomUUID(), mode: 'manual', language }, controller.signal,
-          () => dispatchBlock(store, false, current));
+        reply = await store.api.generate({ requestId: crypto.randomUUID(), mode: 'manual', language }, controller.signal, () => {
+          const why = dispatchBlock(store, false, current);
+          if (why !== null) return why;
+          // A status that landed while the client authenticated counts too; this changes no counters.
+          gated.stop = passSendGate(statusOf(store.get()), first, store.guardPaused);
+          return gated.stop;
+        });
       } finally { store.runController = null; }
       if (store.disposed) return;
       store.guardPaused = reply.code === 'PAUSED' ? true : reply.code === 'OK' ? false : store.guardPaused;
@@ -341,6 +348,7 @@ export async function runPass(store: OutfitGenStore, language: OutfitGenLanguage
       // The suggestions found so far are shown at once, before the next call.
       if (reply.code === 'OK') await readList(store, 'fresh');
       if (store.disposed) return;
+      if (reply.code === 'NOT_SENT' && gated.stop !== null) { stop = gated.stop; break; }
       if (after.stop !== null) { stop = after.stop; break; }
     }
     // Whatever ended the pass, what the server now holds is read again; "all checked" is said only from that read.

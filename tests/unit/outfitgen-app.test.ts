@@ -592,7 +592,41 @@ describe('suggested outfits: one press works through the garments', () => {
       ['a consent change being written', (h) => { h.store.update({ writing: true }); }],
       ['the owner scope ending', (h) => h.abort.abort()],
     ];
-    it('sends the request when nothing changed (control)', async () => {
+    it('re-checks the reserve, a live call, a full list and a paused guard against the newest status right before the second request leaves', async () => {
+    const near = { ...BUDGET, usedMicro: '15000000', remainingMicro: '2940000' };
+    const cases: [string, string, () => OutfitGenStatus | null, (h: Hs) => void][] = [
+      ['control: nothing changed', 'outfitgen.passAll', () => null, () => undefined],
+      ['the reserve is no longer there (the monthly allowance still permits the request)', 'outfitgen.passReserve', () => left(5, { budget: near }), () => undefined],
+      ['a call went live elsewhere', 'outfitgen.busy', () => left(5, { live: true }), () => undefined],
+      ['the list became full', 'outfitgen.full', () => left(5, { pending: 40 }), () => undefined],
+      ['the spending guard paused', 'aiGuard.paused', () => null, (h) => { h.store.guardPaused = true; }],
+    ];
+    for (const [name, line, newer, other] of cases) {
+      doc();
+      const h = primed([left(6), left(5), left(0)]);
+      const hold = deferred<void>();
+      const posts: number[] = [];
+      let n = 0;
+      h.fake.generate.mockImplementation(async (_input, _signal, before) => {
+        n++;
+        if (n === 2) await hold.promise;
+        if (before?.()) return { code: 'NOT_SENT' };
+        posts.push(n);
+        return n === 1 ? more() : last();
+      });
+      const run = runPass(h.store, 'en');
+      while (n < 2) await tick();
+      const status = newer();
+      if (status) h.store.update({ read: { kind: 'ready', status } });
+      other(h);
+      hold.resolve();
+      await run;
+      for (let i = 0; i < 5; i++) await tick();
+      expect(posts, name).toEqual(name.startsWith('control') ? [1, 2] : [1]);
+      expect(keys(h), name).toContain(line);
+    }
+  });
+  it('sends the request when nothing changed (control)', async () => {
       doc();
       const h = primed([left(6)]);
       const gate = deferred<void>();
