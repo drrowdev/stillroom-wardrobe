@@ -2311,38 +2311,55 @@ daily cap (owner amendment); the monthly allowance and AI-GUARD1 bound the spend
 ## OUTFITGEN3 one press works through the unchecked garments - 8 November 2026
 
 Owner request of 7 November 2026 ("one press works through the whole wardrobe with progress"). Source packet, client only: no migration, no
-Edge change, no manifest or prompt change, no new cap. Rollout is a Pages deploy.
+Edge change, no manifest or prompt change, no new cap. Rollout is a Pages deploy. The plan's Sol critique amendments (B1, B2, S3-S6) are applied.
 
 - **What the owner sees.** Find new outfits becomes a pass: one call after another until every unchecked garment is checked or a stop reason
-  applies. The same button turns into Stop. A plain line shows "Checked 6 of 30 garments · 9 outfits found" (not announced per call); the one
-  status region announces the start and the result ("Checked all your clothes. Found 9 new outfits." or "Checked 12 of 30 garments." plus one
-  reason line). New suggestions appear after each call. The server remembers checked garments, so a stopped pass is continued by the next press.
-  When every garment is already checked, a press behaves as before: one call over the least-covered garments, usually "No new outfits this time".
-- **Rules (`src/domain/outfitgen-pass.ts`, pure).** Status is read before every call. Stops: user (Stop), consent off or unsupported (fail
-  closed), offline, hidden page, monthly allowance, **15 % reserve** (`reserveBlock`, for calls after the first), a call already live, 40 pending,
-  nothing left, ceiling `min(40, 2 x unchecked + 2)`, two calls in a row that neither judged a set nor checked a garment, two failures in a row.
-  Reply codes BUSY, RATE_LIMIT, COOLDOWN, PENDING_FULL, ALLOWANCE, PAUSED (AI-GUARD1, terminal until Resume) and CONSENT_REQUIRED end the pass
-  with their own line. Every call has its own request id and is never repeated. Stop lets the call in flight (already paid) finish, then sends
-  nothing. Sign-out or a new owner scope ends the pass at once; a closed page sends nothing more and the call in flight settles on the server.
-  The automatic runs and Today are unchanged.
+  applies. The same button (one element, so focus stays) becomes Stop and back. A plain line shows "6 garments left to check · 9 outfits found"
+  (outside every live region); the one status region announces the start and the result. The result says "Checked all eligible garments."
+  only after a fresh status read made after the last call shows none left; otherwise it says how many are left ("Stopped. 18 garments left to
+  check.") with one reason line, or that it could not confirm. New suggestions appear after each call. The server remembers checked garments,
+  so the next press continues. When every garment is already checked at the start, a press makes exactly one call (the earlier manual run
+  over the least-covered garments, usually "No new outfits this time") and ends.
+- **Rules (`src/domain/outfitgen-pass.ts`, pure; `runPass` in the store).** Status is read before every call. Stops: Stop, leaving the
+  Suggested outfits screen, the page going away, consent off or unsupported (fail closed), offline, the monthly allowance, the **reserve**
+  (best-effort headroom, not an escrow: calls after the first leave 15 % of the allowance unreserved, counted at the outfit policy's
+  `maxRequestMicro`), a call already live, 40 pending, nothing left, and the **ceiling** `min(40, 8 x unchecked)` (one garment has at most eight
+  candidate sets; one when nothing is unchecked). **Progress is only a fresh fall of the unchecked count**; eight successful calls in a row
+  without one end the pass at its safety limit ("Stopped at this pass's safety limit"), whatever the replies judged. **Any failed or lost call
+  ends the pass at once** (no repeat, no new request id); the list and status are read again, and nothing continues while the server may still
+  hold the call (a live call stops the next press with the busy line). BUSY, RATE_LIMIT, COOLDOWN, PENDING_FULL, ALLOWANCE, PAUSED and
+  CONSENT_REQUIRED end it with their own line. The server's PAUSED (AI-GUARD1) is the authority: the line links to Settings, where Resume is.
+  A press that meets an automatic run in flight says busy instead of doing nothing.
+- **The last check before each request.** The client authenticates before the request leaves, so everything is checked again at that moment
+  (`beforeSend`): Stop, leaving the screen, the page going away, that this is still the same pass, consent (no change pending), the limit,
+  the network and the owner scope. A hidden tab, `pagehide` or leaving the screen ends the pass for good; coming back or restoring the page
+  never restarts it. A request already sent settles on the server whatever happens to the page. Stop lets that paid call finish and sends
+  nothing more; sign-out ends the pass at once.
 - **Why the pass does not finish a large wardrobe in one press (measured on synthetic wardrobes, not on real data).** A call judges at most 24
   sets from at most 8 garments, and a garment counts as checked only when all of its (up to 8, deliberately varied) sets are judged. With
   the real `buildBatch` that took about 11 calls for 15 garments, ~40 for 30, 99 for 60 and 182 for 100 (about 1.8 calls per garment; with
   4 sets per garment about half). The server also refuses more than 4 outfit calls in 10 minutes, 6 in an hour and 40 in a day
   (`outfitgen_claim`, RATE_LIMIT). So one press makes at most 4 calls today and says how far it got. Raising the caps (migration) or needing
   fewer calls per garment (Edge/candidate change, manifest and quality decisions) are separate owner decisions, not part of this packet.
-- **Cost.** Reservation USD 0.373 per call (48,000 input x 4.40 + 8,192 output x 19.80 per million); the real figure is lower and is read from
-  the ledger after the owner's trial (an estimate of USD 0.10-0.25 is not a measurement). A press today: at most 4 calls, at most USD 1.49 reserved.
-  A full pass without the server caps would be about 1.8 calls per garment: 30 garments about USD 14.9 reserved, 100 garments about USD 68
-  (more than the USD 50 allowance; the 15 % reserve stops it first). No daily cap; the allowance, the reserve, the 40-pending cap and AI-GUARD1 bound it.
-- **Pictures (OUTFITGEN2).** No shared lock and no new coupling. Outfit calls and picture steps use different purposes and rows, so neither
-  blocks the other and nothing can deadlock. The picture queue reacts to the growing list and keeps its own 15 % gate and single flight; the
-  pass's own reserve check stops the pass before it uses the room pictures need. A long pass finds suggestions faster than pictures are
-  made, so cards wait in the queue for a while.
+- **Cost.** Reservation USD 0.37 per call (48,000 input x 4.40 + 8,192 output x 19.80 per million, the long-context rate). Metered at the
+  short-context rate (2.20 input, 13.20 output per million) and the planned maximum, a call is about USD 0.21; the ledger will show less,
+  and no typical figure is claimed before the owner trial. A press today, at most 4 calls: reserve USD 1.49, metered about USD 0.85. The
+  most one pass can make without the server caps, 40 calls: reserve USD 14.94, metered about USD 8.55. No daily cap; the allowance, the
+  reserve, the 40-pending cap and AI-GUARD1 bound it.
+- **Pictures (OUTFITGEN2).** No new lock and no new coupling in the client. Outfit calls and picture steps use different purposes and rows,
+  but the server's claims take the same per-owner locks, so a picture step in flight can make an outfit claim answer BUSY (which ends the
+  pass with the busy line) and the reverse. The picture queue keeps its own 15 % gate and single flight and reacts to the growing list;
+  the pass's own reserve check is best effort, so pictures can still pause themselves on the budget. A long pass finds suggestions faster than
+  pictures are made, so cards wait in the queue for a while.
 - **After the whole wardrobe is checked.** Unchanged: new or edited garments are checked on the next press and by the automatic run. Fresh
   ideas for already-checked garments would need an Edge change (the candidate lists are deterministic, so each garment's sets run out); that is
   an owner decision and is not done here.
-- **Validation.** Unit: `tests/unit/outfitgen-pass.test.ts` (ceiling, every stop reason and its order, the reserve, progress, a fuzz that
-  never exceeds the ceiling) and the pass cases in `tests/unit/outfitgen-app.test.ts` (calls in turn, Stop, sign-out, each stop reason, no
-  second pass). Browser: `tests/browser/outfitgen.spec.ts` (progress and result, Stop, each stop reason, consent turned off meanwhile,
-  sign-out mid-run, 320 px and 200 % text, Finnish and Swedish). Not run here: the full CI suites, real Azure, real time and cost per call.
+- **Validation.** Unit: `tests/unit/outfitgen-pass.test.ts` (ceiling, every stop reason and its order, the reserve and the policy's request
+  size, progress, a five-call single garment, a fuzz that never exceeds the ceiling, the closing lines) and the pass cases in
+  `tests/unit/outfitgen-app.test.ts` (calls in turn, the last check during a delayed authentication for Stop, leaving, hide, pagehide, consent,
+  budget, a consent write and sign-out, each with a control, hide and return, route departure, double press, an automatic run in flight, a
+  live call elsewhere, a lost reply, a failed final read, the zero-backlog call, the eight-call safety limit). Browser:
+  `tests/browser/outfitgen.spec.ts` (progress and result, focus on the one button, Stop, each stop reason with a held boundary, a minute of
+  page time and no later request, consent turned off, a live call elsewhere, sign-out, hidden and pagehide, route departure, double press,
+  320 px and 200 % text, Finnish and Swedish) and one case in `tests/browser/outfitgen-pictures.spec.ts` with pictures and the pass at once.
+  Not run here: the full CI suites, real Azure, real time and cost per call.

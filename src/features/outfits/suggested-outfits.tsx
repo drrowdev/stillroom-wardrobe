@@ -12,7 +12,7 @@ import '../../i18n/tryon';
 import type { PrivateImages } from '../../images/private-images';
 import { usePrivateImage } from '../../images/use-private-image';
 import {
-  keepSuggestion, outfitGenStoreFor, readList, removeSuggestion, runPass, statusOf, stopPass, undoRemoval, viewOf, type OutfitGenStore,
+  keepSuggestion, outfitGenStoreFor, pausePass, readList, removeSuggestion, runPass, statusOf, stopPass, undoRemoval, viewOf, type OutfitGenStore,
 } from '../outfitgen/outfitgen-store';
 import { pictureQueueFor, type PictureLine, type PictureQueue, type PictureState } from '../outfitgen/picture-queue';
 import { useOutfitGen, useOutfitGenStatus } from '../outfitgen/use-outfitgen';
@@ -56,6 +56,8 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
   // The queue also starts a few seconds after the app opens; here it only reads the saved pictures for the cards on screen.
   useEffect(() => { if (on && queue) { queue.start(); void queue.refreshPictures(); } }, [on, queue]);
   useEffect(() => { if (on && state.list.kind === 'unknown') void readList(store); }, [on, state.list.kind, store]);
+  // Leaving the screen pauses a running pass; coming back does not restart it.
+  useEffect(() => () => pausePass(store), [store]);
   const wanted = state.list.suggestions.flatMap((suggestion) => suggestion.itemIds).filter((id) => !components.has(id));
   const wantedKey = [...new Set(wanted)].sort().join(',');
   useEffect(() => {
@@ -88,18 +90,19 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
     }).finally(() => { release?.(); settle(); });
   };
   const pass = state.pass;
-  const plural = (base: 'outfitgen.found' | 'outfitgen.passFound' | 'outfitgen.passChecked' | 'outfitgen.passSummary', count: number, extra: Record<string, string | number> = {}) =>
+  const plural = (base: 'outfitgen.found' | 'outfitgen.passFound' | 'outfitgen.passLeft' | 'outfitgen.passStopped', count: number) =>
     t(`${base}_${new Intl.PluralRules(locales[language]).select(count) === 'one' ? 'one' : 'other'}` as MessageKey,
-      { count: new Intl.NumberFormat(locales[language]).format(count), ...extra });
-  const line = (key: MessageKey, count?: number, done?: number) => count === undefined ? t(key)
-    : key === 'outfitgen.passSummary_other' ? plural('outfitgen.passSummary', count, { done: new Intl.NumberFormat(locales[language]).format(done ?? 0) })
-      : plural('outfitgen.found', count);
+      { count: new Intl.NumberFormat(locales[language]).format(count) });
+  const line = (key: MessageKey, count?: number) => count === undefined ? t(key)
+    : key === 'outfitgen.passStopped_other' ? plural('outfitgen.passStopped', count) : plural('outfitgen.found', count);
+  // One button for Find, Stop and the moments between: it is never disabled while it has focus, only marked so.
+  const waiting = running && (pass === null || pass.stopping);
   return <section className="suggested" aria-labelledby="suggested-title">
     <div className="suggested-head">
       <h2 id="suggested-title" ref={heading} tabIndex={-1}>{suggestions.length ? t('outfitgen.titleCount', { count: suggestions.length }) : t('outfitgen.title')}</h2>
-      {view.run && <button type="button" className="button button-secondary"
-        disabled={pass ? pass.stopping : !online || running || limits?.reached === true}
-        onClick={() => { if (pass) stopPass(store); else void runPass(store, language); }}>
+      {view.run && <button type="button" className="button button-secondary" id="suggested-find"
+        disabled={!running && (!online || limits?.reached === true)} aria-disabled={waiting || undefined}
+        onClick={() => { if (waiting) return; if (pass) stopPass(store); else if (!running) void runPass(store, language); }}>
         {t(pass ? (pass.stopping ? 'outfitgen.passStopping' : 'outfitgen.passStop') : state.running === 'manual' ? 'outfitgen.finding' : 'outfitgen.find')}</button>}
     </div>
     <div role="status" className="suggested-notices">
@@ -108,11 +111,11 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
         ? <p key={notice.at}>{t(notice.key)}{' '}<button type="button" className="text-button"
           disabled={state.deciding.has(state.removed.id) || pics?.deleting.has(state.removed.id) === true || !online}
           onClick={() => { void undoRemoval(store); }}>{t('common.undo')}</button></p>
-        : <p key={notice.at}>{line(notice.key, notice.count, notice.done)}</p>)}
+        : notice.key === 'aiGuard.paused'
+          ? <p key={notice.at}>{t(notice.key)}{' '}<a className="text-button" href="#/settings">{t('aiGuard.settingsLink')}</a></p>
+          : <p key={notice.at}>{line(notice.key, notice.count)}</p>)}
     </div>
-    {pass && pass.total > 0 && <p className="suggested-progress">{t('outfitgen.passProgress', {
-      checked: plural('outfitgen.passChecked', pass.total, { done: new Intl.NumberFormat(locales[language]).format(pass.done) }),
-      found: plural('outfitgen.passFound', pass.found) })}</p>}
+    {pass && <p className="suggested-pass">{t('outfitgen.passProgress', { left: plural('outfitgen.passLeft', pass.left), found: plural('outfitgen.passFound', pass.found) })}</p>}
     {(view.kind === 'off' || view.kind === 'renew') && <p><span>{t('outfitgen.off')}</span>{' '}<a className="text-button" href="#/settings">{t('aiC.turnOn')}</a></p>}
     {on && limits?.reached && <p className="notice">{t('outfitgenC.limit')}</p>}
     {on && suggestions.length > 0 && <div aria-live="polite" className="suggested-picture-status">

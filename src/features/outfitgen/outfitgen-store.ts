@@ -11,7 +11,7 @@ import {
   outfitGenView, outfitGenLimits, shownOutfitGenView, AUTO_SCOPE_CALLS, autoBlock,
   type GenerateReply, type OutfitGenRead, type OutfitGenStatus, type OutfitGenView, type Suggestion,
 } from '../../domain/outfitgen-app';
-import { passLines, passNext, passReply, passSending, passTotal, type PassMemory, type PassStop } from '../../domain/outfitgen-pass';
+import { passLines, passNext, passReply, passSending, type PassMemory, type PassStop } from '../../domain/outfitgen-pass';
 import type { OutfitGenLanguage, OutfitGenMode } from '../../domain/outfitgen';
 import type { MessageKey } from '../../i18n';
 import '../../i18n/outfitgen';
@@ -25,9 +25,9 @@ export const OUTFITGEN_NOTICE_KEYS = [
   'aiC.azureTrainingNotice', 'outfitgenC.stored', 'aiC.chargesTitle', 'outfitgenC.charges', 'outfitgenC.optOut2',
 ] as const satisfies readonly MessageKey[];
 
-export type Notice = { key: MessageKey; count?: number; done?: number; at: number };
+export type Notice = { key: MessageKey; count?: number; at: number };
 /** Progress of a running pass: garments checked of those to check, outfits found, and whether Stop was pressed. */
-export type PassProgress = { done: number; total: number; found: number; stopping: boolean };
+export type PassProgress = { left: number; found: number; stopping: boolean };
 export type OutfitGenState = {
   read: OutfitGenRead; known: boolean; unresolved: boolean; reading: boolean; writing: boolean; settingsError: MessageKey | null;
   list: { kind: 'unknown' | 'failed' | 'ready'; suggestions: readonly Suggestion[] };
@@ -65,7 +65,8 @@ export class OutfitGenStore {
   autoActive = false;
   /** True from the start of a pass (one press of Find new outfits) to its end, and whether Stop was pressed during it. */
   passActive = false;
-  stopRequested = false;
+  stopReason: PassStop | null = null;
+  passSeq = 0;
   autoCalls = 0;
   /** Set when a run met the spending guard's PAUSED outcome: automatic runs stay off until Resume, or until a manual run succeeds. */
   guardPaused = false;
@@ -89,7 +90,7 @@ export class OutfitGenStore {
     this.state = { ...this.state, ...patch };
     for (const listener of this.listeners) listener();
   }
-  notice(...lines: readonly { key: MessageKey; count?: number; done?: number }[]) {
+  notice(...lines: readonly { key: MessageKey; count?: number }[]) {
     this.update({ notices: lines.map((entry) => ({ ...entry, at: ++this.noticeAt })) });
   }
   dispose() {
@@ -270,69 +271,93 @@ export async function runAuto(store: OutfitGenStore, language: OutfitGenLanguage
 }
 
 /** Asks the running pass to stop: the call in flight is already paid and finishes, then nothing more is sent. */
-export function stopPass(store: OutfitGenStore): void {
+export function stopPass(store: OutfitGenStore, reason: Extract<PassStop, 'user' | 'away' | 'hidden'> = 'user'): void {
+  if (store.disposed || !store.passActive || store.stopReason !== null) return;
+  store.stopReason = reason;
   const pass = store.get().pass;
-  if (store.disposed || !pass || store.stopRequested) return;
-  store.stopRequested = true;
-  store.update({ pass: { ...pass, stopping: true } });
+  if (pass) store.update({ pass: { ...pass, stopping: true } });
+}
+
+/** Leaving the Suggested outfits screen pauses a running pass; coming back never restarts it. */
+export const pausePass = (store: OutfitGenStore) => stopPass(store, 'away');
+
+/** The page going away (hidden tab, locked phone, closing, back-forward cache) latches for the rest of the pass, even if it comes back. */
+function watchPage(onHide: () => void): () => void {
+  const doc = typeof document !== 'undefined' && typeof document.addEventListener === 'function' ? document : null;
+  const win = typeof window !== 'undefined' && typeof window.addEventListener === 'function' ? window : null;
+  const changed = () => { if (document.visibilityState !== 'visible') onHide(); };
+  doc?.addEventListener('visibilitychange', changed);
+  win?.addEventListener('pagehide', onHide);
+  return () => { doc?.removeEventListener('visibilitychange', changed); win?.removeEventListener('pagehide', onHide); };
 }
 
 /**
  * One press of Find new outfits: calls one at a time (each its own request, claim and receipt) until `passNext` and
  * `passReply` say stop. Never while another run is going or a consent change is pending, offline, without consent or
- * over the limit; status is read again before every call and the client checks again right before each request is sent.
- * The server remembers which garments are checked, so a pass that stopped early is continued by the next press. Nothing
- * here retries a request. Closing the page, signing out or a new owner scope ends it; a call already sent settles on the server.
+ * over the limit; status is read again before every call, and right before each request leaves (after the client's own
+ * authentication) the pass is checked once more: Stop, leaving the screen, the page going away, this being still the
+ * same pass, consent, the limit, the network and the owner scope. The server remembers which garments are checked, so a
+ * pass that stopped early is continued by the next press. Nothing here retries a request, and a failed or lost call is never
+ * followed by another. A call already sent settles on the server whatever happens to the page.
  */
 export async function runPass(store: OutfitGenStore, language: OutfitGenLanguage): Promise<void> {
   const state = store.get();
-  if (store.disposed || store.autoActive || store.passActive || state.running || state.writing || !viewOf(state).run) return;
-  if (!online()) { store.notice({ key: 'outfitgen.failed' }); return; }
+  if (store.disposed || store.passActive || state.running === 'manual') return;
+  // An automatic run in flight holds the owner's single outfit slot: say so instead of doing nothing.
+  if (store.autoActive || state.running) { if (!store.disposed && viewOf(state).run) store.notice({ key: 'outfitgen.busy' }); return; }
+  if (state.writing || !viewOf(state).run) return;
+  if (!online() || !visible()) { store.notice({ key: 'outfitgen.failed' }); return; }
+  const id = ++store.passSeq;
   store.passActive = true;
-  store.stopRequested = false;
+  store.stopReason = null;
   store.update({ running: 'manual', notices: [], pass: null });
+  const unwatch = watchPage(() => stopPass(store, 'hidden'));
+  const current = () => store.passActive && store.passSeq === id && store.stopReason === null && visible();
   let mem: PassMemory | null = null;
   let stop: PassStop;
-  let reread = false;
+  let left: number | null = null;
   try {
     for (;;) {
       const status = await readStatus(store, 'fresh');
       if (store.disposed) return;
       const now = store.get();
-      const step = passNext(mem, status, { online: online(), visible: visible(), stopped: store.stopRequested,
+      const step = passNext(mem, status, { online: online(), visible: visible(), stopped: store.stopReason,
         settling: now.writing || store.writePromise !== null, runnable: viewOf(now).run });
       mem = step.mem;
-      if (mem) store.update({ pass: { done: mem.done, total: passTotal(mem), found: mem.found, stopping: store.stopRequested } });
+      if (mem) store.update({ pass: { left: mem.unassessed, found: mem.found, stopping: store.stopReason !== null } });
       if (step.stop !== null || mem === null) { stop = step.stop ?? 'failed'; break; }
       mem = passSending(mem);
       const controller = store.runController = new AbortController();
       let reply: GenerateReply;
       try {
         reply = await store.api.generate({ requestId: crypto.randomUUID(), mode: 'manual', language }, controller.signal,
-          () => dispatchBlock(store, false, () => !store.stopRequested));
+          () => dispatchBlock(store, false, current));
       } finally { store.runController = null; }
       if (store.disposed) return;
       store.guardPaused = reply.code === 'PAUSED' ? true : reply.code === 'OK' ? false : store.guardPaused;
       const after = passReply(mem, reply);
       mem = after.mem;
-      if (reply.code === 'OK' || rereadCodes.has(reply.code)) reread = true;
-      store.update({ pass: { done: mem.done, total: passTotal(mem), found: mem.found, stopping: store.stopRequested } });
+      store.update({ pass: { left: mem.unassessed, found: mem.found, stopping: store.stopReason !== null } });
       // The suggestions found so far are shown at once, before the next call.
       if (reply.code === 'OK') await readList(store, 'fresh');
       if (store.disposed) return;
       if (after.stop !== null) { stop = after.stop; break; }
     }
+    // Whatever ended the pass, what the server now holds is read again; "all checked" is said only from that read.
+    if (mem !== null && mem.calls > 0) {
+      const [, final] = await Promise.all([readList(store, 'fresh'), readStatus(store, 'fresh')]);
+      if (store.disposed) return;
+      left = final !== null && final.code === 'OK' ? final.unassessed : null;
+    }
   } finally {
+    unwatch();
     store.passActive = false;
-    store.stopRequested = false;
+    store.stopReason = null;
     if (!store.disposed) store.update({ running: null, pass: null });
   }
   if (store.disposed) return;
-  store.notice(...passLines(stop, mem));
-  if (reread) void refreshAfterRun(store);
+  store.notice(...passLines(stop, mem, left));
 }
-const rereadCodes = new Set(['CONSENT_REQUIRED', 'INACTIVE', 'UNCONFIGURED', 'CONFIG_CHANGED', 'UNAVAILABLE', 'ALLOWANCE']);
-
 type Decision = { code: 'OK' | 'GONE' | 'RETRY' };
 const mark = (store: OutfitGenStore, id: string, on: boolean) => {
   const deciding = new Set(store.get().deciding);

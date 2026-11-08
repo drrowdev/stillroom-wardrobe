@@ -10,7 +10,7 @@ import {
   type AutoLocal, type GenerateReply, type OutfitGenStatus,
 } from '../../src/domain/outfitgen-app';
 import {
-  OutfitGenStore, keepSuggestion, readList, readStatus, removeSuggestion, runAuto, runPass, stopPass, undoRemoval, viewOf, writeConsent,
+  OutfitGenStore, keepSuggestion, pausePass, readList, readStatus, removeSuggestion, runAuto, runPass, stopPass, undoRemoval, viewOf, writeConsent,
 } from '../../src/features/outfitgen/outfitgen-store';
 import { OutfitGenTrigger } from '../../src/features/outfitgen/outfitgen-trigger';
 import { sharedFigures } from '../../src/features/settings/ai-features-model';
@@ -193,7 +193,7 @@ describe('suggested outfits: automatic runs', () => {
     h.store.failedAtMs = null;
     await runAuto(h.store, 'en');
     expect(h.fake.generate).toHaveBeenCalledTimes(1);
-    expect(passLines('paused', null).map((n) => n.key)).toEqual(['aiGuard.paused']);
+    expect(passLines('paused', null, null).map((n) => n.key)).toEqual(['aiGuard.paused']);
     events.dispatchEvent(new Event(AI_GUARD_RESUMED_EVENT));
     expect(h.store.guardPaused).toBe(false);
     h.fake.generate.mockResolvedValue({ code: 'OK', suggested: 1, judged: 4, remaining: false });
@@ -247,7 +247,7 @@ describe('suggested outfits: automatic runs', () => {
 describe('suggested outfits: manual runs, consent and decisions', () => {
   beforeEach(() => page());
   it('runs one manual call per tap and says plainly what happened', async () => {
-    const h = harness();
+    const h = harness([status(), status(), status({ unassessed: 0 })]);
     await readStatus(h.store);
     await runPass(h.store, 'sv');
     expect(h.fake.generate).toHaveBeenCalledTimes(1);
@@ -494,6 +494,7 @@ describe('suggested outfits: consent changes, newer Saves and ordering', () => {
 
 describe('suggested outfits: one press works through the garments', () => {
   beforeEach(() => page());
+  type Hs = ReturnType<typeof harness>;
   const primed = (statuses: OutfitGenStatus[]) => {
     const h = harness(statuses);
     h.store.update({ read: { kind: 'ready', status: statuses[0]! }, known: true });
@@ -502,21 +503,55 @@ describe('suggested outfits: one press works through the garments', () => {
   const left = (n: number, over: Record<string, unknown> = {}) => status({ unassessed: n, ...over });
   const more = (suggested = 1, judged = 5): GenerateReply => ({ code: 'OK', suggested, judged, remaining: true });
   const last = (suggested = 1): GenerateReply => ({ code: 'OK', suggested, judged: 3, remaining: false });
-  it('calls one at a time until nothing is left, shows progress, and ends with one result', async () => {
-    const h = primed([left(6), left(4), left(2)]);
+  const keys = (h: Hs) => h.store.get().notices.map((n) => n.key);
+  /**
+   * Replies like the real client: a request only counts as sent (a "post") when the last check right before it passes, which
+   * happens after `gate` (the client's own awaits, such as authentication) has been released.
+   */
+  function wire(h: Hs, replies: GenerateReply[], gate?: Deferred<void>) {
+    const posts: GenerateReply[] = [];
+    h.fake.generate.mockImplementation(async (_input, _signal, before) => {
+      if (gate) await gate.promise;
+      if (before?.()) return { code: 'NOT_SENT' };
+      const reply = replies.shift() ?? last(0);
+      posts.push(reply);
+      return reply;
+    });
+    return posts;
+  }
+  const doc = (visibilityState = 'visible') => {
+    const target = Object.assign(new EventTarget(), { visibilityState });
+    const win = new EventTarget();
+    vi.stubGlobal('navigator', { onLine: true });
+    vi.stubGlobal('document', target);
+    vi.stubGlobal('window', win);
+    return { target, win, hide: () => { target.visibilityState = 'hidden'; target.dispatchEvent(new Event('visibilitychange')); },
+      show: () => { target.visibilityState = 'visible'; target.dispatchEvent(new Event('visibilitychange')); } };
+  };
+
+  it('calls one at a time until nothing is left, shows what is left, and says "all checked" only after a final read of zero', async () => {
+    const h = primed([left(6), left(4), left(2), left(0)]);
     h.fake.generate.mockResolvedValueOnce(more(2)).mockResolvedValueOnce(more(1)).mockResolvedValueOnce(last(3));
     const seen: string[] = [];
-    h.store.subscribe(() => { const p = h.store.get().pass; if (p) seen.push(`${p.done}/${p.total}/${p.found}`); });
+    h.store.subscribe(() => { const p = h.store.get().pass; if (p) seen.push(`${p.left}/${p.found}`); });
     await runPass(h.store, 'en');
     expect(h.fake.generate).toHaveBeenCalledTimes(3);
     const requests = h.fake.generate.mock.calls.map((call) => (call[0] as { requestId: string }).requestId);
     expect(new Set(requests).size).toBe(3);
     expect(h.fake.generate.mock.calls.every((call) => (call[0] as { mode: string }).mode === 'manual')).toBe(true);
-    expect(seen).toContain('0/6/0');
-    expect(seen).toContain('2/6/3');
+    expect(seen).toContain('6/0');
+    expect(seen).toContain('4/2');
     expect(h.store.get().notices).toMatchObject([{ key: 'outfitgen.passAll' }, { key: 'outfitgen.found_other', count: 6 }]);
     expect(h.store.get()).toMatchObject({ running: null, pass: null });
     expect(h.store.passActive).toBe(false);
+  });
+  it('does not claim everything was checked when the final status read fails', async () => {
+    const h = primed([left(2), left(2)]);
+    h.fake.generate.mockResolvedValueOnce(last(1));
+    h.fake.outfitGenStatus.mockImplementationOnce(async () => ({ kind: 'ready' as const, status: left(2) }))
+      .mockImplementation(async () => { throw new Error('offline'); });
+    await runPass(h.store, 'en');
+    expect(keys(h)).toEqual(['outfitgen.found_other', 'outfitgen.passUnconfirmed']);
   });
   it('shows what it found after each call, before the next one', async () => {
     const h = primed([left(4), left(2)]);
@@ -526,7 +561,7 @@ describe('suggested outfits: one press works through the garments', () => {
     await runPass(h.store, 'en');
     expect(lists[1]! - lists[0]!).toBeGreaterThanOrEqual(1);
   });
-  it('never starts a second pass, or an automatic run, while one is going', async () => {
+  it('never starts a second pass while one is going, and an automatic run in flight is said plainly (BUSY)', async () => {
     const h = primed([left(4)]);
     const reply = deferred<GenerateReply>();
     h.fake.generate.mockReturnValueOnce(reply.promise);
@@ -538,8 +573,54 @@ describe('suggested outfits: one press works through the garments', () => {
     reply.resolve(last());
     await first;
     expect(h.fake.generate).toHaveBeenCalledTimes(1);
+    const auto = primed([left(4)]);
+    auto.store.autoActive = true;
+    await runPass(auto.store, 'en');
+    expect(auto.fake.generate).not.toHaveBeenCalled();
+    expect(keys(auto)).toEqual(['outfitgen.busy']);
+    expect(auto.store.autoActive).toBe(true);
   });
+
+  describe('the last check right before the request leaves (after the client has awaited its own authentication)', () => {
+    const interferences: [string, (h: Hs, env: ReturnType<typeof doc>) => void][] = [
+      ['Stop', (h) => stopPass(h.store)],
+      ['leaving the screen', (h) => pausePass(h.store)],
+      ['the page being hidden', (_h, env) => env.hide()],
+      ['the page going away (pagehide)', (_h, env) => { env.win.dispatchEvent(new Event('pagehide')); }],
+      ['consent being turned off', (h) => h.store.update({ read: { kind: 'ready', status: status({}, 'CONSENT_REQUIRED', false) } })],
+      ['the monthly budget being used up', (h) => h.store.update({ read: { kind: 'ready', status: left(6, { budget: { ...BUDGET, usedMicro: '17900000', remainingMicro: '40000' } }) } })],
+      ['a consent change being written', (h) => { h.store.update({ writing: true }); }],
+      ['the owner scope ending', (h) => h.abort.abort()],
+    ];
+    it('sends the request when nothing changed (control)', async () => {
+      doc();
+      const h = primed([left(6)]);
+      const gate = deferred<void>();
+      const posts = wire(h, [last()], gate);
+      const run = runPass(h.store, 'en');
+      await tick();
+      gate.resolve();
+      await run;
+      expect(posts).toHaveLength(1);
+    });
+    it.each(interferences)('sends nothing when %s happens during the delay, and nothing later either', async (_name, interfere) => {
+      const env = doc();
+      const h = primed([left(6)]);
+      const gate = deferred<void>();
+      const posts = wire(h, [more(), more(), last()], gate);
+      const run = runPass(h.store, 'en');
+      await tick();
+      interfere(h, env);
+      gate.resolve();
+      await run;
+      env.show();
+      await tick();
+      expect(posts).toHaveLength(0);
+    });
+  });
+
   it('Stop lets the call in flight finish and sends nothing more', async () => {
+    doc();
     const h = primed([left(6)]);
     const reply = deferred<GenerateReply>();
     h.fake.generate.mockReturnValueOnce(reply.promise);
@@ -550,13 +631,42 @@ describe('suggested outfits: one press works through the garments', () => {
     reply.resolve(more(2));
     await run;
     expect(h.fake.generate).toHaveBeenCalledTimes(1);
-    expect(h.store.get().notices.map((n) => n.key)).toEqual(['outfitgen.passSummary_other', 'outfitgen.found_other', 'outfitgen.passContinue']);
+    expect(keys(h)).toEqual(['outfitgen.passStopped_other', 'outfitgen.found_other', 'outfitgen.passContinue']);
     expect(h.store.get().pass).toBeNull();
-    // A Stop pressed before the request leaves sends nothing at all.
-    const early = primed([left(6)]);
-    early.fake.generate.mockImplementationOnce(async (...args) => { stopPass(early.store); return args[2]?.() ? { code: 'NOT_SENT' } : more(); });
-    await runPass(early.store, 'en');
-    expect(early.store.get().notices.map((n) => n.key)).not.toContain('outfitgen.failed');
+  });
+  it('a page hidden during a call ends the pass for good: coming back, or a restored page, never restarts it', async () => {
+    for (const how of ['visibility', 'pagehide'] as const) {
+      const env = doc();
+      const h = primed([left(6), left(5), left(4)]);
+      const reply = deferred<GenerateReply>();
+      h.fake.generate.mockReturnValueOnce(reply.promise).mockResolvedValue(more());
+      const run = runPass(h.store, 'en');
+      await tick();
+      if (how === 'visibility') env.hide(); else env.win.dispatchEvent(new Event('pagehide'));
+      env.show();
+      env.win.dispatchEvent(new Event('pageshow'));
+      reply.resolve(more());
+      await run;
+      env.show();
+      await tick();
+      expect(h.fake.generate).toHaveBeenCalledTimes(1);
+      expect(keys(h)).toContain('outfitgen.passContinue');
+    }
+  });
+  it('leaving the screen pauses a running pass and returning does not restart it', async () => {
+    doc();
+    const h = primed([left(6), left(5)]);
+    const reply = deferred<GenerateReply>();
+    h.fake.generate.mockReturnValueOnce(reply.promise).mockResolvedValue(more());
+    const run = runPass(h.store, 'en');
+    await tick();
+    pausePass(h.store);
+    reply.resolve(more());
+    await run;
+    expect(h.fake.generate).toHaveBeenCalledTimes(1);
+    expect(keys(h)).toContain('outfitgen.passContinue');
+    pausePass(h.store);
+    expect(h.store.passActive).toBe(false);
   });
   it('ends when the owner signs out, and shows and sends nothing afterwards', async () => {
     const h = primed([left(6)]);
@@ -573,43 +683,53 @@ describe('suggested outfits: one press works through the garments', () => {
   });
   it.each<[string, GenerateReply, string]>([
     ['the list is full', { code: 'PENDING_FULL' }, 'outfitgen.full'],
-    ['another check is running', { code: 'BUSY' }, 'outfitgen.busy'],
+    ['another check is running (for example a picture holding the same owner lock)', { code: 'BUSY' }, 'outfitgen.busy'],
     ['the server limits the calls', { code: 'RATE_LIMIT' }, 'outfitgen.rateLimit'],
     ['the cooldown applies', { code: 'COOLDOWN' }, 'outfitgen.rateLimit'],
     ['the monthly budget is used', { code: 'ALLOWANCE' }, 'outfitgenC.limit'],
     ['the spending guard has paused', { code: 'PAUSED' }, 'aiGuard.paused'],
     ['consent was withdrawn', { code: 'CONSENT_REQUIRED' }, 'outfitgen.off'],
-  ])('stops, with its own line, when %s', async (_name, reply, key) => {
-    const h = primed([left(6), left(5)]);
-    h.fake.generate.mockResolvedValueOnce(more()).mockResolvedValueOnce(reply);
+    ['a call fails', { code: 'FAILED' }, 'outfitgen.failed'],
+    ['a reply is lost', { code: 'TIMEOUT' }, 'outfitgen.failed'],
+  ])('stops, with its own line and no further call, when %s', async (_name, reply, key) => {
+    const h = primed([left(6), left(5), left(4)]);
+    const posts = wire(h, [more(), reply, more()]);
     await runPass(h.store, 'en');
-    expect(h.fake.generate).toHaveBeenCalledTimes(2);
-    expect(h.store.get().notices.map((n) => n.key).at(-1)).toBe(key);
-    expect(h.store.get().notices[0]).toMatchObject({ key: 'outfitgen.passSummary_other', count: 6, done: 1 });
+    expect(posts).toHaveLength(2);
+    expect(keys(h).at(-1)).toBe(key);
+    expect(keys(h)[0]).toBe('outfitgen.passStopped_other');
+    expect(h.store.get().notices[0]).toMatchObject({ count: 4 });
   });
-  it('stops on the second failure in a row, and never repeats a request', async () => {
+  it('a failure on the very first call stops at once, refreshes what the server holds, and is never repeated', async () => {
     const h = primed([left(6)]);
     h.fake.generate.mockResolvedValue({ code: 'FAILED' });
     await runPass(h.store, 'en');
-    expect(h.fake.generate).toHaveBeenCalledTimes(2);
-    const requests = h.fake.generate.mock.calls.map((call) => (call[0] as { requestId: string }).requestId);
-    expect(new Set(requests).size).toBe(2);
-    expect(h.store.get().notices.map((n) => n.key)).toContain('outfitgen.failed');
+    expect(h.fake.generate).toHaveBeenCalledTimes(1);
+    expect(h.fake.list.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(keys(h).at(-1)).toBe('outfitgen.failed');
   });
-  it('stops, before the next call, when consent is gone, the page is hidden, the network is gone or the list is full', async () => {
+  it('after a lost reply nothing continues while the server may still hold the call, and a later press goes on once it has settled', async () => {
+    const h = primed([left(6), left(6, { live: true })]);
+    h.fake.generate.mockResolvedValueOnce({ code: 'TIMEOUT' });
+    await runPass(h.store, 'en');
+    expect(h.fake.generate).toHaveBeenCalledTimes(1);
+    await runPass(h.store, 'en');
+    expect(h.fake.generate).toHaveBeenCalledTimes(1);
+    expect(keys(h)).toEqual(['outfitgen.busy']);
+    // It settled: the next press goes on (a failed settlement is no different: it simply leaves the garments unchecked).
+    const settled = primed([left(6)]);
+    settled.fake.generate.mockResolvedValueOnce({ code: 'TIMEOUT' }).mockResolvedValueOnce(last());
+    await runPass(settled.store, 'en');
+    await runPass(settled.store, 'en');
+    expect(settled.fake.generate).toHaveBeenCalledTimes(2);
+  });
+  it('stops, before the next call, when consent is gone, the network is gone or the list is full', async () => {
     const off = primed([left(6), status({ unassessed: 5 }, 'CONSENT_REQUIRED', false)]);
     off.fake.generate.mockResolvedValueOnce(more());
     await runPass(off.store, 'en');
     expect(off.fake.generate).toHaveBeenCalledTimes(1);
-    expect(off.store.get().notices.map((n) => n.key)).toContain('outfitgen.off');
+    expect(keys(off)).toContain('outfitgen.off');
 
-    const hidden = primed([left(6), left(5)]);
-    hidden.fake.generate.mockImplementationOnce(async () => { page(true, 'hidden'); return more(); });
-    await runPass(hidden.store, 'en');
-    expect(hidden.fake.generate).toHaveBeenCalledTimes(1);
-    expect(hidden.store.get().notices.map((n) => n.key)).toContain('outfitgen.passContinue');
-
-    page();
     const offline = primed([left(6), left(5)]);
     offline.fake.generate.mockImplementationOnce(async () => { page(false); return more(); });
     await runPass(offline.store, 'en');
@@ -620,7 +740,18 @@ describe('suggested outfits: one press works through the garments', () => {
     full.fake.generate.mockResolvedValueOnce(more());
     await runPass(full.store, 'en');
     expect(full.fake.generate).toHaveBeenCalledTimes(1);
-    expect(full.store.get().notices.map((n) => n.key).at(-1)).toBe('outfitgen.full');
+    expect(keys(full).at(-1)).toBe('outfitgen.full');
+  });
+  it('stops when another window or device already has a call live, at the start and between calls', async () => {
+    const start = primed([left(6, { live: true })]);
+    await runPass(start.store, 'en');
+    expect(start.fake.generate).not.toHaveBeenCalled();
+    expect(keys(start)).toEqual(['outfitgen.busy']);
+    const between = primed([left(6), left(5, { live: true })]);
+    between.fake.generate.mockResolvedValueOnce(more());
+    await runPass(between.store, 'en');
+    expect(between.fake.generate).toHaveBeenCalledTimes(1);
+    expect(keys(between).at(-1)).toBe('outfitgen.busy');
   });
   it('stops short of the reserve of the monthly budget, but not before the first call', async () => {
     const near = { ...BUDGET, usedMicro: '15000000', remainingMicro: '2940000' };
@@ -628,14 +759,36 @@ describe('suggested outfits: one press works through the garments', () => {
     h.fake.generate.mockResolvedValue(more());
     await runPass(h.store, 'en');
     expect(h.fake.generate).toHaveBeenCalledTimes(1);
-    expect(h.store.get().notices.map((n) => n.key).at(-1)).toBe('outfitgen.passReserve');
+    expect(keys(h).at(-1)).toBe('outfitgen.passReserve');
   });
-  it('is bounded by the wardrobe even if the server keeps saying more is left', async () => {
-    const h = primed([left(1)]);
+  it('with nothing unchecked makes one call, even if the reply says more is left', async () => {
+    const h = primed([left(0)]);
+    h.fake.generate.mockResolvedValue(more(1));
+    await runPass(h.store, 'en');
+    expect(h.fake.generate).toHaveBeenCalledTimes(1);
+    expect(keys(h)).toEqual(['outfitgen.found_other']);
+  });
+  it('goes on through five calls for one garment, since only a fresh fall of the count is progress', async () => {
+    const h = primed([left(1), left(1), left(1), left(1), left(1), left(0)]);
+    h.fake.generate.mockResolvedValueOnce(more(0, 4)).mockResolvedValueOnce(more(0, 4)).mockResolvedValueOnce(more(0, 4)).mockResolvedValueOnce(more(0, 4)).mockResolvedValueOnce(last(1));
+    await runPass(h.store, 'en');
+    expect(h.fake.generate).toHaveBeenCalledTimes(5);
+    expect(keys(h)[0]).toBe('outfitgen.passAll');
+  });
+  it('judging sets without the unchecked count falling is not progress: eight calls end the pass at its safety limit', async () => {
+    const h = primed([left(20)]);
+    h.fake.generate.mockResolvedValue(more(0, 6));
+    await runPass(h.store, 'en');
+    expect(h.fake.generate).toHaveBeenCalledTimes(8);
+    expect(keys(h).at(-1)).toBe('outfitgen.passSafety');
+  });
+  it('is bounded by the wardrobe even if every reply says more is left and the count keeps falling', async () => {
+    let n = 2;
+    const h = primed([left(2)]);
+    h.fake.outfitGenStatus.mockImplementation(async () => ({ kind: 'ready' as const, status: left(Math.max(1, n--)) }));
     h.fake.generate.mockResolvedValue(more(0, 2));
     await runPass(h.store, 'en');
-    // One unchecked garment allows at most 2 x 1 + 2 = 4 calls, however much each reply claims is left.
-    expect(h.fake.generate.mock.calls.length).toBeLessThanOrEqual(4);
+    expect(h.fake.generate.mock.calls.length).toBeLessThanOrEqual(16);
     expect(h.store.passActive).toBe(false);
   });
 });

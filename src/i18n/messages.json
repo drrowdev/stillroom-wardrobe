@@ -718,5 +718,6 @@
   "aiGuard.amounts": {"en":"Last hour: {spent}. Limit: {limit}.","fi":"Viimeinen tunti: {spent}. Raja: {limit}.","sv":"Senaste timmen: {spent}. Gräns: {limit}."},
   "aiGuard.resume": {"en":"Resume AI features","fi":"Jatka tekoälytoimintoja","sv":"Återuppta AI-funktioner"},
   "aiGuard.resumeFailed": {"en":"Couldn't resume. Try again.","fi":"Jatkaminen ei onnistunut. Yritä uudelleen.","sv":"Det gick inte att återuppta. Försök igen."},
+  "aiGuard.settingsLink": {"en":"Open Settings","fi":"Avaa asetukset","sv":"Öppna Inställningar"},
   "aiGuard.paused": {"en":"AI features are paused after unusually high spending. Resume them in Settings.","fi":"Tekoälytoiminnot on keskeytetty epätavallisen suuren kulutuksen vuoksi. Jatka niitä asetuksista.","sv":"AI-funktionerna är pausade efter ovanligt hög förbrukning. Återuppta dem i Inställningar."}
 }
