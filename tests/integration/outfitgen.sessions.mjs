@@ -702,23 +702,35 @@ const replaceLines = (all, from, to) => {
 // Everything an installation of the claim limits migration must leave alone, as one comparable document. The claim's own body is
 // excluded; its identity, owner, ACL, security configuration, volatility and the full definition and ACL of every other function in
 // the application schemas are included, with the rows of every table the claim reads or writes and every trigger.
-const LIMITS_STATE_SQL = `select jsonb_build_object(
-  'claim',(select jsonb_build_object('oid',p.oid::bigint,'owner',pg_get_userbyid(p.proowner),'acl',p.proacl::text,'secdef',p.prosecdef,'config',p.proconfig,
+const rowsDigest = (table) => `select jsonb_build_object('count',count(*),'md5',md5(coalesce(string_agg(to_jsonb(t)::text,'|' order by to_jsonb(t)::text),'')))::text from ${table} t`;
+// One query per part, each answering a jsonb document as text, so a failure names the part (the rehearsal prints only the stage label).
+const LIMITS_STATE = {
+  claim: `select jsonb_build_object('oid',p.oid::bigint,'owner',pg_get_userbyid(p.proowner),'acl',p.proacl::text,'secdef',p.prosecdef,'config',p.proconfig,
     'volatility',p.provolatile,'strict',p.proisstrict,'parallel',p.proparallel,'leakproof',p.proleakproof,'kind',p.prokind,'returns',p.prorettype::regtype::text,
-    'args',pg_get_function_identity_arguments(p.oid),'language',l.lanname,'cost',p.procost,'rows',p.prorows)
-    from pg_proc p join pg_language l on l.oid=p.prolang where p.oid='${CLAIM}'::regprocedure),
-  'functions',(select jsonb_build_object('count',count(*),'md5',md5(string_agg(p.oid::regprocedure::text||'|'||pg_get_functiondef(p.oid)||'|'||coalesce(p.proacl::text,''),E'\\n'
-    order by p.oid::regprocedure::text))) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-    where n.nspname in ('public','private') and p.prokind='f' and p.oid<>'${CLAIM}'::regprocedure),
-  'triggers',(select md5(string_agg(tgrelid::regclass::text||'|'||tgenabled||'|'||pg_get_triggerdef(oid),E'\\n' order by tgrelid::regclass::text,tgname))
-    from pg_trigger where not tgisinternal),
-  'controls',(select md5(coalesce(string_agg(to_jsonb(t)::text,'|' order by to_jsonb(t)::text),'')) from private.ai_controls t),
-  'usage',(select jsonb_build_object('count',count(*),'md5',md5(coalesce(string_agg(to_jsonb(t)::text,'|' order by to_jsonb(t)::text),''))) from private.ai_usage t),
-  'evidence',(select jsonb_build_object('count',count(*),'md5',md5(coalesce(string_agg(to_jsonb(t)::text,'|' order by to_jsonb(t)::text),''))) from private.ai_usage_evidence t),
-  'requests',(select jsonb_build_object('count',count(*),'md5',md5(coalesce(string_agg(to_jsonb(t)::text,'|' order by to_jsonb(t)::text),''))) from private.outfitgen_requests t),
-  'suggestions',(select jsonb_build_object('count',count(*),'md5',md5(coalesce(string_agg(to_jsonb(t)::text,'|' order by to_jsonb(t)::text),''))) from public.suggested_outfits t),
-  'assessed',(select jsonb_build_object('count',count(*),'md5',md5(coalesce(string_agg(to_jsonb(t)::text,'|' order by to_jsonb(t)::text),''))) from private.outfit_assessed_items t),
-  'manifests',(select md5(coalesce(string_agg(to_jsonb(t)::text,'|' order by to_jsonb(t)::text),'')) from private.ai_execution_manifests t))::text;`;
+    'args',pg_get_function_identity_arguments(p.oid),'language',l.lanname,'cost',p.procost,'rows',p.prorows)::text
+    from pg_proc p join pg_language l on l.oid=p.prolang where p.oid='${CLAIM}'::regprocedure`,
+  functions: `select jsonb_build_object('count',count(*),'md5',md5(string_agg(p.oid::regprocedure::text||'|'||pg_get_functiondef(p.oid)||'|'||coalesce(p.proacl::text,''),E'\\n'
+    order by p.oid::regprocedure::text)))::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname in ('public','private') and p.prokind='f' and p.oid<>'${CLAIM}'::regprocedure`,
+  // The enabled flag is cast to text: text || "char" is an ambiguous operator.
+  triggers: `select to_jsonb(md5(string_agg(tgrelid::regclass::text||'|'||tgenabled::text||'|'||pg_get_triggerdef(oid),E'\\n' order by tgrelid::regclass::text,tgname)))::text
+    from pg_trigger where not tgisinternal`,
+  controls: rowsDigest('private.ai_controls'),
+  usage: rowsDigest('private.ai_usage'),
+  evidence: rowsDigest('private.ai_usage_evidence'),
+  requests: rowsDigest('private.outfitgen_requests'),
+  suggestions: rowsDigest('public.suggested_outfits'),
+  assessed: rowsDigest('private.outfit_assessed_items'),
+  manifests: rowsDigest('private.ai_execution_manifests'),
+};
+async function limitsState(one) {
+  const state = {};
+  for (const [part, text] of Object.entries(LIMITS_STATE)) {
+    note(`state-${part}`);
+    state[part] = await one(`${text};`);
+  }
+  return state;
+}
 
 // OUTFITGEN3-B2, before the claim limits migration (the predecessor inventory): one owner is configured and consented, one genuine claim is held
 // and everything the migration must not change is captured. The held request must survive the installation and settle afterwards.
@@ -736,8 +748,9 @@ export async function outfitgenLimitsCheckpoint(snapshot, sql, mark = () => {}) 
     const held = await claim(id, ['c'.repeat(64)]);
     equal([held.code, held.claimed], ['OK', true]);
     equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(id)};`), 'held');
-    note('state');
-    return { before, id, state: await one(LIMITS_STATE_SQL), body: lines(await scalar(`select prosrc from pg_proc where oid='${CLAIM}'::regprocedure;`)) };
+    const state = await limitsState(one);
+    note('body');
+    return { before, id, state, body: lines(await scalar(`select prosrc from pg_proc where oid='${CLAIM}'::regprocedure;`)) };
   } catch (error) {
     if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
     await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(a.uid)};`);
@@ -754,8 +767,11 @@ export async function outfitgenLimitsCompare(checkpoint, snapshot, sql, mark = (
   const h = helpers(snapshot, sql);
   const { one, scalar, finish } = h;
   try {
-    note('state');
-    equal(await one(LIMITS_STATE_SQL), checkpoint.state);
+    const state = await limitsState(one);
+    note('state-compare');
+    for (const part of Object.keys(LIMITS_STATE)) {
+      if (!isDeepStrictEqual(state[part], checkpoint.state[part])) { note(`state-differs-${part}`); requireEvidence(false); }
+    }
     note('body');
     const after = lines(await scalar(`select prosrc from pg_proc where oid='${CLAIM}'::regprocedure;`));
     const sourceNow = await claimBodyLines('20261108100000_outfitgen_call_limits.sql');
