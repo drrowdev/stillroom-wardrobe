@@ -2594,7 +2594,10 @@ plan critique by GPT-6.1 Sol applied as binding amendments. Source packet: nothi
   call, though two scores per verdict); reasoning tokens may rise (unmeasured; the output cap still bounds the worst case). No typical per-call cost is claimed before the trial. **Calls per garment:**
   measured offline with the real `buildBatch` on a synthetic 23-garment wardrobe shaped like a small real one (5 tops, 7 bottoms, 2 shoes, 8 jackets, 1 layer), the same loop a whole-wardrobe press runs:
   the previous generator needed 20 calls (0.87 per garment, 133 sets judged); the first v2 draft at 8 sets per garment needed 27 (1.17), so `perAnchor` was lowered; at 6 it was 22 (0.96); at 5 it is 19 (0.83,
-  89 sets judged, every base but five covered). The real figure is about 1.8 calls per garment on the earlier synthetic wardrobes and is not measured on the owner's data. Fewer, more varied suggestions
+  89 sets judged, every base but five covered). Exact runs (all sets liked, no selection; generator only): previous generator 20 calls, 133 sets, 28 bases, top garment in 41 % of the sets; v2 at `perAnchor` 8
+  27 calls, 142 sets, 35 bases, 25 %; at 6 22 calls, 108 sets, 31 bases, 32 %; at 5 (shipped) 19 calls, 89 sets, 30 bases, 40 %. **The trade is deliberate and plain: five sets per garment instead of eight
+  means fewer combinations are judged per garment in total (89 sets against 133 on this wardrobe), chosen as quality over quantity; the gate was calls per garment not above the previous generator, and 8 and 6
+  failed it.** The real figure is about 1.8 calls per garment on the earlier synthetic wardrobes and is not measured on the owner's data. Fewer, more varied suggestions
   (at most 4 per call, base and garment caps) should also shrink the picture queue (each waiting suggestion queues 2 to 6 try-on steps at the 360,000 micro reservation); 71 % of the owner's decided
   suggestions were removed, each with a picture made for nothing. The first v2 plan drops the v1 declined rows (the existing version rule), so some of those sets may be judged again when picked, bounded by the
   same calls. A full re-pass of an already-checked wardrobe needs the owner's own SQL (clearing `private.outfit_assessed_items` for the owner), about one call per garment, and is a separate owner decision.
