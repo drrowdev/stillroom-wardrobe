@@ -23,6 +23,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
   let analysisMode: 'ready' | 'pending' | 'timeout' | 'unclear' | 'failed' = 'ready';
   let ttl = 3600000;
   let failNext = 0;
+  let foundType: string | null = null;
   let policy = { activated: true, noticeRevision: 2, modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 2,
     executionManifestId: 'azure-eu-terra-devtest-v2',
     maxRequestMicro: '4097351', resultTtlSeconds: 3600 };
@@ -46,7 +47,7 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
       const result: AiResult = { schemaVersion: 1, requestId, draftId, generation, imageSha256,
         modelId: 'gpt-5.6-terra-2026-07-09', promptVersion: 2, createdAtMs: Date.now() - 1, expiresAtMs: Date.now() + ttl,
         facts: analysisMode === 'unclear' ? { outcome: 'unclear', fields: unknown }
-          : { outcome: 'ready', fields: { ...unknown, category: 'top', colours: ['green'], formality: 0, material: 'Cotton', sleeve_length: 'long', style_tags: ['relaxed'] } } };
+          : { outcome: 'ready', fields: { ...unknown, category: 'top', subcategory: foundType, colours: ['green'], formality: 0, material: 'Cotton', sleeve_length: 'long', style_tags: ['relaxed'] } } };
       results.set(requestId, result);
       if (analysisMode === 'timeout') return { body: { code: 'TIMEOUT' }, status: 504 };
       return { body: { code: 'OK', status: analysisMode === 'pending' ? 'dispatched' : 'ready',
@@ -111,6 +112,8 @@ export async function aiFixture(page: Page, language: Language = 'en', enabled =
   return { ...api, results, calls, inputs, consent, mode: (mode: typeof analysisMode) => { analysisMode = mode; },
     /** The next `count` analyses fail, as a reply with a missing or unexpected model name does; the rest are unaffected. */
     failNext: (count: number) => { failNext = count; },
+    /** The type (subcategory) the next analyses report. */
+    type: (value: string | null) => { foundType = value; },
     // The one monthly amount belongs to the budget, not the policy; a test may still set it here.
     policy: (next: Partial<typeof policy> & { monthlyAllowanceMicro?: string }) => {
       const { monthlyAllowanceMicro, ...rest } = next;
