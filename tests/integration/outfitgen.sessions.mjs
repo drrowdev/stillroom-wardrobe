@@ -1385,6 +1385,7 @@ export async function outfitgenJudgeProbes(snapshot, sql, mark = () => {}) {
       select public.outfitgen_claim(${literal(a.uid)},${literal(R7)},${literal(MANIFEST_V2)},false,${texts([s7])},${uuids([top2])});
       do $$ /* holder-wait */ declare n integer := 0; begin
         loop
+          perform pg_stat_clear_snapshot();
           exit when exists(select 1 from pg_stat_activity where pid<>pg_backend_pid() and query like '%v_from constant'||' text%' and wait_event_type='Lock');
           n := n+1; if n>600 then raise exception 'holder barrier timeout'; end if;
           perform pg_sleep(0.1);
@@ -1394,6 +1395,7 @@ export async function outfitgenJudgeProbes(snapshot, sql, mark = () => {}) {
     await waitFor('guard-holder-in-barrier', "query like '%holder-wait%' and wait_event='PgSleep'");
     const refused = runGuard(MANIFEST_V2, MANIFEST);
     await waitFor('guard-switch-waiting', switchWaits);
+    note('guard-holder-finished');
     equal(await holder, null);
     ok((await refused) !== null);
     note('guard-refused-on-held-row');
