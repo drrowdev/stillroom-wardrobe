@@ -7,7 +7,7 @@ import { AppError } from '../data/errors';
 // A short suggested name ("Black top") and local tag suggestions from style words; tags are never a saved claim.
 export function presentAiFacts(facts: AiFacts, language: Language): { title: string; description: string; tags: string[] } {
   if (facts.outcome !== 'ready') return { title: '', description: '', tags: [] };
-  const title = [...defaultItemName(facts.fields.category, facts.fields.colours ?? [], language)].slice(0, 100).join('');
+  const title = [...defaultItemName(facts.fields.category, facts.fields.colours ?? [], language, facts.fields.subcategory)].slice(0, 100).join('');
   const seen = new Set<string>();
   const tags = (facts.fields.style_tags ?? []).map((tag) => tag.trim()).filter((tag) => {
     const key = tag.toLocaleLowerCase();

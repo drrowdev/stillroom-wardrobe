@@ -157,6 +157,17 @@ describe('pure bound draft projection', () => {
     expect(raw(untouched).raw.title).toBe('');
     expect(raw(untouched).raw.tags).toEqual([]);
   });
+  it('suggests a colour-and-type title, keeps edited titles and leaves a cleared title empty', () => {
+    const first = changed(presentAiDraft(ready(), context, 'en'));
+    expect(raw(first).raw.title).toBe('Olive Overshirt');
+    const edited = changed(editAiDraftField(first, context, 'title', 'My own title', 'en'));
+    expect(raw(changed(prepareAiGeneration(edited, context, nextContext))).raw.title).toBe('My own title');
+    const cleared = changed(editAiDraftField(first, context, 'title', '', 'en'));
+    expect(raw(changed(prepareAiGeneration(cleared, context, nextContext))).raw.title).toBe('');
+    expect(raw(changed(prepareAiGeneration(first, context, nextContext))).raw.title).toBe('');
+    const typed = changed(editAiDraftField(ready(), context, 'title', 'Typed first', 'en'));
+    expect(raw(changed(presentAiDraft(typed, context, 'en'))).raw.title).toBe('Typed first');
+  });
   it('requires explicit request start and distinct draft/request/generation identity', () => {
     const idle = initial();
     expect(idle.context?.draftId).not.toBe(idle.context?.requestId);

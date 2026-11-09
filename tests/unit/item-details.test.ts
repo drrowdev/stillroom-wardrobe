@@ -155,6 +155,10 @@ describe('default photo description', () => {
     expect(defaultItemName('outerwear', ['burgundy'], 'sv')).toBe('Vinrött ytterplagg');
     expect(defaultItemName('footwear', ['gold'], 'sv')).toBe('Guldfärgade skor');
     expect(defaultItemName('top', ['light_blue'], 'en')).toBe('Light blue top');
+    expect(defaultItemName('layer', ['navy'], 'en', 'single-breasted blazer')).toBe('Navy single-breasted blazer');
+    expect(defaultItemName('layer', ['navy'], 'sv', 'kavaj')).toBe('Marinblå kavaj');
+    expect(defaultItemName('layer', ['navy'], 'en', '  ')).toBe('Navy layer');
+    expect(defaultItemName('layer', [], 'en', 'blazer')).toBe('Blazer');
     expect(defaultItemName(null, ['teal'], 'fi')).toBe('Petroolinsininen');
     expect(colours).toHaveLength(21);
     for (const language of ['en', 'fi', 'sv'] as const) {

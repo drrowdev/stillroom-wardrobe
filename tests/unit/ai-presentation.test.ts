@@ -30,6 +30,21 @@ describe('local presentation, not a second inference', () => {
     expect(presentAiFacts({ outcome: 'ready', fields: { category: 'footwear', colours: ['silver'] } }, 'sv').title).toBe('Silverfärgade skor');
     expect(presentAiFacts({ outcome: 'ready', fields: { category: 'top', colours: ['green'] } }, 'en').tags).toEqual([]);
   });
+  it('names the item by its colour and the AI-found type when there is one', () => {
+    const name = (fields: object, language: 'en' | 'fi' | 'sv' = 'en') => presentAiFacts({ outcome: 'ready', fields }, language);
+    expect(name({ category: 'layer', subcategory: 'single-breasted blazer', colours: ['navy', 'grey'] })).toMatchObject({
+      title: 'Navy single-breasted blazer', description: 'Navy single-breasted blazer' });
+    expect(name({ category: 'layer', subcategory: 'kaksirivinen bleiseri', colours: ['navy'] }, 'fi').title).toBe('Tummansininen kaksirivinen bleiseri');
+    expect(name({ category: 'footwear', subcategory: 'sneakers', colours: ['white'] }, 'sv').title).toBe('Vit sneakers');
+    expect(name({ category: 'top', subcategory: '  Oxford   shirt ', colours: ['green'] }).title).toBe('Green Oxford shirt');
+    expect(name({ category: 'top', subcategory: 'shirt', colours: ['unheard-of'] }).title).toBe('Shirt');
+    expect(name({ category: 'top', subcategory: 'shirt', colours: [] }).title).toBe('Shirt');
+    expect(name({ category: 'top', subcategory: 'shirt' }).title).toBe('Shirt');
+    expect(name({ category: 'top', subcategory: null, colours: ['green'] }).title).toBe('Green top');
+    expect(name({ category: 'top', subcategory: '   ', colours: ['green'] }).title).toBe('Green top');
+    expect(name({ category: 'top', subcategory: 'x'.repeat(60), colours: ['light_blue'] }).title).toBe(`Light blue ${'x'.repeat(60)}`);
+    expect([...name({ category: 'top', subcategory: 'x'.repeat(200), colours: ['navy'] }).title]).toHaveLength(100);
+  });
   it('rounds usage up and the limit down to whole cents', () => {
     expect(usdCents('0', 'en', 'used')).toBe('$0.00');
     expect(usdCents('1', 'en', 'used')).toBe('$0.01');
