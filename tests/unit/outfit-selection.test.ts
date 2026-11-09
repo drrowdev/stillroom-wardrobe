@@ -20,8 +20,8 @@ const look = (...numbers: number[]): SeenLook => ({
   base: numbers.filter((n) => ['top', 'bottom', 'one_piece'].includes(categories[n]!)).map(id),
   garments: numbers.filter((n) => categories[n] !== 'footwear').map(id) });
 const seenOf = (pending: number[][] = [], kept: number[][] = []): SelectionSeen => ({ pending: pending.map((entry) => look(...entry)), kept: kept.map((entry) => look(...entry)) });
-const run = (sets: number[][], verdicts: SelectionVerdict[], seen: SelectionSeen = none, room = 100) =>
-  selectSuggestions({ sets: sets.map((entry) => set(...entry)), verdicts, bar: 8, seen, room, categoryOf });
+const run = (sets: number[][], verdicts: SelectionVerdict[], seen: SelectionSeen = none, room = 100, bar: number = SELECTION_LIMITS.minScore) =>
+  selectSuggestions({ sets: sets.map((entry) => set(...entry)), verdicts, bar, seen, room, categoryOf });
 const chosen = (sets: number[][], verdicts: SelectionVerdict[], seen: SelectionSeen = none, room = 100) =>
   run(sets, verdicts, seen, room).chosen.flatMap((flag, index) => (flag ? [index] : []));
 
@@ -33,7 +33,7 @@ describe('suggestion scoring', () => {
   });
   it('allows a quarter of the candidates, rounded up, and never more than four', () => {
     expect([1, 3, 4, 5, 8, 9, 16, 17, 24].map(perCallLimit)).toEqual([1, 1, 1, 2, 2, 3, 4, 4, 4]);
-    expect(SELECTION_LIMITS).toEqual({ perCallMax: 4, perBase: 2, perBaseCall: 1, perGarment: 6 });
+    expect(SELECTION_LIMITS).toEqual({ perCallMax: 4, perBase: 2, perBaseCall: 1, perGarment: 6, perGarmentPlain: 4, minScore: 7, goodScore: 8 });
   });
   it('keys a base by its top and bottoms or its one-piece, ignoring shoes and layers, and refuses a set with an unknown garment', () => {
     expect(baseKeyOf(set(1, 11, 21), categoryOf)).toBe(baseKeyOf(set(1, 11, 22, 31), categoryOf));
@@ -48,9 +48,21 @@ describe('suggestion scoring', () => {
 });
 
 describe('which candidates become suggestions', () => {
-  it('needs a good verdict whose weaker score reaches the bar', () => {
-    const sets = [[1, 11, 21], [2, 12, 21], [3, 13, 21], [4, 14, 21], [5, 15, 21], [6, 16, 21]];
-    expect(chosen(sets, [good(), good(7, 9), good(9, 7), skip, { decision: 'skip', baseScore: 10, fullScore: 10 }, good(8, 8)])).toEqual([0, 5]);
+  it('keeps a verdict from the bar of 7 (the weaker score), whatever its decision, and never one below it', () => {
+    const pad = Array.from({ length: 12 }, (_, index) => [1 + (index % 6), 11 + ((index + 1) % 6), 22]);
+    const sets = [[1, 11, 21], [2, 12, 21], [3, 13, 21], [4, 14, 21], ...pad];
+    // Three candidates reach 7 or more (one is a skip, which is what the model calls a plain look); good with a weak base and a plain 6 do not.
+    const verdicts = [{ decision: 'skip' as const, baseScore: 7, fullScore: 8 }, good(6, 9), { decision: 'skip' as const, baseScore: 6, fullScore: 6 }, good(7, 7), ...pad.map(() => skip)];
+    expect(chosen(sets, verdicts)).toEqual([0, 3]);
+    // The bar is a parameter: at the prompt's own bar of 8 the same verdicts keep nothing.
+    expect(run(sets, verdicts, none, 100, 8).chosen.some(Boolean)).toBe(false);
+  });
+  it('ranks better scores first, so plain sevens only fill what the eights leave of the per-call quota', () => {
+    const pad = Array.from({ length: 12 }, () => [6, 16, 21]);
+    const sets = [[1, 11, 21], [2, 12, 21], [3, 13, 21], [4, 14, 21], ...pad];
+    const verdicts = [good(7, 7), good(7, 7), good(8, 8), good(7, 7), ...pad.map(() => skip)];
+    expect(chosen(sets, verdicts, none, 2)).toEqual([0, 2]);
+    expect(chosen(sets, verdicts, none, 1)).toEqual([2]);
   });
   it('keeps only a few per call, best score first, then best base score, then call order', () => {
     const sets = [[1, 11, 21], [2, 12, 21], [3, 13, 21], [4, 14, 21], [5, 15, 21], [6, 16, 21], [1, 12, 22], [2, 13, 22], [3, 14, 22], [4, 15, 22], [5, 16, 22], [6, 11, 22]];
@@ -90,21 +102,33 @@ describe('which candidates become suggestions', () => {
     expect(chosen(sets, verdicts, none)).toEqual([0]);
     expect(chosen(sets, verdicts, seenOf([[1, 11, 21, 32]]))).toEqual([0]);
   });
-  it('caps waiting and kept suggestions per garment, never counts shoes, and is not fooled by a set outside the candidate pool', () => {
+  it('counts only WAITING suggestions toward the per-garment cap (kept ones never close a garment), never counts shoes, and is not fooled by a set outside the candidate pool', () => {
     const crowded = Array.from({ length: SELECTION_LIMITS.perGarment }, (_, index) => [1, 11 + index, 21]);
     const pad = Array.from({ length: 9 }, () => [6, 16, 21]);
     const sets = [[1, 12, 22], [2, 12, 22], [2, 13, 21], ...pad];
     const verdicts = [...sets.slice(0, 3).map(() => good()), ...pad.map(() => skip)];
     // The first top already sits in six waiting suggestions: its look is blocked, the others are not.
     expect(chosen(sets, verdicts, seenOf(crowded))).toEqual([1, 2]);
-    // Kept suggestions count too, three waiting and three kept making six.
-    expect(chosen(sets, verdicts, seenOf(crowded.slice(0, 3), crowded.slice(3)))).toEqual([1, 2]);
+    // Kept suggestions do not count: the same six looks, three waiting and three kept (on other bases than the candidate's), block nothing...
+    expect(chosen(sets, verdicts, seenOf(crowded.slice(0, 3), crowded.slice(3)))).toEqual([0, 1, 2]);
+    // ...and a garment in many kept looks (more than the cap) is still welcome.
+    expect(chosen(sets, verdicts, seenOf([], Array.from({ length: 10 }, (_, index) => [1, [11, 13, 14, 15, 16][index % 5]!, 21 + (index % 2)])))).toEqual([0, 1, 2]);
     expect(chosen(sets, verdicts, seenOf(crowded.slice(0, SELECTION_LIMITS.perGarment - 1)))).toEqual([0, 1, 2]);
     // Shoes are never limited: twelve waiting suggestions in the same shoes block nothing.
     expect(chosen(sets, verdicts, seenOf(Array.from({ length: 12 }, (_, index) => [3 + (index % 3), 14 + (index % 3), 21])))).toEqual([0, 1, 2]);
     // The database reports each look by its base and garments, so a look whose shoes (or any garment) are not among the candidates still counts.
     const outside = { pending: crowded.map((entry) => ({ base: [id(1), id(entry[1]!)], garments: [id(1), id(entry[1]!), id(999)] })), kept: [] };
     expect(chosen(sets, verdicts, outside)).toEqual([1, 2]);
+  });
+  it('lets a plain look (below the prompt\'s good bar) use a garment only up to the lower ceiling, and leaves the rest of its places to better looks', () => {
+    const waiting = (count: number) => seenOf(Array.from({ length: count }, (_, index) => [1, 11 + index, 21]));
+    const sets = [[1, 12, 22], ...Array.from({ length: 9 }, () => [6, 16, 21])];
+    const pad = sets.slice(1).map(() => skip);
+    const plain = [good(7, 7), ...pad], better = [good(8, 8), ...pad];
+    expect(chosen(sets, plain, waiting(SELECTION_LIMITS.perGarmentPlain - 1))).toEqual([0]);
+    expect(chosen(sets, plain, waiting(SELECTION_LIMITS.perGarmentPlain))).toEqual([]);
+    expect(chosen(sets, better, waiting(SELECTION_LIMITS.perGarmentPlain))).toEqual([0]);
+    expect(chosen(sets, better, waiting(SELECTION_LIMITS.perGarment))).toEqual([]);
   });
   it('never keeps more than the room left on the waiting list, and declines the rest rather than dropping them', () => {
     const pad = Array.from({ length: 8 }, () => [6, 16, 21]);

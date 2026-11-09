@@ -1,9 +1,12 @@
 // OUTFITGEN1 candidate sets (B3). Pure and import-free so the outfit-generate Edge function and the tests share it. It bounds
 // what the model is asked to judge and never ranks taste into a ban: the only hard filters are validity (a complete outfit
-// of distinct eligible garments) and the owner's explicit bans (avoided pairs, disliked sets). Everything else only orders
+// of distinct eligible garments), the owner's explicit bans (avoided pairs, disliked sets) and, since QUALITY2, shorts or a graphic top
+// under a formal layer or jacket. Everything else only orders
 // and diversifies. Each garment is an "anchor": its candidate list is a finite, deterministic, diverse selection of at most
 // `perAnchor` sets that contain it, computed without looking at what was already judged, so assessing an item always ends.
 // OUTFITGEN-QUALITY1: sets that differ only by shoes are one idea and an anchor offers at most `perBase` looks of one top+bottoms.
+// OUTFITGEN-QUALITY2: a formal layer or jacket (formality 3 or more) is offered only with a sensible core (no shorts, no graphic or loud top),
+// is ranked by formality fit, and gets a guaranteed look in every other garment's list when such a pairing exists.
 
 export type CandidateCategory = 'top' | 'bottom' | 'one_piece' | 'layer' | 'outerwear' | 'footwear';
 export type CandidateItem = {
@@ -17,7 +20,7 @@ export type CandidateSet = { ids: string[]; key: string; anchor: string; score: 
 export type SignedSet = CandidateSet & { signature: string };
 
 export const CANDIDATE_LIMITS = Object.freeze({
-  perAnchor: 5, exploration: 2, partnerReuse: 2, explorationReuse: 3, perBase: 2, shoeTie: 0.02, poolCore: 24, poolAddOnAnchor: 8, addOnsPerKind: 2,
+  perAnchor: 5, exploration: 2, partnerReuse: 2, explorationReuse: 3, perBase: 2, shoeTie: 0.02, poolCore: 24, poolAddOnAnchor: 8, addOnsPerKind: 2, formalFrom: 3,
   maxAnchors: 12,
   maxGarments: 8, maxSets: 24, imageBytes: 3_145_728, plannedTokens: 40_000, textTokens: 8_000, imageTokens: 3_300,
 });
@@ -65,6 +68,16 @@ function seasonClash(items: readonly CandidateItem[]): boolean {
 const baseOf = (members: readonly CandidateItem[]) => members.filter(isBase).map((item) => item.id).sort(compare).join('|');
 const lookOf = (members: readonly CandidateItem[]) => members.filter((item) => item.category !== 'footwear').map((item) => item.id).sort(compare).join('|');
 const loud = (item: CandidateItem) => item.pattern !== null && item.pattern !== 'solid';
+/** A layer or jacket at the owner's "business" formality or above (a blazer, an overcoat). */
+const dressy = (item: CandidateItem) => !isCore(item) && (item.formality ?? 0) >= CANDIDATE_LIMITS.formalFrom;
+const NOT_UNDER_FORMAL = new Set(['graphic', 'floral', 'dotted', 'abstract', 'animal', 'other']);
+/**
+ * OUTFITGEN-QUALITY2, the one taste filter besides the owner's bans: shorts and a graphic or otherwise loud top are never offered under a
+ * formal layer or jacket (a blazer over shorts or a printed tee is a clear mismatch, and the judge would score it low anyway). Unknown length
+ * or pattern is given the benefit of the doubt. A wardrobe with no sensible partner simply gets no such look.
+ */
+const suitableUnderFormal = (item: CandidateItem) => !(item.category === 'bottom' && item.garmentLength === 'short')
+  && !(item.category === 'top' && item.pattern !== null && NOT_UNDER_FORMAL.has(item.pattern));
 /** Ordering score only (0..~1.1): colour pairing, formality agreement, season overlap, pattern clash, favourites. Never a filter. */
 export function softScore(items: readonly CandidateItem[]): number {
   const pairs: number[] = [];
@@ -73,7 +86,14 @@ export function softScore(items: readonly CandidateItem[]): number {
   }
   const colour = pairs.length ? pairs.reduce((a, b) => a + b, 0) / pairs.length : 0.5;
   const known = items.filter((item) => isCore(item) && item.formality !== null).map((item) => item.formality!);
-  const formality = known.length >= 2 ? Math.max(0, 1 - (Math.max(...known) - Math.min(...known)) / 3) : 0.7;
+  let formality = known.length >= 2 ? Math.max(0, 1 - (Math.max(...known) - Math.min(...known)) / 3) : 0.7;
+  // OUTFITGEN-QUALITY2: a layer or jacket with a known formality is judged against the core's mean too (a gap of two costs half, so a
+  // smart-casual blazer over a casual core is not buried, while a formal core with it ranks above that).
+  const over = items.filter((item) => !isCore(item) && item.formality !== null).map((item) => item.formality!);
+  if (known.length >= 1 && over.length) {
+    const mean = known.reduce((a, b) => a + b, 0) / known.length;
+    formality = (formality + Math.min(...over.map((value) => 1 - Math.min(1, Math.abs(value - mean) / 4)))) / 2;
+  }
   const season = Math.max(...['spring', 'summer', 'autumn', 'winter'].map((s) => items.filter((item) => item.seasons.includes(s)).length)) / items.length
     * (seasonClash(items) ? 0.5 : 1);
   const patterns = items.filter(loud).length;
@@ -107,8 +127,9 @@ const ordered = (items: readonly CandidateItem[]) => [...items].sort((a, b) => d
  * and reserves `exploration` slots for a deterministic hashed sample so mid-ranked pairings get judged as well.
  */
 export function anchorSets(anchor: CandidateItem, items: readonly CandidateItem[], bans: CandidateBans): CandidateSet[] {
-  const by = (category: CandidateCategory) => items.filter((item) => item.category === category && item.id !== anchor.id);
   const addOnAnchor = anchor.category === 'layer' || anchor.category === 'outerwear';
+  const formalAnchor = dressy(anchor);
+  const by = (category: CandidateCategory) => items.filter((item) => item.category === category && item.id !== anchor.id && (!formalAnchor || suitableUnderFormal(item)));
   const size = addOnAnchor ? CANDIDATE_LIMITS.poolAddOnAnchor : CANDIDATE_LIMITS.poolCore;
   const pool = (category: CandidateCategory) => pickPool(by(category), anchor, size);
   const cores: CandidateItem[][] = [];
@@ -120,17 +141,23 @@ export function anchorSets(anchor: CandidateItem, items: readonly CandidateItem[
   const sets = new Map<string, CandidateSet>();
   const add = (members: CandidateItem[], addOn: boolean) => {
     if (!members.some((item) => item.id === anchor.id) || banned(members, bans)) return;
+    if (members.some(dressy) && !members.filter(isCore).every(suitableUnderFormal)) return;
     const key = setKey(members.map((item) => item.id));
     if (!sets.has(key)) sets.set(key, { ids: ordered(members).map((item) => item.id), key, anchor: anchor.id, score: softScore(members), addOn,
       base: baseOf(members) });
   };
   const looks = new Map<string, CandidateSet[]>();
   const lookByKey = new Map<string, string>();
+  const formalKeys = new Set<string>();
   const addLook = (members: CandidateItem[], addOn: boolean) => {
     add(members, addOn);
     const key = setKey(members.map((item) => item.id));
-    if (sets.has(key)) { const look = lookOf(members); lookByKey.set(key, look); }
+    if (sets.has(key)) {
+      const look = lookOf(members); lookByKey.set(key, look);
+      if (addOn && members.some((item) => !isCore(item) && (item.formality ?? 0) >= CANDIDATE_LIMITS.formalFrom)) formalKeys.add(key);
+    }
   };
+  const formalAddOns = [...layers, ...outer].filter((item) => (item.formality ?? 0) >= CANDIDATE_LIMITS.formalFrom);
   for (const core of cores) {
     if (core.some((item, index) => core.findIndex((other) => other.id === item.id) !== index)) continue;
     if (!addOnAnchor) addLook(core, false);
@@ -138,6 +165,12 @@ export function anchorSets(anchor: CandidateItem, items: readonly CandidateItem[
       [...layers].sort((a, b) => fit(core[0]!, b) - fit(core[0]!, a) || compare(a.id, b.id)).slice(0, CANDIDATE_LIMITS.addOnsPerKind),
       [...outer].sort((a, b) => fit(core[0]!, b) - fit(core[0]!, a) || compare(a.id, b.id)).slice(0, CANDIDATE_LIMITS.addOnsPerKind)];
     for (const kind of kinds) for (const extra of kind) addLook([...core, extra], true);
+    // OUTFITGEN-QUALITY2: when the add-ons chosen for this core include no formal one, the formal add-on that fits it best is a candidate too,
+    // even when casual layers fit the top better.
+    if (!addOnAnchor && formalAddOns.length && !kinds.flat().some((item) => (item.formality ?? 0) >= CANDIDATE_LIMITS.formalFrom)) {
+      const formal = [...formalAddOns].sort((a, b) => fit(core[0]!, b) - fit(core[0]!, a) || compare(a.id, b.id))[0]!;
+      addLook([...core, formal], true);
+    }
   }
   // Sets that differ only by footwear are one idea: keep the best-scoring shoe, and let a stable hash of the look choose among
   // near-equal ones so the shoes still vary from look to look.
@@ -178,6 +211,16 @@ export function anchorSets(anchor: CandidateItem, items: readonly CandidateItem[
     const dropped = picks.length >= k - explore ? picks[picks.length - 1]! : null;
     if (dropped) drop(dropped);
     const taken = all.some((set) => set.addOn === wanted && take(set, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase));
+    if (!taken && dropped) take(dropped, Infinity, Infinity);
+  }
+  // OUTFITGEN-QUALITY2: when a formal layer or jacket exists, the list holds at least one look with one (the best-scored). It takes the place of
+  // a pick that no other guarantee needs; the base cap stays on and the list is never longer.
+  if (!addOnAnchor && formalKeys.size && !picks.some((set) => formalKeys.has(set.key))) {
+    const needed: ((set: CandidateSet) => boolean)[] = [(set) => !set.addOn, (set) => set.addOn];
+    const spare = (set: CandidateSet) => needed.every((has) => !has(set) || picks.some((other) => other !== set && has(other)));
+    const dropped = picks.length >= k - explore ? [...picks].reverse().find(spare) ?? null : null;
+    if (dropped) drop(dropped);
+    const taken = all.some((set) => formalKeys.has(set.key) && take(set, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase));
     if (!taken && dropped) take(dropped, Infinity, Infinity);
   }
   const rest = all.filter((set) => !picks.includes(set)).sort((a, b) => hashOf(a.key) - hashOf(b.key) || compare(a.key, b.key));

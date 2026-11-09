@@ -130,6 +130,12 @@ test.describe('OUTFITGEN1b suggested outfits', () => {
     await expect(cards(page)).toHaveCount(2);
     await expect(cards(page).first()).toContainText('Quiet colours that stay calm together.');
     await expect(cards(page).first()).toContainText(text('occasion.smart'));
+    await expect(cards(page).first()).toContainText(text('outfitgen.score', 'en', { score: 9 }));
+    await expect(cards(page).nth(1)).toContainText(text('outfitgen.score', 'en', { score: 8 }));
+    const help = section(page).locator('details.suggested-help');
+    await expect(help.getByText(text('outfitgen.scoreHelp'), { exact: true })).toBeHidden();
+    await help.getByText(text('outfitgen.scoreHelpSummary'), { exact: true }).click();
+    await expect(help.getByText(text('outfitgen.scoreHelp'), { exact: true })).toBeVisible();
     await expect(cards(page).first().locator('.outfit-thumb')).toHaveCount(3);
     await cards(page).first().getByRole('button', { name: text('outfitgen.keepLabel', 'en', { title: 'Crisp navy' }), exact: true }).click();
     await expect(cards(page)).toHaveCount(1);
@@ -244,11 +250,15 @@ test.describe('OUTFITGEN1b suggested outfits', () => {
   test('passes axe and fits 320 px at 200% text', async ({ page }) => {
     await start(page, { setup: {}, consent: true, suggestions: true });
     await expect(cards(page)).toHaveCount(2);
+    await section(page).locator('details.suggested-help summary').click();
+    await expect(section(page).getByText(text('outfitgen.scoreHelp'), { exact: true })).toBeVisible();
     await axe(page);
     await page.setViewportSize({ width: 320, height: 900 });
     for (const zoomed of [false, true]) {
       if (zoomed) await page.addStyleTag({ content: zoom });
       await noOverflow(page, 320);
+      await section(page).locator('details.suggested-help p').scrollIntoViewIfNeeded();
+      expect(await section(page).locator('details.suggested-help p').evaluate((node) => node.getBoundingClientRect().right <= innerWidth + 1)).toBe(true);
       await cards(page).nth(1).scrollIntoViewIfNeeded();
       await axe(page);
     }
@@ -266,6 +276,8 @@ test.describe('OUTFITGEN1b suggested outfits', () => {
       await expect(find(page, language)).toBeVisible();
       await expect(cards(page).first().getByRole('button', { name: text('outfitgen.keepLabel', language, { title: 'Crisp navy' }), exact: true })).toBeVisible();
       await expect(cards(page).first()).toContainText(text('occasion.smart', language));
+      await expect(cards(page).first()).toContainText(text('outfitgen.score', language, { score: 9 }));
+      await expect(section(page).getByText(text('outfitgen.scoreHelpSummary', language), { exact: true })).toBeVisible();
     });
   }
 });

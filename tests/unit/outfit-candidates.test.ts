@@ -150,6 +150,87 @@ describe('batches', () => {
   });
 });
 
+describe('candidate formal add-ons (OUTFITGEN-QUALITY2)', () => {
+  const casual = { formality: 1, colours: ['black'] }, formal = { formality: 3, colours: ['navy'] };
+  const allSeasons = ['spring', 'summer', 'autumn', 'winter'];
+  it('rank a layer by how its formality fits the core: formal core with a blazer above casual core with it, casual layer on casual core above both', () => {
+    counter = 1;
+    const [ct, cb, cf] = [make('top', casual), make('bottom', casual), make('footwear', casual)];
+    const [ft, fb, ff] = [make('top', formal), make('bottom', formal), make('footwear', formal)];
+    const blazer = make('layer', { ...formal, seasons: allSeasons }), hoodie = make('layer', { ...casual, seasons: allSeasons });
+    const casualPlusBlazer = softScore([ct, cb, cf, blazer]), formalPlusBlazer = softScore([ft, fb, ff, blazer]);
+    expect(formalPlusBlazer).toBeGreaterThan(casualPlusBlazer);
+    expect(softScore([ct, cb, cf, hoodie])).toBeGreaterThan(casualPlusBlazer);
+    // A smart-casual blazer over a casual core is lowered, not buried: the gap of two costs less than a formal core's whole formality term.
+    expect(casualPlusBlazer).toBeGreaterThan(softScore([ct, cb, cf, hoodie]) - 0.1);
+    // An add-on with no known formality changes nothing.
+    const unknown = make('layer', { ...formal, formality: null, seasons: allSeasons });
+    expect(softScore([ct, cb, cf, unknown])).toBe(softScore([ct, cb, cf, make('layer', { ...casual, seasons: allSeasons, formality: null })]));
+  });
+  it('give a formal layer\'s own list the formal garments first when they exist', () => {
+    counter = 1;
+    const tops = [make('top', casual), make('top', casual), make('top', formal)];
+    const bottoms = [make('bottom', casual), make('bottom', casual), make('bottom', formal)];
+    const shoes = [make('footwear', casual), make('footwear', formal)];
+    const blazer = make('layer', { ...formal, seasons: allSeasons });
+    const items = [...tops, ...bottoms, ...shoes, blazer];
+    const sets = anchorSets(blazer, items, none);
+    expect(sets[0]!.ids).toEqual(expect.arrayContaining([tops[2]!.id, bottoms[2]!.id, shoes[1]!.id, blazer.id]));
+    expect(sets.every((set) => set.ids.includes(blazer.id))).toBe(true);
+  });
+  it('keep a look with the formal layer or jacket in every other garment\'s list, even when casual layers fit the top better', () => {
+    counter = 1;
+    const tops = [make('top', casual), make('top', casual)];
+    const bottoms = Array.from({ length: 5 }, () => make('bottom', casual));
+    const shoes = [make('footwear', casual), make('footwear', casual)];
+    const hoodies = Array.from({ length: 3 }, () => make('layer', { ...casual, seasons: allSeasons }));
+    const bombers = Array.from({ length: 3 }, () => make('outerwear', { ...casual, seasons: allSeasons, warmth: 2 }));
+    const blazer = make('layer', { ...formal, seasons: allSeasons });
+    const items = [...tops, ...bottoms, ...shoes, ...hoodies, ...bombers, blazer];
+    for (const anchor of [tops[0]!, bottoms[2]!, shoes[0]!]) {
+      const sets = anchorSets(anchor, items, none);
+      expect(sets.length).toBeLessThanOrEqual(CANDIDATE_LIMITS.perAnchor);
+      expect(sets.some((set) => set.ids.includes(blazer.id))).toBe(true);
+      expect(sets.some((set) => !set.addOn) && sets.some((set) => set.addOn)).toBe(true);
+      const perBase = new Map<string, number>();
+      for (const set of sets) perBase.set(set.base, (perBase.get(set.base) ?? 0) + 1);
+      expect(Math.max(...perBase.values())).toBeLessThanOrEqual(CANDIDATE_LIMITS.perBase);
+    }
+  });
+  it('never offer a formal layer or jacket over shorts or a graphic top, in any list, and give it no look when no sensible pairing exists', () => {
+    counter = 1;
+    const plainTops = [make('top', casual), make('top', { ...casual, colours: ['white'] })], graphic = make('top', { ...casual, pattern: 'graphic' });
+    const trousers = [make('bottom', casual), make('bottom', { ...casual, colours: ['khaki'] })], shorts = make('bottom', { ...casual, garmentLength: 'short', seasons: ['summer'] });
+    const shoes = [make('footwear', casual), make('footwear', { ...casual, colours: ['white'] })];
+    const blazer = make('layer', { ...formal, seasons: allSeasons }), overcoat = make('outerwear', { ...formal, seasons: ['autumn', 'winter'], colours: ['grey'] });
+    const items = [...plainTops, graphic, ...trousers, shorts, ...shoes, blazer, overcoat];
+    const byId = new Map(items.map((item) => [item.id, item]));
+    for (const anchor of items) {
+      for (const set of anchorSets(anchor, items, none)) {
+        const members = set.ids.map((entry) => byId.get(entry)!);
+        if (!members.some((item) => item.id === blazer.id || item.id === overcoat.id)) continue;
+        expect(members.some((item) => item.garmentLength === 'short' || item.pattern === 'graphic')).toBe(false);
+      }
+    }
+    expect(anchorSets(blazer, items, none).length).toBeGreaterThan(0);
+    expect(anchorSets(graphic, items, none).every((set) => !set.ids.includes(blazer.id) && !set.ids.includes(overcoat.id))).toBe(true);
+    // A wardrobe whose only tops are graphic and only bottoms shorts: the blazer simply has none (and is still finite and assessable).
+    counter = 1;
+    const bad = [make('top', { ...casual, pattern: 'graphic' }), make('bottom', { ...casual, garmentLength: 'short' }), make('footwear', casual), make('layer', { ...formal, seasons: allSeasons })];
+    expect(anchorSets(bad[3]!, bad, none)).toEqual([]);
+    expect(anchorSets(bad[0]!, bad, none).every((set) => !set.ids.includes(bad[3]!.id))).toBe(true);
+    expect(anchorSets(bad[0]!, bad, none).length).toBeGreaterThan(0);
+  });
+  it('change nothing for a wardrobe with no formal layer or jacket', () => {
+    counter = 1;
+    const items = [make('top', casual), make('top', casual), ...Array.from({ length: 4 }, () => make('bottom', casual)), make('footwear', casual),
+      make('layer', { ...casual, seasons: allSeasons }), make('outerwear', { ...casual, warmth: 2 })];
+    const sets = anchorSets(items[0]!, items, none);
+    expect(sets).toHaveLength(CANDIDATE_LIMITS.perAnchor);
+    expect(sets.every((set) => valid(set.ids, items))).toBe(true);
+  });
+});
+
 describe('candidate quality rules (OUTFITGEN-QUALITY1)', () => {
   const look = (ids: readonly string[], items: readonly CandidateItem[]) => {
     const byId = new Map(items.map((item) => [item.id, item]));

@@ -1,9 +1,10 @@
 import {
-  OUTFITGEN_LIMITS, OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION, OUTFITGEN_RESERVATION_MICRO, OUTFITGEN_SCORE_BAR, buildOutfitGenRequest,
+  OUTFITGEN_LIMITS, OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION, OUTFITGEN_RESERVATION_MICRO, buildOutfitGenRequest,
   parseOutfitGenBody, parseOutfitGenItem, validateOutfitGenReply, type OutfitGenItem, type OutfitGenMode,
 } from '../../../src/domain/outfitgen.ts';
 import { buildBatch, setKey, type CandidateBans, type CandidateItem } from '../../../src/domain/outfit-candidates.ts';
-import { selectSuggestions, verdictScore, type SeenLook, type SelectionCategory, type SelectionSeen } from '../../../src/domain/outfit-selection.ts';
+import { selectSuggestions, verdictScore, SELECTION_LIMITS, type SeenLook, type SelectionCategory, type SelectionSeen } from '../../../src/domain/outfit-selection.ts';
+import { PLAIN_TEXT, type PlainLanguage } from '../../../src/domain/outfit-plain-text.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
 import { AI_GUARD_CODE, guardRefusal } from '../../../src/domain/ai-guard.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
@@ -218,6 +219,7 @@ export function createOutfitGenHandler(config: OutfitGenConfig, registrar: Outfi
       const registration = new Promise<boolean>((resolve) => { accept = resolve; });
       const work = runClaimed({ config, owner, requestId: input.requestId, built, sets: batch.sets.map((set) => set.ids),
         assessable, remaining, dispatchBeforeMs: claim.dispatchBeforeMs, registration, azureTransport, seen: plan.seen, room: plan.pendingRoom,
+        language: input.language,
         categoryOf: (id: string) => byId.get(id)?.category as SelectionCategory | undefined });
       try { registrar(work); accept(true); } catch { accept(false); }
       const outcome = await work;
@@ -261,7 +263,7 @@ async function downloadGarment(config: OutfitGenConfig, bearer: string, item: Ou
 type Claimed = {
   config: OutfitGenConfig; owner: string; requestId: string; built: ReturnType<typeof buildOutfitGenRequest>; sets: string[][];
   assessable: string[]; remaining: boolean; dispatchBeforeMs: number; registration: Promise<boolean>; azureTransport: AzureTransport;
-  seen: SelectionSeen; room: number; categoryOf: (id: string) => SelectionCategory | undefined;
+  seen: SelectionSeen; room: number; language: PlainLanguage; categoryOf: (id: string) => SelectionCategory | undefined;
 };
 type ClaimedOutcome = { code: string; suggested: number; judged: number; remaining: boolean };
 
@@ -293,12 +295,15 @@ function runClaimed(work: Claimed): Promise<ClaimedOutcome> {
       const outcome = await callOutfitGen(work.config.azure, work.built.body, stage(server, OUTFITGEN_LIMITS.requestMs), work.azureTransport);
       const verdicts = outcome.code === 'OK' ? validateOutfitGenReply(outcome.content, work.built.candidateRefs) : null;
       const code = outcome.code === 'OK' && !verdicts ? 'FAILED' : outcome.code;
-      const selection = verdicts ? selectSuggestions({ sets: work.sets, verdicts, bar: OUTFITGEN_SCORE_BAR, seen: work.seen, room: work.room, categoryOf: work.categoryOf }) : null;
+      const selection = verdicts ? selectSuggestions({ sets: work.sets, verdicts, bar: SELECTION_LIMITS.minScore, seen: work.seen, room: work.room, categoryOf: work.categoryOf }) : null;
+      // A verdict the model called good keeps its own title and reason; a plain look (it gave none) gets the fixed text of the owner's language.
+      const textOf = (verdict: { decision: string; title: string; reason: string }) => verdict.decision === 'good' ? { title: verdict.title, reason: verdict.reason } : PLAIN_TEXT[work.language];
       // Results go out in ranking order, kept suggestions first, each carrying its own candidate's set, so any truncation the database must
       // make (a race for room) drops the lowest-ranked ones and never a tied winner by call order.
       const results = verdicts && selection ? [...selection.order.filter((index) => selection.chosen[index]), ...selection.order.filter((index) => !selection.chosen[index])]
         .map((index) => ({ items: work.sets[index]!, decision: selection.chosen[index] ? 'suggested' : 'declined', score: verdictScore(verdicts[index]!),
-          occasion: verdicts[index]!.occasion, title: selection.chosen[index] ? verdicts[index]!.title : null, reason: selection.chosen[index] ? verdicts[index]!.reason : null })) : null;
+          occasion: verdicts[index]!.occasion, title: selection.chosen[index] ? textOf(verdicts[index]!).title : null,
+          reason: selection.chosen[index] ? textOf(verdicts[index]!).reason : null })) : null;
       const finished = await finish(code, outcome.usage, results, results ? work.assessable : null);
       if (finished.code !== 'OK' || code !== 'OK' || !results) return fail(closedCode(finished.code === 'OK' ? code : String(finished.code)));
       const recorded = object(finished.recorded) ? finished.recorded : null;

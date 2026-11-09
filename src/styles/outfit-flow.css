@@ -50,4 +50,7 @@
 .suggested-text h3 { margin: 0 0 2px; }
 .suggested-text p { margin: 0; }
 .suggested-occasion { color: var(--secondary); font-size: 0.875rem; }
+.suggested-help { font-size: 0.875rem; min-width: 0; }
+.suggested-help summary { cursor: pointer; padding: 8px 0; color: var(--secondary); }
+.suggested-help p { margin: 0 0 8px; overflow-wrap: anywhere; }
 .suggested-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block-start: auto; }

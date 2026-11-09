@@ -360,11 +360,12 @@ Owner feedback of 8 November 2026 (every garment matched with every other; a jac
 `azure-eu-terra-outfitgen-v2`, prompt and schema version 2, the same data flow, model, rates and reservation, so notice revision 2
 and consent stay. The judge scores the **base** look (top or one-piece, bottoms, shoes, as worn indoors) and the **whole** outfit
 separately on an anchored scale and ranks the candidates of a call against each other; the server stores the weaker score and keeps
-a suggestion only for a good verdict of at least 8 that also passes the caps: few per call and never more than the room left on the waiting
-list, at most two looks per top+bottoms base and six suggestions per garment among the owner's waiting and kept ones (shoes exempt;
-removed sets stay exact-set bans and count for nothing else). Sets that differ only by shoes are one
-idea in the candidate lists. No new data is sent (subcategory and material are free text and stay out). Details, cost, rollout and
-acceptance: `docs/cloud-development.md`, OUTFITGEN-QUALITY1.
+a suggestion only for a score (the weaker of the two) of at least 7 (OUTFITGEN-QUALITY2; the prompt's own "good" starts at 8, and a plain 7 gets fixed
+text in the owner's language) that also passes the caps: few per call and never more than the room left on the waiting
+list, at most two looks per top+bottoms base among the owner's waiting and kept suggestions and six suggestions per garment among the
+**waiting** ones (four for a plain look; shoes exempt; removed sets stay exact-set bans and count for nothing else). Sets that differ only by shoes are one
+idea in the candidate lists, and a formal layer or jacket is offered only with a sensible base (no shorts, no graphic top). No new data is sent (subcategory and material are free text and stay out). Details, cost, rollout and
+acceptance: `docs/cloud-development.md`, OUTFITGEN-QUALITY1 and OUTFITGEN-QUALITY2.
 ## OUTFITGEN1b suggested outfits in the app (inactive until the owner consents) - 6 November 2026
 
 Source only, after OUTFITGEN1a. The app stays inert until the server answers that suggested outfits are set up for the account and

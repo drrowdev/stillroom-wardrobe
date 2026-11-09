@@ -7,6 +7,7 @@ import {
 } from '../../src/domain/outfitgen';
 import { classifyOutfitGenResponse, UNUSABLE_RESPONSE_USAGE } from '../../supabase/functions/outfit-generate/azure';
 import { createOutfitGenHandler, OUTFITGEN_RPCS } from '../../supabase/functions/outfit-generate/handler';
+import { PLAIN_TEXT } from '../../src/domain/outfit-plain-text';
 
 const REQUEST = '11111111-1111-4111-8111-111111111111';
 const OWNER = '22222222-2222-4222-8222-222222222222';
@@ -398,7 +399,7 @@ describe('outfit generation handler quality rules (OUTFITGEN-QUALITY1)', () => {
   pending: 0, unassessed: 5, autoUnassessed: 5, autoCallsLeft: 3, live: false, serverTimeMs: 1_000_000, cooldownUntilMs: null };
   const accounting = { basis: 'estimated', amountMicro: '90000', currency: 'USD' };
   type Sent = { candidates: { ref: string; base: string[]; over: string[] }[]; garments: { ref: string; category: string }[] };
-  async function run(options: { plan?: Record<string, unknown>; verdict?: (index: number, set: Sent['candidates'][number]) => Record<string, unknown> } = {}) {
+  async function run(options: { plan?: Record<string, unknown>; language?: string; verdict?: (index: number, set: Sent['candidates'][number]) => Record<string, unknown> } = {}) {
     const items = wardrobe();
     const plan = { code: 'OK', items, pairs: [], disliked: [], known: [], seen: [], pendingRoom: 100, ...options.plan };
     let finish: Record<string, unknown> | null = null;
@@ -425,9 +426,9 @@ describe('outfit generation handler quality rules (OUTFITGEN-QUALITY1)', () => {
     });
     const request = new Request('http://127.0.0.1:54321/functions/v1/outfit-generate', { method: 'POST',
       headers: { Authorization: 'Bearer fictional.user.token', 'X-Stillroom-AI-Budget-Contract': '2', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId: REQUEST, mode: 'manual', language: 'en' }) });
+      body: JSON.stringify({ requestId: REQUEST, mode: 'manual', language: options.language ?? 'en' }) });
     const response = await createOutfitGenHandler(config, () => {}, transport)(request);
-    const results = finish ? (finish as { p_results: { items: string[]; decision: string; score: number; title: string | null }[] | null }).p_results : null;
+    const results = finish ? (finish as { p_results: { items: string[]; decision: string; score: number; title: string | null; reason: string | null }[] | null }).p_results : null;
     return { response, results, sent: sentData as Sent | null, items };
   }
   const good = { decision: 'good', baseScore: 9, fullScore: 9, title: 'Navy set', reason: 'Calm colours.' };
@@ -465,6 +466,27 @@ describe('outfit generation handler quality rules (OUTFITGEN-QUALITY1)', () => {
     const bases = kept.map((entry) => entry.items.filter((itemId) => ['top', 'bottom', 'one_piece'].includes(category.get(itemId)!)).sort().join('|'));
     expect(new Set(bases).size).toBe(bases.length);
     expect(results!.every((entry) => entry.decision === 'suggested' ? entry.title !== null : entry.title === null && entry.score === 9)).toBe(true);
+  });
+
+  it('lets a plain look (score 7) through with fixed text in the owner\'s language, keeps the model\'s own text for a good one, and still declines a 6', async () => {
+    const plain = { decision: 'skip', baseScore: 7, fullScore: 8, occasion: 'everyday', title: '', reason: '' };
+    for (const language of ['en', 'fi', 'sv'] as const) {
+      const { results } = await run({ language, verdict: (index) => (index === 0 ? plain : {}) });
+      expect(results![0]).toMatchObject({ decision: 'suggested', score: 7, occasion: 'everyday', title: PLAIN_TEXT[language].title, reason: PLAIN_TEXT[language].reason });
+    }
+    const six = await run({ verdict: (index) => (index === 0 ? { ...plain, baseScore: 6 } : {}) });
+    expect(six.results![0]).toMatchObject({ decision: 'declined', score: 6, title: null, reason: null });
+    // A verdict the model called good keeps its own words even at 7 (the model broke its own rule; the text is still its).
+    const own = await run({ verdict: (index) => (index === 0 ? { ...good, baseScore: 7, fullScore: 7 } : {}) });
+    expect(own.results![0]).toMatchObject({ decision: 'suggested', score: 7, title: 'Navy set', reason: 'Calm colours.' });
+  });
+
+  it('keeps better looks ahead of plain ones within the same call', async () => {
+    const { results } = await run({ plan: { pendingRoom: 1 }, verdict: (index) => (index === 2 ? { ...good, baseScore: 8, fullScore: 8 }
+      : { decision: 'skip', baseScore: 7, fullScore: 7, occasion: 'smart' }) });
+    const kept = results!.filter((entry) => entry.decision === 'suggested');
+    expect(kept).toHaveLength(1);
+    expect(kept[0]).toMatchObject({ score: 8, title: 'Navy set' });
   });
 
   it('counts the waiting and kept looks the plan reports, and only those: a base the owner already has twice gets no third look, a removed one still does', async () => {
@@ -510,12 +532,15 @@ describe('outfit generation handler quality rules (OUTFITGEN-QUALITY1)', () => {
     const plain = await run({ verdict: () => good, plan: { seen: odd } });
     expect(plain.response.status).toBe(200);
     expect(plain.results).not.toBeNull();
-    // What remains of the history still counts: six kept looks that used the top (and no base) leave the top at its cap.
-    const crowded = await run({ verdict: () => good, plan: { seen: [...odd, ...Array.from({ length: 6 }, () => ['kept', [], [top]])] } });
+    // What remains of the history still counts: six WAITING looks that used the top (and no base) leave the top at its cap.
+    const crowded = await run({ verdict: () => good, plan: { seen: [...odd, ...Array.from({ length: 6 }, () => ['suggested', [], [top]])] } });
     expect(crowded.response.status).toBe(200);
     expect(crowded.results!.some((entry) => entry.decision === 'suggested')).toBe(true);
     expect(crowded.results!.filter((entry) => entry.items.includes(top)).every((entry) => entry.decision === 'declined')).toBe(true);
     expect(plain.results!.filter((entry) => entry.items.includes(top)).some((entry) => entry.decision === 'suggested')).toBe(true);
+    // The same six looks KEPT leave the top open (QUALITY2): kept looks no longer close a garment.
+    const kept = await run({ verdict: () => good, plan: { seen: [...odd, ...Array.from({ length: 6 }, () => ['kept', [], [top]])] } });
+    expect(kept.results!.filter((entry) => entry.items.includes(top)).some((entry) => entry.decision === 'suggested')).toBe(true);
     // Arrays longer than a set can be, or a malformed row, are still refused.
     for (const bad of [['kept', [], Array.from({ length: 7 }, (_, index) => id(index + 1))], ['kept', [top]], ['removed', [], []], ['kept', ['x'], []]]) {
       const refused = await run({ plan: { seen: [bad] } });
