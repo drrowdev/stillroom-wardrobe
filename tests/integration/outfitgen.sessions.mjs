@@ -12,6 +12,10 @@
 //   outfitgenLimitsCheckpoint / outfitgenLimitsCompare / outfitgenLimitProbes: the claim limits migration (OUTFITGEN3-B2).
 //   outfitgenCapCheckpoint / outfitgenCapCompare / outfitgenCapProbes: the cap of 100 pending suggestions (OUTFITGEN-PENDING100):
 //     four bodies differ by exactly their cap line, then the plan, claim, recording and Undo are probed at 99, 100 and 101.
+//   outfitgenJudgeCheckpoint / outfitgenJudgeCompare / outfitgenJudgeProbes: judge v2 (OUTFITGEN-QUALITY1): the claim and the plan differ by
+//     exactly their stated deltas, the v2 manifest equals v1 apart from its identity, then the manifest follows the controls, a v2 settlement
+//     records prompt version 2, the plan lists the waiting and kept sets, and the guarded controls switch refuses held work, waits for a
+//     claim's lock and blocks admission while its transaction is open.
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
@@ -1134,6 +1138,296 @@ export async function outfitgenCapProbes(snapshot, sql, mark = () => {}) {
     if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
     throw error;
   } finally {
+    await h.restore(before, made);
+  }
+}
+
+// OUTFITGEN-QUALITY1: judge v2. Two functions are replaced (the claim accepts manifest v1 or v2; the plan adds the `seen` key) and the
+// immutable v2 manifest is added. Each replaced function is its latest body (20261109090000) plus the stated delta, trimmed lines.
+const JUDGE_MIGRATION = '20261109100000_outfitgen_judge_v2.sql';
+const PLAN = 'public.outfitgen_plan(uuid)';
+const MANIFEST_V2 = 'azure-eu-terra-outfitgen-v2';
+const SEEN_LINES = [
+  "select coalesce(jsonb_agg(jsonb_build_array(q.state,q.base,q.garments) order by q.state desc,q.created_at desc,q.id),'[]'::jsonb) into v_seen from (",
+  'select s.state,s.created_at,s.id,',
+  'coalesce((select jsonb_agg(i.id order by i.id) from public.items i where i.owner_id=s.owner_id and i.id=any(s.item_ids)',
+  "and i.category in ('top','bottom','one_piece')),'[]'::jsonb) base,",
+  'coalesce((select jsonb_agg(i.id order by i.id) from public.items i where i.owner_id=s.owner_id and i.id=any(s.item_ids)',
+  "and i.category<>'footwear'),'[]'::jsonb) garments",
+  "from public.suggested_outfits s where s.owner_id=p_owner_id and (s.state='suggested' or s.id in (",
+  "select k.id from public.suggested_outfits k where k.owner_id=p_owner_id and k.state='kept' order by k.created_at desc,k.id limit 200))) q;",
+];
+const JUDGE_CHANGES = [
+  { name: 'public.outfitgen_claim', sig: CLAIM, config: ['search_path=""', 'lock_timeout=2s'], like: FINISH, edits: [
+    [["if not found or m.id<>'azure-eu-terra-outfitgen-v1' then return jsonb_build_object('code','UNCONFIGURED','claimed',false); end if;"],
+      ["if not found or m.id not in ('azure-eu-terra-outfitgen-v1','azure-eu-terra-outfitgen-v2') then return jsonb_build_object('code','UNCONFIGURED','claimed',false); end if;"]]] },
+  { name: 'public.outfitgen_plan', sig: PLAN, config: ['search_path=""', 'lock_timeout=2s'], like: FINISH, edits: [
+    [['declare p public.profiles; c private.ai_controls; v_code text; v_items jsonb; v_pairs jsonb; v_disliked jsonb; v_known jsonb;'],
+      ['declare p public.profiles; c private.ai_controls; v_code text; v_items jsonb; v_pairs jsonb; v_disliked jsonb; v_known jsonb; v_seen jsonb;']],
+    [['limit 20000) k;'], ['limit 20000) k;', ...SEEN_LINES]],
+    [["return jsonb_build_object('code','OK','items',v_items,'pairs',v_pairs,'disliked',v_disliked,'known',v_known,"],
+      ["return jsonb_build_object('code','OK','items',v_items,'pairs',v_pairs,'disliked',v_disliked,'known',v_known,'seen',v_seen,"]]] },
+];
+const applyEdits = (all, edits, reverse = false) => edits.reduce((text, [from, to]) => (text === null ? null : (reverse ? replaceLines(text, to, from) : replaceLines(text, from, to))), all);
+const JUDGED = JUDGE_CHANGES.map((change) => `'${change.sig}'::regprocedure`).join(',');
+// The same document as the cap comparison; the two replaced functions are listed by identity instead of by body, and the manifest rows are
+// compared without the v2 row (which the migration adds and the compare checks on its own).
+const JUDGE_STATE = Object.freeze({
+  replaced: PROC_PROPS(`p.oid in (${JUDGED})`),
+  functions: `select jsonb_build_object('count',count(*),'md5',md5(string_agg(p.oid::regprocedure::text||'|'||pg_get_functiondef(p.oid)||'|'||coalesce(p.proacl::text,''),E'\\n'
+    order by p.oid::regprocedure::text)))::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname in ('public','private') and p.prokind='f' and p.oid not in (${JUDGED})`,
+  ...Object.fromEntries(Object.entries(LIMITS_STATE).filter(([part]) => part !== 'claim' && part !== 'functions' && part !== 'manifests')),
+  manifests: `${rowsDigest('private.ai_execution_manifests')} where t.id<>'${MANIFEST_V2}'`,
+});
+const manifestIdentity = (id) => `select (to_jsonb(m)-array['id','prompt_version','prompt_sha256','schema_sha256','settings_sha256','tariff_description'])::text
+  from private.ai_execution_manifests m where id='${id}'`;
+
+// Before the judge migration (the predecessor inventory, 46 migrations through 20261109090000): one owner is configured and consented,
+// one genuine claim is held and everything the migration must not change is captured.
+export async function outfitgenJudgeCheckpoint(snapshot, sql, mark = () => {}) {
+  note = (label) => { last = label; mark(label); };
+  const h = helpers(snapshot, sql);
+  const { a, one, scalar, claim } = h;
+  const before = await h.configure();
+  try {
+    note('configure');
+    await sql(`update private.ai_controls set outfitgen_activated=true,outfitgen_consent_revision=2,outfitgen_consented_at=clock_timestamp()
+      where owner_id=${literal(a.uid)};`);
+    note('claim');
+    const id = randomUUID();
+    const held = await claim(id, ['c'.repeat(64)]);
+    equal([held.code, held.claimed], ['OK', true]);
+    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(id)};`), 'held');
+    equal(await scalar(`select count(*) from private.ai_execution_manifests where id='${MANIFEST_V2}';`), '0');
+    const state = await limitsState(one, JUDGE_STATE);
+    const bodies = {};
+    for (const change of JUDGE_CHANGES) {
+      const short = change.name.split('.')[1];
+      note(`body-${short}`);
+      bodies[change.name] = lines(await scalar(`select prosrc from pg_proc where oid='${change.sig}'::regprocedure;`));
+      note(`predecessor-${short}-body`);
+      ok(isDeepStrictEqual(bodies[change.name], await bodyLinesOf(CAP_MIGRATION, change.name)));
+      note(`predecessor-${short}-properties`);
+      const props = (sig) => one(`select jsonb_build_object('owner',pg_get_userbyid(p.proowner),'acl',p.proacl::text,'secdef',p.prosecdef,'config',p.proconfig,
+        'kind',p.prokind)::text from pg_proc p where p.oid='${sig}'::regprocedure;`);
+      const [mine, like] = [await props(change.sig), await props(change.like)];
+      ok(mine.secdef === true && mine.kind === 'f' && isDeepStrictEqual(mine.config, change.config) && mine.owner === like.owner && mine.acl === like.acl);
+    }
+    note('plan-without-seen');
+    ok(!('seen' in await one(`select public.outfitgen_plan(${literal(a.uid)});`)));
+    return { before, id, state, bodies };
+  } catch (error) {
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
+    await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(a.uid)};`);
+    await h.restore(before, []);
+    throw error;
+  }
+}
+
+// After the judge migration alone: only the two bodies differ, each by exactly its stated delta and each equal to the migration; the v2
+// manifest equals v1 apart from its identity, hashes, prompt version and description; the held request survives and settles on v1.
+export async function outfitgenJudgeCompare(checkpoint, snapshot, sql, mark = () => {}) {
+  note = (label) => { last = label; mark(label); };
+  const h = helpers(snapshot, sql);
+  const { one, scalar, finish } = h;
+  try {
+    const state = await limitsState(one, JUDGE_STATE);
+    note('state-compare');
+    for (const part of Object.keys(JUDGE_STATE)) {
+      if (!isDeepStrictEqual(state[part], checkpoint.state[part])) { note(`state-differs-${part}`); requireEvidence(false); }
+    }
+    for (const change of JUDGE_CHANGES) {
+      const short = change.name.split('.')[1];
+      note(`body-${short}`);
+      const after = lines(await scalar(`select prosrc from pg_proc where oid='${change.sig}'::regprocedure;`));
+      const was = checkpoint.bodies[change.name];
+      note(`body-${short}-equals-migration`);
+      ok(isDeepStrictEqual(after, await bodyLinesOf(JUDGE_MIGRATION, change.name)));
+      note(`body-${short}-only-delta`);
+      ok(isDeepStrictEqual(applyEdits(was, change.edits), after));
+      ok(isDeepStrictEqual(applyEdits(after, change.edits, true), was));
+    }
+    note('manifest-v2');
+    equal(await scalar(`select prompt_version::text from private.ai_execution_manifests where id='${MANIFEST_V2}';`), '2');
+    equal(await scalar(`${manifestIdentity(MANIFEST_V2)};`), await scalar(`${manifestIdentity(MANIFEST)};`));
+    ok((await scalar(`select count(distinct x) from (select prompt_sha256 x from private.ai_execution_manifests where id in ('${MANIFEST}','${MANIFEST_V2}')
+      union all select schema_sha256 from private.ai_execution_manifests where id in ('${MANIFEST}','${MANIFEST_V2}')
+      union all select settings_sha256 from private.ai_execution_manifests where id in ('${MANIFEST}','${MANIFEST_V2}')) t;`)) === '6');
+    note('held');
+    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(checkpoint.id)};`), 'held');
+    const done = await finish(checkpoint.id, 'OK', USAGE, [], null);
+    equal(done.code, 'OK');
+    equal(await scalar(`select charge_state||':'||accounted_micro from private.ai_usage where request_id=${literal(checkpoint.id)};`), `estimated:${30000 * 220 / 100 + 2000 * 1320 / 100}`);
+  } catch (error) {
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
+    throw error;
+  } finally {
+    await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(h.a.uid)} and charge_state='held';`);
+    await h.restore(checkpoint.before, []);
+  }
+}
+
+// OUTFITGEN-QUALITY1 after the migration: v1 still admitted under v1 controls, the manifest follows the controls, finish records prompt
+// version 2, a controls move while a request is in flight settles the accounting and records nothing, and the plan's `seen` key lists the
+// waiting and kept sets (newest first) and not the removed or declined ones.
+export async function outfitgenJudgeProbes(snapshot, sql, mark = () => {}) {
+  note = (label) => { last = label; mark(label); };
+  const h = helpers(snapshot, sql);
+  const { a, one, scalar, rpc, sig, plan, finish, result } = h;
+  const before = await h.configure();
+  const made = [];
+  const claimWith = (id, manifest, signatures, targets = []) => one(`select public.outfitgen_claim(${literal(a.uid)},${literal(id)},${literal(manifest)},
+    false,${texts(signatures)},${uuids(targets)});`);
+  const rows = (id) => scalar(`select count(*) from private.ai_usage where request_id=${literal(id)};`);
+  try {
+    note('setup');
+    await sql(`update private.ai_controls set outfitgen_activated=true,outfitgen_consent_revision=2,outfitgen_consented_at=clock_timestamp()
+      where owner_id=${literal(a.uid)};`);
+    const top = await h.garment('top'), bottom = await h.garment('bottom'), shoes = await h.garment('footwear');
+    const top2 = await h.garment('top', ['red']), layer = await h.garment('layer');
+    made.push(top, bottom, shoes, top2, layer);
+    const setA = [top, bottom, shoes], setB = [top, bottom, shoes, layer], setC = [top2, bottom, shoes];
+    const [sa, sb, sc] = [await sig(setA), await sig(setB), await sig(setC)];
+
+    note('v1-inert');
+    const R1 = randomUUID();
+    const v1 = await claimWith(R1, MANIFEST, [sa]);
+    equal([v1.code, v1.claimed, v1.manifestId], ['OK', true, MANIFEST]);
+    equal(await scalar(`select manifest_id from private.ai_usage_evidence where request_id=${literal(R1)};`), MANIFEST);
+    equal((await finish(R1, 'OK', USAGE, [], null)).code, 'OK');
+
+    note('manifest-follows-controls');
+    const R2 = randomUUID(), R3 = randomUUID();
+    equal((await claimWith(R2, MANIFEST_V2, [sa])).code, 'CONFIG_CHANGED');
+    equal((await claimWith(R3, 'azure-eu-terra-outfitgen-v3', [sa])).code, 'UNCONFIGURED');
+    equal([await rows(R2), await rows(R3)], ['0', '0']);
+    await sql(`update private.ai_controls set outfitgen_manifest_id=${literal(MANIFEST_V2)},updated_at=clock_timestamp() where owner_id=${literal(a.uid)};`);
+    const R4 = randomUUID();
+    equal((await claimWith(R4, MANIFEST, [sa])).code, 'CONFIG_CHANGED');
+    equal(await rows(R4), '0');
+
+    note('v2-claim');
+    const R5 = randomUUID();
+    const v2 = await claimWith(R5, MANIFEST_V2, [sa, sb, sc], [top, bottom]);
+    equal([v2.code, v2.claimed, v2.manifestId], ['OK', true, MANIFEST_V2]);
+    equal(await scalar(`select manifest_id from private.ai_usage_evidence where request_id=${literal(R5)};`), MANIFEST_V2);
+
+    note('v2-finish');
+    // Stored score is whatever the Edge computed (the weaker of the base and the whole look); the database records it as given.
+    const done = await finish(R5, 'OK', USAGE, [result(setA, 'suggested', 9), result(setB, 'suggested', 8), result(setC, 'declined', 5)], [top, bottom]);
+    equal(done.code, 'OK');
+    equal(done.recorded, { suggested: 2, declined: 1, assessed: 2 });
+    equal(await scalar(`select string_agg(state||':'||score||':'||manifest_id||':'||prompt_version,',' order by signature) from public.suggested_outfits
+      where owner_id=${literal(a.uid)} and request_id=${literal(R5)};`),
+    [[sa, 'suggested:9'], [sb, 'suggested:8'], [sc, 'declined:5']].sort(([x], [y]) => (x < y ? -1 : 1)).map(([, v]) => `${v}:${MANIFEST_V2}:2`).join(','));
+
+    note('plan-seen');
+    const byIds = async (signature) => scalar(`select id from public.suggested_outfits where owner_id=${literal(a.uid)} and signature=${literal(signature)};`);
+    const idA = await byIds(sa), idB = await byIds(sb);
+    const keys = (value) => [...value].sort().join('|');
+    // Each look is its base (top and bottoms) and its garments other than shoes, computed in the database.
+    const look = (state, set) => [state, keys(set.filter((entry) => [top, bottom, top2].includes(entry))), keys(set.filter((entry) => entry !== shoes))];
+    const seenOf = async () => (await plan()).seen.map(([state, base, garments]) => [state, keys(base), keys(garments)]);
+    equal(await seenOf(), [look('suggested', setB), look('suggested', setA)]);
+    equal((await rpc(a, 'outfitgen_keep', { p_id: idA, p_outfit_id: randomUUID() })).code, 'OK');
+    equal(await seenOf(), [look('suggested', setB), look('kept', setA)]);
+    equal((await rpc(a, 'outfitgen_remove', { p_id: idB })).code, 'OK');
+    equal(await seenOf(), [look('kept', setA)]);
+    const planned = await plan();
+    equal(Object.keys(planned).sort(), ['code', 'disliked', 'items', 'known', 'pairs', 'pendingRoom', 'seen']);
+    ok(planned.disliked.some((ids) => keys(ids) === keys(setB)));
+    ok(!planned.seen.some(([, , garments]) => keys(garments) === keys(setC.filter((entry) => entry !== shoes))));
+
+    // The guarded switch (docs/outfitgen-manifest-switch.sql): one transaction, the claim's lock order, refused while outfit work is held.
+    // No probe needs two sessions to meet in time. The refusals are proved in sequence (the same text refuses with held work and then
+    // succeeds once it has settled, with nothing else changed), and the lock order is proved with a separate open transaction that holds
+    // the profile row for a fixed, long window: a claim answers BUSY and the switch, with a short lock timeout, fails without changing
+    // anything. The error text of a refusal is suppressed by the local SQL runner, so a refusal is read from the state it leaves.
+    const template = await readFile(new URL('../../docs/outfitgen-manifest-switch.sql', import.meta.url), 'utf8');
+    const guardSql = (from, to, lockTimeout = null) => {
+      const text = template.replaceAll('<owner>', a.uid).replaceAll('<from>', from).replaceAll('<to>', to);
+      if (lockTimeout === null) return text;
+      const short = text.replace("set local lock_timeout = '10s';", `set local lock_timeout = '${lockTimeout}';`);
+      ok(short !== text);
+      return short;
+    };
+    const runGuard = async (from, to, lockTimeout = null) => { try { await sql(guardSql(from, to, lockTimeout)); return null; } catch (error) { return error; } };
+    const installed = () => scalar(`select outfitgen_manifest_id from private.ai_controls where owner_id=${literal(a.uid)};`);
+    const s7 = await sig([top2, bottom, shoes, layer]);
+    const consentState = () => scalar(`select outfitgen_consent_revision::text||outfitgen_notice_revision::text||outfitgen_activated::text
+      from private.ai_controls where owner_id=${literal(a.uid)};`);
+    const state = (id) => scalar(`select charge_state from private.ai_usage where request_id=${literal(id)};`);
+
+    note('guard-refuses-wrong-installed');
+    equal(await installed(), MANIFEST_V2);
+    const consentBefore = await consentState();
+    equal(consentBefore, '22true');
+    ok((await runGuard(MANIFEST, MANIFEST_V2)) !== null);
+    ok((await runGuard(MANIFEST_V2, 'azure-eu-terra-outfitgen-v3')) !== null);
+    equal(await installed(), MANIFEST_V2);
+
+    // 1. Held outfit work: the switch refuses and changes nothing; once it has settled, the same text succeeds.
+    note('guard-claim-held');
+    const R7 = randomUUID();
+    equal((await claimWith(R7, MANIFEST_V2, [s7], [top2])).code, 'OK');
+    equal(await state(R7), 'held');
+    note('guard-refused-on-held-row');
+    ok((await runGuard(MANIFEST_V2, MANIFEST)) !== null);
+    equal(await installed(), MANIFEST_V2);
+    equal(await state(R7), 'held');
+    note('guard-settle-held');
+    equal((await finish(R7, 'OK', USAGE, [], [top2])).code, 'OK');
+    equal(await state(R7), 'estimated');
+    note('guard-switch-after-settle');
+    equal(await runGuard(MANIFEST_V2, MANIFEST), null);
+    equal(await installed(), MANIFEST);
+    const R9 = randomUUID();
+    equal((await claimWith(R9, MANIFEST_V2, [s7], [top2])).code, 'CONFIG_CHANGED');
+    equal(await rows(R9), '0');
+    note('guard-rollback');
+    equal(await runGuard(MANIFEST, MANIFEST_V2), null);
+    equal(await installed(), MANIFEST_V2);
+    equal(await consentState(), consentBefore);
+
+    // 2. Lock order: the profile row is held by an open transaction for 25 s. A claim meets it with its no-wait lock and writes nothing;
+    //    the switch, whose first lock is the same row, fails at its short lock timeout and changes nothing. The only possible reason is that
+    //    lock: the same text succeeded just above and succeeds again after the holder has finished.
+    note('guard-lock-holder-start');
+    const holdSeconds = 25;
+    const lockHolder = sql(`begin; select 1 from public.profiles where owner_id=${literal(a.uid)} for update; select pg_sleep(${holdSeconds}); commit;`)
+      .then(() => null, (error) => error);
+    try {
+      let started = false;
+      for (let attempt = 0; attempt < 40 && !started; attempt++) {
+        started = Number(await scalar(`select count(*) from pg_stat_activity where datname=current_database() and pid<>pg_backend_pid()
+          and query like '%pg_sleep(${holdSeconds})%' and wait_event='PgSleep';`)) > 0;
+        if (!started) await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      ok(started);
+      note('guard-claim-busy');
+      const R8 = randomUUID();
+      equal((await claimWith(R8, MANIFEST_V2, [s7], [top2])).code, 'BUSY');
+      equal(await rows(R8), '0');
+      note('guard-switch-lock-timeout');
+      ok((await runGuard(MANIFEST_V2, MANIFEST, '1s')) !== null);
+      equal(await installed(), MANIFEST_V2);
+    } finally {
+      note('guard-lock-holder-finish');
+      ok((await lockHolder) === null);
+    }
+    note('guard-switch-after-holder');
+    equal(await runGuard(MANIFEST_V2, MANIFEST), null);
+    equal(await installed(), MANIFEST);
+    equal(await runGuard(MANIFEST, MANIFEST_V2), null);
+    equal(await installed(), MANIFEST_V2);
+    equal(await consentState(), consentBefore);
+
+  } catch (error) {
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
+    throw error;
+  } finally {
+    await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(a.uid)} and charge_state='held';`);
     await h.restore(before, made);
   }
 }

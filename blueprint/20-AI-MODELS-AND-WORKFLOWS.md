@@ -354,6 +354,17 @@ Source only: the `outfit-generate` Edge function, `20261106090000_outfit_generat
 - **Evidence.** Engineering tests only; no provider call. Prompt quality, tokens per photo, latency and the quota question are
   verified only by the owner trial with real photos.
 
+## OUTFITGEN-QUALITY1 judge v2 (source only) - 9 November 2026
+
+Owner feedback of 8 November 2026 (every garment matched with every other; a jacket hid a flat base): manifest
+`azure-eu-terra-outfitgen-v2`, prompt and schema version 2, the same data flow, model, rates and reservation, so notice revision 2
+and consent stay. The judge scores the **base** look (top or one-piece, bottoms, shoes, as worn indoors) and the **whole** outfit
+separately on an anchored scale and ranks the candidates of a call against each other; the server stores the weaker score and keeps
+a suggestion only for a good verdict of at least 8 that also passes the caps: few per call and never more than the room left on the waiting
+list, at most two looks per top+bottoms base and six suggestions per garment among the owner's waiting and kept ones (shoes exempt;
+removed sets stay exact-set bans and count for nothing else). Sets that differ only by shoes are one
+idea in the candidate lists. No new data is sent (subcategory and material are free text and stay out). Details, cost, rollout and
+acceptance: `docs/cloud-development.md`, OUTFITGEN-QUALITY1.
 ## OUTFITGEN1b suggested outfits in the app (inactive until the owner consents) - 6 November 2026
 
 Source only, after OUTFITGEN1a. The app stays inert until the server answers that suggested outfits are set up for the account and

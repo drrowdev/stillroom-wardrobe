@@ -149,3 +149,83 @@ describe('batches', () => {
     expect(batch.uncovered).toEqual([]);
   });
 });
+
+describe('candidate quality rules (OUTFITGEN-QUALITY1)', () => {
+  const look = (ids: readonly string[], items: readonly CandidateItem[]) => {
+    const byId = new Map(items.map((item) => [item.id, item]));
+    return ids.filter((entry) => byId.get(entry)!.category !== 'footwear').sort().join('|');
+  };
+  const baseOf = (ids: readonly string[], items: readonly CandidateItem[]) => {
+    const byId = new Map(items.map((item) => [item.id, item]));
+    return ids.filter((entry) => ['top', 'bottom', 'one_piece'].includes(byId.get(entry)!.category)).sort().join('|');
+  };
+  it('treat sets that differ only by footwear as one idea, and still vary the shoes from look to look', () => {
+    const items = wardrobe(3, 6, 4, 2, 3);
+    const sets = anchorSets(items[0]!, items, none);
+    expect(sets.length).toBe(CANDIDATE_LIMITS.perAnchor);
+    expect(new Set(sets.map((set) => look(set.ids, items))).size).toBe(sets.length);
+    const shoes = new Set(sets.flatMap((set) => set.ids.filter((entry) => items.find((item) => item.id === entry)!.category === 'footwear')));
+    expect(shoes.size).toBeGreaterThanOrEqual(2);
+  });
+  it('picks the better-scoring shoe when the scores really differ', () => {
+    counter = 1;
+    const top = make('top', { colours: ['navy'], pattern: 'striped' }), bottom = make('bottom', { colours: ['navy'], pattern: 'checked' });
+    const plain = make('footwear', { colours: ['white'] }), loud = make('footwear', { colours: ['red'], pattern: 'floral' });
+    const sets = anchorSets(top, [top, bottom, plain, loud], none);
+    expect(sets).toHaveLength(1);
+    expect(sets[0]!.ids).toContain(plain.id);
+    expect(sets[0]!.ids).not.toContain(loud.id);
+  });
+  it('offer at most two looks of one top and bottoms to an anchor while other bases are available', () => {
+    const items = wardrobe(2, 8, 2, 2, 4);
+    const sets = anchorSets(items[0]!, items, none);
+    expect(sets).toHaveLength(CANDIDATE_LIMITS.perAnchor);
+    const perBase = new Map<string, number>();
+    for (const set of sets) perBase.set(baseOf(set.ids, items), (perBase.get(baseOf(set.ids, items)) ?? 0) + 1);
+    expect(Math.max(...perBase.values())).toBeLessThanOrEqual(CANDIDATE_LIMITS.perBase);
+    expect(perBase.size).toBeGreaterThanOrEqual(Math.ceil(CANDIDATE_LIMITS.perAnchor / CANDIDATE_LIMITS.perBase));
+    expect(sets.every((set) => set.base === baseOf(set.ids, items))).toBe(true);
+  });
+  it('keep the base cap in a small wardrobe and return fewer sets rather than a third look of one base', () => {
+    const items = wardrobe(1, 1, 1, 0, 3);
+    const sets = anchorSets(items[0]!, items, none);
+    expect(sets).toHaveLength(CANDIDATE_LIMITS.perBase);
+    expect(new Set(sets.map((set) => set.base)).size).toBe(1);
+  });
+  it('spread a short list over every base that exists, never over-filling one while another is unused (the swap and the fill keep the cap)', () => {
+    counter = 1;
+    const top = make('top'), bottoms = [make('bottom', { colours: ['navy'] }), make('bottom', { colours: ['brown'] }), make('bottom', { colours: ['grey'] })];
+    const shoes = make('footwear');
+    const jackets = [make('outerwear', { favourite: true }), make('outerwear', { favourite: true })];
+    const items = [top, ...bottoms, shoes, ...jackets];
+    const sets = anchorSets(top, items, none);
+    const perBase = new Map<string, number>();
+    for (const set of sets) perBase.set(set.base, (perBase.get(set.base) ?? 0) + 1);
+    expect(Math.max(...perBase.values())).toBeLessThanOrEqual(CANDIDATE_LIMITS.perBase);
+    expect(perBase.size).toBe(3);
+    expect(sets).toHaveLength(CANDIDATE_LIMITS.perAnchor);
+    expect(sets.some((set) => !set.addOn) && sets.some((set) => set.addOn)).toBe(true);
+  });
+  it('rank a short bottom under a warm jacket, and a jacket out of season, below the same outfit without the clash', () => {
+    const top = make('top', { seasons: ['spring', 'summer', 'autumn'] }), shoes = make('footwear', { seasons: ['spring', 'summer', 'autumn'] });
+    const trousers = make('bottom', { seasons: ['spring', 'summer', 'autumn'], garmentLength: 'regular' });
+    const shorts = make('bottom', { seasons: ['spring', 'summer', 'autumn'], garmentLength: 'short' });
+    const bomber = make('outerwear', { seasons: ['spring', 'summer', 'autumn'], warmth: 3 });
+    expect(softScore([top, shorts, shoes, bomber])).toBeLessThan(softScore([top, trousers, shoes, bomber]));
+    expect(softScore([top, shorts, shoes])).toBe(softScore([top, trousers, shoes]));
+    const parka = make('outerwear', { seasons: ['winter'], warmth: 3 });
+    expect(softScore([top, trousers, shoes, parka])).toBeLessThan(softScore([top, trousers, shoes, bomber]));
+    // A short bottom under a light jacket is not a clash.
+    const shell = make('outerwear', { seasons: ['spring', 'summer', 'autumn'], warmth: 1 });
+    expect(softScore([top, shorts, shoes, shell])).toBe(softScore([top, trousers, shoes, shell]));
+  });
+  it('does not look at what was judged or seen: an anchor list is the same whatever the owner has done', async () => {
+    const items = withBytes(wardrobe(6, 6, 3, 2, 3));
+    const first = anchorSets(items[0]!, items, none);
+    const batch = await buildBatch({ items, anchors: [items[0]!.id], known: new Set(), bans: none });
+    expect(batch.sets.length).toBeGreaterThan(0);
+    expect(batch.sets.map((set) => set.key).every((key) => first.some((set) => set.key === key))).toBe(true);
+    const again = await buildBatch({ items, anchors: [items[0]!.id], known: new Set(batch.sets.map((set) => set.signature)), bans: none });
+    expect(again.sets.some((set) => batch.sets.some((done) => done.signature === set.signature))).toBe(false);
+  });
+});

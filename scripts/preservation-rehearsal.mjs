@@ -38,17 +38,18 @@ const PROMPT_PRIOR_VERSION = '20261101200000';
 const OUTFITGEN_PRIOR_VERSION = '20261102090000';
 const CLAIM_PRIOR_VERSION = '20261107100100';
 const CAP_PRIOR_VERSION = '20261108100000';
+const JUDGE_PRIOR_VERSION = '20261109090000';
 // Exact applied prefix per labelled stage; 'target' is the full source inventory.
 const STAGE_VERSIONS = Object.freeze({ base: '20260905000000', 'hosted-source': HOSTED_SOURCE_VERSION,
   'prior-main': PRIOR_MAIN_VERSION, 'azure-target': AZURE_TARGET_VERSION, 'image-change': IMAGE_CHANGE_VERSION,
   colours: COLOUR_VERSION, 'tryon-stop': TRYON_STOP_VERSION, 'save1-prior': SAVE1_PRIOR_VERSION, 'budget1-prior': BUDGET1_PRIOR_VERSION,
   'idea-prior': IDEA_PRIOR_VERSION, 'photo-prior': PHOTO_PRIOR_VERSION, 'avail-prior': AVAIL_PRIOR_VERSION,
   'budget2-prior': BUDGET2_PRIOR_VERSION, 'limits-prior': LIMITS_PRIOR_VERSION, 'tryon-v3-prior': PROMPT_PRIOR_VERSION,
-  'outfitgen-prior': OUTFITGEN_PRIOR_VERSION, 'claim-prior': CLAIM_PRIOR_VERSION, 'cap-prior': CAP_PRIOR_VERSION, target: null });
+  'outfitgen-prior': OUTFITGEN_PRIOR_VERSION, 'claim-prior': CLAIM_PRIOR_VERSION, 'cap-prior': CAP_PRIOR_VERSION, 'judge-prior': JUDGE_PRIOR_VERSION, target: null });
 const STAGE_UPGRADES = Object.freeze({ 'azure-target': ['base', 'prior-main'], 'image-change': ['azure-target', 'hosted-source'],
   colours: ['image-change'], 'tryon-stop': ['colours'], 'save1-prior': ['tryon-stop'], 'budget1-prior': ['save1-prior'],
   'idea-prior': ['budget1-prior'], 'photo-prior': ['idea-prior'], 'avail-prior': ['photo-prior'], 'budget2-prior': ['avail-prior'],
-  'limits-prior': ['budget2-prior'], 'tryon-v3-prior': ['limits-prior'], 'outfitgen-prior': ['tryon-v3-prior'], 'claim-prior': ['outfitgen-prior'], 'cap-prior': ['claim-prior'], target: ['cap-prior'] });
+  'limits-prior': ['budget2-prior'], 'tryon-v3-prior': ['limits-prior'], 'outfitgen-prior': ['tryon-v3-prior'], 'claim-prior': ['outfitgen-prior'], 'cap-prior': ['claim-prior'], 'judge-prior': ['cap-prior'], target: ['judge-prior'] });
 
 // Prints, per stage, whether SYNTHETIC analysis claim/finish/Save/replacement evidence was used (lazy import keeps this module import-safe).
 const syntheticNote = async (stage) => (await import('../tests/integration/synthetic-analysis.sessions.mjs')).syntheticNote(stage);
@@ -100,6 +101,7 @@ export const MIGRATIONS = Object.freeze([
   { name: '20261107100100_ai_guard_schedule.sql', version: '20261107100100', time: '2026-11-07 10:01:00', bytes: 2060, sha256: '0a67fb6de83bc832a44ab3ce3fedd8f1493fc78334638009b8b7f60536f3421b' },
   { name: '20261108100000_outfitgen_call_limits.sql', version: '20261108100000', time: '2026-11-08 10:00:00', bytes: 5980, sha256: '0540cce6063a8ab649cd600c9ef7c0bce9f0028d1f1500459c6681a6c84cb897' },
   { name: '20261109090000_outfitgen_pending_100.sql', version: '20261109090000', time: '2026-11-09 09:00:00', bytes: 16658, sha256: '6b99ea11d443e937accce80894ffde7b92183f538c71011efa2dc4f205b13e94' },
+  { name: '20261109100000_outfitgen_judge_v2.sql', version: '20261109100000', time: '2026-11-09 10:00:00', bytes: 20566, sha256: 'a3ae1dad8f589b35b7d748995561c84acb3dd2b61adc2d00ec3f44be8955110d' },
 ]);
 
 // Catalog-only structural proof. Never delete a normal fixture profile to test retention.
@@ -1512,7 +1514,7 @@ async function main() {
       // and only those two bodies may differ (additions only) before the service-only claim/finish contract, dedupe, caps,
       // Keep/Remove/Undo and owner isolation are probed at the OLD claim limits (the original four-row rate probe).
       const { outfitgenUpgradeSeed, outfitgenUpgradeVerify, outfitgenProbes, outfitgenLimitsCheckpoint, outfitgenLimitsCompare, outfitgenLimitProbes,
-        outfitgenCapCheckpoint, outfitgenCapCompare, outfitgenCapProbes } = await import('../tests/integration/outfitgen.sessions.mjs');
+        outfitgenCapCheckpoint, outfitgenCapCompare, outfitgenCapProbes, outfitgenJudgeCheckpoint, outfitgenJudgeCompare, outfitgenJudgeProbes } = await import('../tests/integration/outfitgen.sessions.mjs');
       stage = 'OUTFITGEN1-seed';
       const outfitgenSeed = await outfitgenUpgradeSeed(colourSnapshot, privilegedLocalSql);
       stage = 'OUTFITGEN1-outfitgen-prior-to-claim-prior';
@@ -1543,14 +1545,28 @@ async function main() {
       // and only then is the cap of 100 probed.
       stage = 'PENDING100-checkpoint';
       const capCheckpoint = await outfitgenCapCheckpoint(colourSnapshot, privilegedLocalSql, (label) => { stage = `PENDING100-checkpoint-${label}`; });
-      stage = 'PENDING100-cap-prior-to-target';
-      await migrateToStage(run, 'cap-prior', 'target');
+      stage = 'PENDING100-cap-prior-to-judge-prior';
+      await migrateToStage(run, 'cap-prior', 'judge-prior');
       requireEvidence(await sameDatabaseIdentity() === colourContainer);
-      await history('target'); await verifyCiStorageGuard();
+      await history('judge-prior'); await verifyCiStorageGuard();
       stage = 'PENDING100-compare';
       await outfitgenCapCompare(capCheckpoint, colourSnapshot, privilegedLocalSql, (label) => { stage = `PENDING100-compare-${label}`; });
       stage = 'PENDING100-cap';
       await outfitgenCapProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `PENDING100-${label}`; });
+      colourFinalizer.assertRunning();
+      // OUTFITGEN-QUALITY1: the predecessor (the 46 migrations through 20261109090000) is checkpointed with one genuine held request,
+      // the judge migration alone is applied (47), everything but the two replaced bodies and the added v2 manifest row is compared
+      // unchanged, the held request settles, and only then are the v2 manifest, the plan's seen key and the cutover cases probed.
+      stage = 'JUDGE2-checkpoint';
+      const judgeCheckpoint = await outfitgenJudgeCheckpoint(colourSnapshot, privilegedLocalSql, (label) => { stage = `JUDGE2-checkpoint-${label}`; });
+      stage = 'JUDGE2-judge-prior-to-target';
+      await migrateToStage(run, 'judge-prior', 'target');
+      requireEvidence(await sameDatabaseIdentity() === colourContainer);
+      await history('target'); await verifyCiStorageGuard();
+      stage = 'JUDGE2-compare';
+      await outfitgenJudgeCompare(judgeCheckpoint, colourSnapshot, privilegedLocalSql, (label) => { stage = `JUDGE2-compare-${label}`; });
+      stage = 'JUDGE2-judge';
+      await outfitgenJudgeProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `JUDGE2-${label}`; });
       colourFinalizer.assertRunning();
       // AI-GUARD1: the guard migrations are part of the target inventory above; its probes run last, restore what they touch and never call a provider.
       const { aiGuardProbes } = await import('../tests/integration/aiguard.sessions.mjs');
@@ -1558,6 +1574,7 @@ async function main() {
       await aiGuardProbes(colourSnapshot, privilegedLocalSql, (label) => { stage = `AIGUARD1-${label}`; });
       colourFinalizer.assertRunning();
     } finally { await colourFinalizer.stop(); }
+    console.log('PASS: OUTFITGEN-QUALITY1 judge v2; the predecessor inventory (46 migrations through 20261109090000) was checkpointed with one genuine held claim (the installed claim and plan proved equal to the bodies of the migration that held them last, with owner, ACL and configuration, and the plan without the seen key), the judge migration alone was applied (47) and the checkpoint compared equal (every other function body and ACL, triggers, controls, consent, usage, evidence, requests, suggestions, assessed rows and the earlier manifests) apart from the claim and the plan, each of which differs from its predecessor by exactly its stated delta and equals the migration; the v2 manifest equals v1 apart from its identity, hashes, prompt version and description; the held claim settled afterwards; v1 was still admitted under v1 controls and refused under v2 controls (CONFIG_CHANGED), v2 the reverse, an unknown manifest UNCONFIGURED with nothing written; a v2 request was recorded with manifest v2 and prompt version 2 and the plan listed the waiting and kept sets (each as its base and garments, newest first) but not removed or declined ones; the guarded controls switch refused while outfit work was held and when the installed manifest was not the expected one, blocked admission (BUSY, nothing written) while its transaction was open and waited for a claim\'s profile lock; no provider calls');
     console.log('PASS: OUTFITGEN-PENDING100 waiting list of 100; the predecessor inventory (45 migrations through 20261108100000) was checkpointed with one genuine held claim and still enforced 40 (the old probes ran there), and in that checkpoint each of the four installed definitions was proved equal to the body of the migration that held it last, with its owner, ACL (that of a sibling function), security definer and configuration, before anything was installed; the cap migration alone was applied (46) and the checkpoint compared equal (the four replaced functions\' identity, owner, ACL, security configuration and volatility, every other function body and ACL, triggers, controls, consent, usage, evidence, requests, suggestions, assessed rows and manifests) apart from the four bodies, each of which differs from its predecessor by exactly its cap line and equals the migration; the held claim settled afterwards; a claim was admitted at 99 pending and refused PENDING_FULL at 100 with nothing written, a settled request recorded only the room left under 100, choosing the best-scored of verdicts listed out of score order (the 10 at room one, the 10 and the 9 at room two, all three with room), none when the room was taken by a real Undo between the claim and the settlement, with each scenario starting from fresh assessment state, the omitted good verdicts leaving no stored signature while the claimed targets were marked assessed all the same, the plan reported the room, Remove freed room and a claim was admitted again, Undo was admitted at 99 and refused at 100 with nothing changed, and with 101 rows (what a race between two Undos can leave) claims and Undo were refused while Remove still worked; no provider calls');
     console.log('PASS: OUTFITGEN3-B2 call limits; the old four-row rate probe ran at the predecessor inventory (44 migrations through 20261107100100), which was checkpointed with one genuine held claim; the limits migration alone was applied (45) and the checkpoint compared equal (the claim\'s identity, owner, ACL, security configuration and volatility, every other function body and ACL, triggers, controls, consent, usage, evidence, requests, suggestions, assessed rows and manifests) apart from the claim body, which differs by exactly the rate block; the held claim settled afterwards; the installed body equals the migration; manual calls were admitted at 39 in ten minutes, 119 in an hour and 199 in a rolling day and refused at 40, 120 and 200 (failed, expired and request-less rows counted, other purposes not, passed windows free), automatic kept 4, 6 and 40, manual and automatic history, different owners and a request id shared by two owners never limited or classified each other, a real sequence of 40 claims beyond the old 4 and 6 was admitted and the 41st refused, a claim that meets a held profile row lock is refused BUSY and writes nothing, and with the last slot taken the next claim meets the live batch, and replay, one live batch, the exact allowance, the guard\'s SQLSTATE with no rows written, settlement and expiry while paused, withdrawn consent and an ordinary session were all unchanged; no provider calls');
     console.log('PASS: AI-GUARD1 spending guard; a legitimate peak (50 clean-ups, 50 analyses and a six-step try-on chain, USD 22.79) did not latch, a synthetic burst latched one owner only with the status and Resume calls owner-only, a paused owner was refused with the guard\'s SQLSTATE and no usage row for every purpose while settlement, expiry and withdrawal still worked, Resume re-opened admission without counting the old spending, a second burst and an owner-set threshold latched again; no provider calls');
