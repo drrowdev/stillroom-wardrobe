@@ -164,23 +164,25 @@ export function anchorSets(anchor: CandidateItem, items: readonly CandidateItem[
     for (const id of set.ids) if (id !== anchor.id && !footwearIds.has(id)) uses.set(id, (uses.get(id) ?? 0) + 1);
     return true;
   };
+  const drop = (set: CandidateSet) => {
+    picks.splice(picks.indexOf(set), 1);
+    bases.set(set.base, (bases.get(set.base) ?? 1) - 1);
+    for (const id of set.ids) if (id !== anchor.id && !footwearIds.has(id)) uses.set(id, (uses.get(id) ?? 1) - 1);
+  };
   for (const set of all) { if (picks.length >= k - explore) break; take(set, CANDIDATE_LIMITS.partnerReuse, CANDIDATE_LIMITS.perBase); }
   const hasKind = (addOn: boolean) => picks.some((set) => set.addOn === addOn);
+  // The list offers a bare outfit and an add-on one when both exist. The base cap stays on: if no other base can take the place, the
+  // list keeps what it has (a pick that was dropped to make room is put back).
   for (const wanted of [false, true]) {
     if (hasKind(wanted) || !all.some((set) => set.addOn === wanted)) continue;
-    const swap = all.find((set) => set.addOn === wanted && !picks.includes(set));
-    if (!swap) continue;
-    if (picks.length >= k - explore) {
-      const dropped = picks.pop()!;
-      bases.set(dropped.base, (bases.get(dropped.base) ?? 1) - 1);
-      for (const id of dropped.ids) if (id !== anchor.id && !footwearIds.has(id)) uses.set(id, (uses.get(id) ?? 1) - 1);
-    }
-    take(swap, CANDIDATE_LIMITS.explorationReuse, Infinity);
+    const dropped = picks.length >= k - explore ? picks[picks.length - 1]! : null;
+    if (dropped) drop(dropped);
+    const taken = all.some((set) => set.addOn === wanted && take(set, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase));
+    if (!taken && dropped) take(dropped, Infinity, Infinity);
   }
   const rest = all.filter((set) => !picks.includes(set)).sort((a, b) => hashOf(a.key) - hashOf(b.key) || compare(a.key, b.key));
-  for (const [cap, baseCap] of [[CANDIDATE_LIMITS.partnerReuse, CANDIDATE_LIMITS.perBase], [CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase],
-    [Infinity, CANDIDATE_LIMITS.perBase], [Infinity, Infinity]] as const) {
-    for (const set of rest) { if (picks.length >= k) break; take(set, cap, baseCap); }
+  for (const cap of [CANDIDATE_LIMITS.partnerReuse, CANDIDATE_LIMITS.explorationReuse, Infinity]) {
+    for (const set of rest) { if (picks.length >= k) break; take(set, cap, CANDIDATE_LIMITS.perBase); }
   }
   return picks.sort((a, b) => b.score - a.score || compare(a.key, b.key));
 }

@@ -186,11 +186,25 @@ describe('candidate quality rules (OUTFITGEN-QUALITY1)', () => {
     expect(perBase.size).toBeGreaterThanOrEqual(Math.ceil(CANDIDATE_LIMITS.perAnchor / CANDIDATE_LIMITS.perBase));
     expect(sets.every((set) => set.base === baseOf(set.ids, items))).toBe(true);
   });
-  it('still fill the list from a small wardrobe, with a third look of a base only when nothing else is left', () => {
+  it('keep the base cap in a small wardrobe and return fewer sets rather than a third look of one base', () => {
     const items = wardrobe(1, 1, 1, 0, 3);
     const sets = anchorSets(items[0]!, items, none);
-    expect(sets.length).toBeGreaterThan(CANDIDATE_LIMITS.perBase);
+    expect(sets).toHaveLength(CANDIDATE_LIMITS.perBase);
     expect(new Set(sets.map((set) => set.base)).size).toBe(1);
+  });
+  it('spread a short list over every base that exists, never over-filling one while another is unused (the swap and the fill keep the cap)', () => {
+    counter = 1;
+    const top = make('top'), bottoms = [make('bottom', { colours: ['navy'] }), make('bottom', { colours: ['brown'] }), make('bottom', { colours: ['grey'] })];
+    const shoes = make('footwear');
+    const jackets = [make('outerwear', { favourite: true }), make('outerwear', { favourite: true })];
+    const items = [top, ...bottoms, shoes, ...jackets];
+    const sets = anchorSets(top, items, none);
+    const perBase = new Map<string, number>();
+    for (const set of sets) perBase.set(set.base, (perBase.get(set.base) ?? 0) + 1);
+    expect(Math.max(...perBase.values())).toBeLessThanOrEqual(CANDIDATE_LIMITS.perBase);
+    expect(perBase.size).toBe(3);
+    expect(sets).toHaveLength(CANDIDATE_LIMITS.perAnchor);
+    expect(sets.some((set) => !set.addOn) && sets.some((set) => set.addOn)).toBe(true);
   });
   it('rank a short bottom under a warm jacket, and a jacket out of season, below the same outfit without the clash', () => {
     const top = make('top', { seasons: ['spring', 'summer', 'autumn'] }), shoes = make('footwear', { seasons: ['spring', 'summer', 'autumn'] });

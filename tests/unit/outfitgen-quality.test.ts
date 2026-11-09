@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildBatch, softScore, type CandidateBans, type CandidateCategory, type CandidateItem } from '../../src/domain/outfit-candidates';
-import { SELECTION_LIMITS, baseKeyOf, selectSuggestions, type SelectionSeen } from '../../src/domain/outfit-selection';
+import { SELECTION_LIMITS, baseKeyOf, selectSuggestions } from '../../src/domain/outfit-selection';
 
 // An offline evaluation of the generator and the selection together, with no provider and no real data: a synthetic wardrobe shaped
 // like a small real one (few tops and shoes, many bottoms and jackets, mostly neutral colours) goes through the same loop a whole-wardrobe
@@ -25,7 +25,9 @@ async function pass(maxSuggestedPerCall = Infinity) {
   const byId = new Map(items.map((item) => [item.id, item]));
   const categoryOf = (value: string) => byId.get(value)?.category;
   const none: CandidateBans = { pairs: new Set(), disliked: new Set() };
-  const known = new Set<string>(), covered = new Set<string>(), seen: SelectionSeen = { pending: [], kept: [], removed: [] };
+  const known = new Set<string>(), covered = new Set<string>();
+  const lookOf = (ids: readonly string[]) => ({ base: ids.filter((entry) => ['top', 'bottom', 'one_piece'].includes(byId.get(entry)!.category)),
+    garments: ids.filter((entry) => byId.get(entry)!.category !== 'footwear') });
   const anchors = items.map((item) => item.id);
   const pending: string[][] = [];
   let calls = 0, judged = 0;
@@ -38,7 +40,8 @@ async function pass(maxSuggestedPerCall = Infinity) {
       // The stand-in judge likes every set the soft score already likes, which is a lenient judge on purpose: the caps must hold anyway.
       const verdicts = batch.sets.map((set) => ({ decision: softScore(set.ids.map((entry) => byId.get(entry)!)) >= 0.7 ? 'good' as const : 'skip' as const,
         baseScore: 9, fullScore: 9 }));
-      const chosen = selectSuggestions({ sets: batch.sets.map((set) => set.ids), verdicts, bar: 8, seen: { ...seen, pending }, categoryOf });
+      const { chosen } = selectSuggestions({ sets: batch.sets.map((set) => set.ids), verdicts, bar: 8, seen: { pending: pending.map(lookOf), kept: [] },
+        room: 100 - pending.length, categoryOf });
       expect(chosen.filter(Boolean).length).toBeLessThanOrEqual(maxSuggestedPerCall);
       batch.sets.forEach((set, index) => { known.add(set.signature); if (chosen[index]) pending.push(set.ids); });
     }

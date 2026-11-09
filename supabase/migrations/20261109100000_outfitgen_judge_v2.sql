@@ -6,13 +6,17 @@
 --     differ. v1 stays installed and unchanged. No provider-deployment row exists for either (the claim does not use one);
 --   NON-ADDITIVE (function replacement, same signatures, owners, security, search_path, lock_timeout and ACLs kept by create or replace):
 --     public.outfitgen_claim, each latest body (20261109090000) with only the manifest pin changed from v1 to v1-or-v2;
---     public.outfitgen_plan, its latest body (20261109090000) plus one key, 'seen': the item sets of the newest 500 waiting and kept
---     suggestions, which the Edge function reads to keep a garment or a top+bottom base from filling the list. It is read-only.
+--     public.outfitgen_plan, its latest body (20261109090000) plus one key, 'seen': for every waiting suggestion, and for the newest 200
+--     kept ones (best effort), the ids of its top and bottoms (or one-piece) and of every garment except its shoes, computed from
+--     public.items in the database before any candidate-pool truncation. The Edge function reads it to keep a base or a garment from
+--     filling the list. It is read-only.
 -- Not written: private.ai_controls (the accounts stay on v1 until the owner's controls move), consent, the notice revision (the data flow is the
 -- same), suggestions, assessments, usage and every other function. Inert for the running stack: the claim still admits v1, and an Edge function
 -- or app of the previous version ignores the extra plan key.
--- Rollout (docs/cloud-development.md): this migration, then Pages, then, with no held request, the owner's controls move to v2 and the Edge
--- function redeploy back to back. Backout: controls back to v1 and the previous Edge function; nothing here needs a compensating statement.
+-- Rollout (docs/cloud-development.md): this migration, then Pages, then the guarded controls switch (docs/outfitgen-manifest-switch.sql: one
+-- transaction that locks the owner's profile and controls rows, refuses while outfit work is held, and moves the manifest) and the Edge
+-- function redeploy back to back. Backout: the same guarded switch back to v1 and the previous Edge function; nothing here needs a
+-- compensating statement.
 begin;
 set local lock_timeout = '5s';
 
@@ -128,7 +132,7 @@ begin
 end;
 $$;
 
--- 20261109090000's plan plus the 'seen' key (waiting and kept item sets, newest 500). Removed sets are already in 'disliked'.
+-- 20261109090000's plan plus the 'seen' key (every waiting look and the newest 200 kept ones, each as its base and garments). Removed sets are already in 'disliked'.
 create or replace function public.outfitgen_plan(p_owner_id uuid) returns jsonb
 language plpgsql security definer set search_path = '' set lock_timeout = '2s' as $$
 declare p public.profiles; c private.ai_controls; v_code text; v_items jsonb; v_pairs jsonb; v_disliked jsonb; v_known jsonb; v_seen jsonb;
@@ -189,18 +193,28 @@ begin
     union select encode(sha256(convert_to(string_agg(oi.item_id::text,'|' order by oi.item_id),'UTF8')),'hex')
       from public.outfit_items oi where oi.owner_id=p_owner_id group by oi.outfit_id
     limit 20000) k;
-  select coalesce(jsonb_agg(jsonb_build_array(q.state,to_jsonb(q.item_ids)) order by q.created_at desc,q.id),'[]'::jsonb) into v_seen from (
-    select state,item_ids,created_at,id from public.suggested_outfits where owner_id=p_owner_id and state in ('suggested','kept')
-      order by created_at desc,id limit 500) q;
+  select coalesce(jsonb_agg(jsonb_build_array(q.state,q.base,q.garments) order by q.state desc,q.created_at desc,q.id),'[]'::jsonb) into v_seen from (
+    select s.state,s.created_at,s.id,
+      coalesce((select jsonb_agg(i.id order by i.id) from public.items i where i.owner_id=s.owner_id and i.id=any(s.item_ids)
+        and i.category in ('top','bottom','one_piece')),'[]'::jsonb) base,
+      coalesce((select jsonb_agg(i.id order by i.id) from public.items i where i.owner_id=s.owner_id and i.id=any(s.item_ids)
+        and i.category<>'footwear'),'[]'::jsonb) garments
+    from public.suggested_outfits s where s.owner_id=p_owner_id and (s.state='suggested' or s.id in (
+      select k.id from public.suggested_outfits k where k.owner_id=p_owner_id and k.state='kept' order by k.created_at desc,k.id limit 200))) q;
   return jsonb_build_object('code','OK','items',v_items,'pairs',v_pairs,'disliked',v_disliked,'known',v_known,'seen',v_seen,
     'pendingRoom',greatest(0,100-(select count(*) from public.suggested_outfits where owner_id=p_owner_id and state='suggested')));
 end;
 $$;
 
 do $$
-declare v_seen_block text := $seen$  select coalesce(jsonb_agg(jsonb_build_array(q.state,to_jsonb(q.item_ids)) order by q.created_at desc,q.id),'[]'::jsonb) into v_seen from (
-    select state,item_ids,created_at,id from public.suggested_outfits where owner_id=p_owner_id and state in ('suggested','kept')
-      order by created_at desc,id limit 500) q;
+declare v_seen_block text := $seen$  select coalesce(jsonb_agg(jsonb_build_array(q.state,q.base,q.garments) order by q.state desc,q.created_at desc,q.id),'[]'::jsonb) into v_seen from (
+    select s.state,s.created_at,s.id,
+      coalesce((select jsonb_agg(i.id order by i.id) from public.items i where i.owner_id=s.owner_id and i.id=any(s.item_ids)
+        and i.category in ('top','bottom','one_piece')),'[]'::jsonb) base,
+      coalesce((select jsonb_agg(i.id order by i.id) from public.items i where i.owner_id=s.owner_id and i.id=any(s.item_ids)
+        and i.category<>'footwear'),'[]'::jsonb) garments
+    from public.suggested_outfits s where s.owner_id=p_owner_id and (s.state='suggested' or s.id in (
+      select k.id from public.suggested_outfits k where k.owner_id=p_owner_id and k.state='kept' order by k.created_at desc,k.id limit 200))) q;
 $seen$;
 begin
   if not exists(select 1 from private.ai_execution_manifests where id='azure-eu-terra-outfitgen-v2' and prompt_version=2) then

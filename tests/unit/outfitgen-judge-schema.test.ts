@@ -22,9 +22,14 @@ const count = (text: string, part: string) => text.split(part).length - 1;
 const header = (text: string) => text.slice(0, text.indexOf('$$'));
 
 const CLAIM_PIN = { from: "m.id<>'azure-eu-terra-outfitgen-v1' then", to: "m.id not in ('azure-eu-terra-outfitgen-v1','azure-eu-terra-outfitgen-v2') then" };
-const SEEN_BLOCK = `  select coalesce(jsonb_agg(jsonb_build_array(q.state,to_jsonb(q.item_ids)) order by q.created_at desc,q.id),'[]'::jsonb) into v_seen from (
-    select state,item_ids,created_at,id from public.suggested_outfits where owner_id=p_owner_id and state in ('suggested','kept')
-      order by created_at desc,id limit 500) q;
+const SEEN_BLOCK = `  select coalesce(jsonb_agg(jsonb_build_array(q.state,q.base,q.garments) order by q.state desc,q.created_at desc,q.id),'[]'::jsonb) into v_seen from (
+    select s.state,s.created_at,s.id,
+      coalesce((select jsonb_agg(i.id order by i.id) from public.items i where i.owner_id=s.owner_id and i.id=any(s.item_ids)
+        and i.category in ('top','bottom','one_piece')),'[]'::jsonb) base,
+      coalesce((select jsonb_agg(i.id order by i.id) from public.items i where i.owner_id=s.owner_id and i.id=any(s.item_ids)
+        and i.category<>'footwear'),'[]'::jsonb) garments
+    from public.suggested_outfits s where s.owner_id=p_owner_id and (s.state='suggested' or s.id in (
+      select k.id from public.suggested_outfits k where k.owner_id=p_owner_id and k.state='kept' order by k.created_at desc,k.id limit 200))) q;
 `;
 const PLAN_EDITS = [
   { from: 'v_disliked jsonb; v_known jsonb;\n', to: 'v_disliked jsonb; v_known jsonb; v_seen jsonb;\n' },
@@ -87,9 +92,13 @@ describe('judge migration (source proofs)', () => {
     }
     expect(reverted).toBe(before);
     expect(header(after)).toBe(header(before));
-    // Waiting and kept sets only (removed sets are already in `disliked`), newest first, at most 500.
-    expect(SEEN_BLOCK).toContain("state in ('suggested','kept')");
-    expect(SEEN_BLOCK).toContain('limit 500');
+    // Every waiting suggestion, whatever the kept bound; kept ones newest 200 (best effort); each as its base and its garments except shoes,
+    // read from public.items so no candidate-pool truncation can hide a garment. Removed sets are already in `disliked`.
+    expect(SEEN_BLOCK).toContain("s.state='suggested' or s.id in (");
+    expect(SEEN_BLOCK).toContain("k.state='kept' order by k.created_at desc,k.id limit 200");
+    expect(SEEN_BLOCK).toContain("i.category in ('top','bottom','one_piece')");
+    expect(SEEN_BLOCK).toContain("i.category<>'footwear'");
+    expect(SEEN_BLOCK).not.toContain("'removed'");
     expect(SEEN_BLOCK).not.toMatch(/\b(insert|update|delete)\b/i);
   });
 
@@ -123,5 +132,28 @@ describe('judge migration (source proofs)', () => {
   it('leaves the earlier definitions in place as history', async () => {
     expect(definition(await read(BEFORE), 'public.outfitgen_claim')).toContain("m.id<>'azure-eu-terra-outfitgen-v1'");
     expect(definition(await read(ORIGINAL), 'public.outfitgen_plan')).not.toContain('v_seen');
+  });
+});
+
+describe('guarded manifest switch (docs/outfitgen-manifest-switch.sql)', () => {
+  const guard = () => readFile(new URL('../../docs/outfitgen-manifest-switch.sql', import.meta.url), 'utf8');
+  it('is one transaction that takes the claim\'s locks in the claim\'s order, validates, refuses held work and only then writes the manifest', async () => {
+    const sql = await guard();
+    expect(sql).not.toMatch(/\r/);
+    const code = sql.split('\n').filter((line) => !line.startsWith('--')).join('\n');
+    expect(code.trimStart().startsWith('begin;')).toBe(true);
+    expect(code.trimEnd().endsWith('commit;')).toBe(true);
+    expect(code).toContain("set local lock_timeout = '10s';");
+    const order = ['from public.profiles where owner_id=v_owner for update', 'from private.ai_controls where owner_id=v_owner for update',
+      'c.outfitgen_manifest_id is distinct from v_from', "from private.ai_execution_manifests where id=v_to", "charge_state in ('reserved','held')",
+      'update private.ai_controls set outfitgen_manifest_id=v_to'].map((part) => code.indexOf(part));
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // The claim takes the profile row and then the controls row: the same order, so the two never wait on each other in a cycle.
+    const claim = definition(await read(FORWARD), 'public.outfitgen_claim');
+    expect(claim.indexOf('from public.profiles where owner_id=p_owner_id for update nowait')).toBeLessThan(claim.indexOf('from private.ai_controls where owner_id=p_owner_id for update nowait'));
+    expect(code.match(/^\s*update /gm)).toHaveLength(1);
+    expect(sql.match(/'<(owner|from|to)>'/g)).toHaveLength(3);
+    expect(code).not.toMatch(/consent|notice_revision|reserved_micro/);
   });
 });

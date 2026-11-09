@@ -467,16 +467,39 @@ describe('outfit generation handler quality rules (OUTFITGEN-QUALITY1)', () => {
     expect(results!.every((entry) => entry.decision === 'suggested' ? entry.title !== null : entry.title === null && entry.score === 9)).toBe(true);
   });
 
-  it('counts the waiting, kept and removed sets the plan reports: a base the owner already has twice gets no third look', async () => {
-    const [top, bottom, shoes] = [wardrobe()[0]!.id, wardrobe()[1]!.id, wardrobe()[2]!.id];
-    const withSeen = await run({ verdict: () => good, plan: { seen: [['suggested', [top, bottom, shoes]], ['kept', [top, bottom, shoes, wardrobe()[4]!.id]]] } });
+  it('counts the waiting and kept looks the plan reports, and only those: a base the owner already has twice gets no third look, a removed one still does', async () => {
+    const items = wardrobe();
+    const [top, bottom, layer] = [items[0]!.id, items[1]!.id, items[4]!.id];
+    const lookOf = (state: string, ...ids: string[]) => [state, ids.filter((entry) => entry === top || entry === bottom), ids];
     const own = (entry: { items: string[] }) => entry.items.includes(top) && entry.items.includes(bottom);
+    const withSeen = await run({ verdict: () => good, plan: { seen: [lookOf('suggested', top, bottom), lookOf('kept', top, bottom, layer)] } });
     expect(withSeen.results!.filter((entry) => entry.decision === 'suggested').some(own)).toBe(false);
     expect(withSeen.results!.filter(own).every((entry) => entry.decision === 'declined')).toBe(true);
-    const removed = await run({ verdict: () => good, plan: { disliked: [[top, bottom, shoes]], seen: [['suggested', [top, bottom, shoes, wardrobe()[4]!.id]]] } });
-    expect(removed.results!.filter((entry) => entry.decision === 'suggested').some(own)).toBe(false);
+    // Removed sets are exact-set bans in the plan and do not use up the base: with the jacket variant removed, the bare look is still welcome.
+    const removed = await run({ verdict: () => good, plan: { disliked: [[top, bottom, items[2]!.id, layer]], seen: [] } });
+    expect(removed.results!.filter((entry) => entry.decision === 'suggested').some(own)).toBe(true);
     const free = await run({ verdict: () => good });
     expect(free.results!.filter((entry) => entry.decision === 'suggested').some(own)).toBe(true);
+  });
+
+  it('keeps no more than the room left, sends every result in ranking order and declines what the room blocks', async () => {
+    const items = wardrobe();
+    // Every candidate is good at 8; one has the stronger base look. With room for one it must be the one kept, whatever the call order.
+    const { results, sent } = await run({ plan: { pendingRoom: 1 }, verdict: (index) => ({ decision: 'good', title: 'Navy set', reason: 'Calm colours.',
+      baseScore: index === 3 ? 9 : 8, fullScore: 8 }) });
+    const kept = results!.filter((entry) => entry.decision === 'suggested');
+    expect(kept).toHaveLength(1);
+    const strongest = sent!.candidates[3]!;
+    // The five garments are sent in id order, so g1 to g5 are the first five ids of the wardrobe.
+    const idOf = (ref: string) => items[Number(ref.slice(1)) - 1]!.id;
+    expect([...kept[0]!.items].sort()).toEqual([...strongest.base, ...strongest.over].map(idOf).sort());
+    // The kept result is first, and every candidate was sent: the rest are recorded as declined with their own scores, none dropped.
+    expect(results![0]!.decision).toBe('suggested');
+    expect(results).toHaveLength(sent!.candidates.length);
+    expect(results!.slice(1).every((entry) => entry.decision === 'declined' && entry.title === null && entry.score === 8)).toBe(true);
+    expect(new Set(results!.map((entry) => [...entry.items].sort().join('|'))).size).toBe(results!.length);
+    const none = await run({ plan: { pendingRoom: 0 }, verdict: () => good });
+    expect(none.results!.every((entry) => entry.decision === 'declined')).toBe(true);
   });
 
   it('refuses a plan without the seen list before claiming anything', async () => {

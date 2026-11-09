@@ -14,7 +14,8 @@
 //     four bodies differ by exactly their cap line, then the plan, claim, recording and Undo are probed at 99, 100 and 101.
 //   outfitgenJudgeCheckpoint / outfitgenJudgeCompare / outfitgenJudgeProbes: judge v2 (OUTFITGEN-QUALITY1): the claim and the plan differ by
 //     exactly their stated deltas, the v2 manifest equals v1 apart from its identity, then the manifest follows the controls, a v2 settlement
-//     records prompt version 2, the plan lists the waiting and kept sets, and a controls move in flight settles without recording.
+//     records prompt version 2, the plan lists the waiting and kept sets, and the guarded controls switch refuses held work, waits for a
+//     claim's lock and blocks admission while its transaction is open.
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
@@ -1147,9 +1148,14 @@ const JUDGE_MIGRATION = '20261109100000_outfitgen_judge_v2.sql';
 const PLAN = 'public.outfitgen_plan(uuid)';
 const MANIFEST_V2 = 'azure-eu-terra-outfitgen-v2';
 const SEEN_LINES = [
-  "select coalesce(jsonb_agg(jsonb_build_array(q.state,to_jsonb(q.item_ids)) order by q.created_at desc,q.id),'[]'::jsonb) into v_seen from (",
-  "select state,item_ids,created_at,id from public.suggested_outfits where owner_id=p_owner_id and state in ('suggested','kept')",
-  'order by created_at desc,id limit 500) q;',
+  "select coalesce(jsonb_agg(jsonb_build_array(q.state,q.base,q.garments) order by q.state desc,q.created_at desc,q.id),'[]'::jsonb) into v_seen from (",
+  'select s.state,s.created_at,s.id,',
+  'coalesce((select jsonb_agg(i.id order by i.id) from public.items i where i.owner_id=s.owner_id and i.id=any(s.item_ids)',
+  "and i.category in ('top','bottom','one_piece')),'[]'::jsonb) base,",
+  'coalesce((select jsonb_agg(i.id order by i.id) from public.items i where i.owner_id=s.owner_id and i.id=any(s.item_ids)',
+  "and i.category<>'footwear'),'[]'::jsonb) garments",
+  "from public.suggested_outfits s where s.owner_id=p_owner_id and (s.state='suggested' or s.id in (",
+  "select k.id from public.suggested_outfits k where k.owner_id=p_owner_id and k.state='kept' order by k.created_at desc,k.id limit 200))) q;",
 ];
 const JUDGE_CHANGES = [
   { name: 'public.outfitgen_claim', sig: CLAIM, config: ['search_path=""', 'lock_timeout=2s'], like: FINISH, edits: [
@@ -1320,26 +1326,68 @@ export async function outfitgenJudgeProbes(snapshot, sql, mark = () => {}) {
     const byIds = async (signature) => scalar(`select id from public.suggested_outfits where owner_id=${literal(a.uid)} and signature=${literal(signature)};`);
     const idA = await byIds(sa), idB = await byIds(sb);
     const keys = (value) => [...value].sort().join('|');
-    const seenOf = async () => (await plan()).seen.map(([state, ids]) => [state, keys(ids)]);
-    equal(await seenOf(), [['suggested', keys(setB)], ['suggested', keys(setA)]]);
+    // Each look is its base (top and bottoms) and its garments other than shoes, computed in the database.
+    const look = (state, set) => [state, keys(set.filter((entry) => [top, bottom, top2].includes(entry))), keys(set.filter((entry) => entry !== shoes))];
+    const seenOf = async () => (await plan()).seen.map(([state, base, garments]) => [state, keys(base), keys(garments)]);
+    equal(await seenOf(), [look('suggested', setB), look('suggested', setA)]);
     equal((await rpc(a, 'outfitgen_keep', { p_id: idA, p_outfit_id: randomUUID() })).code, 'OK');
-    equal(await seenOf(), [['suggested', keys(setB)], ['kept', keys(setA)]]);
+    equal(await seenOf(), [look('suggested', setB), look('kept', setA)]);
     equal((await rpc(a, 'outfitgen_remove', { p_id: idB })).code, 'OK');
-    equal(await seenOf(), [['kept', keys(setA)]]);
+    equal(await seenOf(), [look('kept', setA)]);
     const planned = await plan();
     equal(Object.keys(planned).sort(), ['code', 'disliked', 'items', 'known', 'pairs', 'pendingRoom', 'seen']);
     ok(planned.disliked.some((ids) => keys(ids) === keys(setB)));
-    ok(!planned.seen.some(([, ids]) => keys(ids) === keys(setC)));
+    ok(!planned.seen.some(([, , garments]) => keys(garments) === keys(setC.filter((entry) => entry !== shoes))));
 
-    note('controls-moved-in-flight');
-    const R6 = randomUUID();
-    const s6 = await sig([top2, bottom, shoes, layer]);
-    equal((await claimWith(R6, MANIFEST_V2, [s6], [top2])).code, 'OK');
-    await sql(`update private.ai_controls set outfitgen_manifest_id=${literal(MANIFEST)},updated_at=clock_timestamp() where owner_id=${literal(a.uid)};`);
-    const moved = await finish(R6, 'OK', USAGE, [result([top2, bottom, shoes, layer], 'suggested', 9)], [top2]);
-    equal(moved.code, 'UNAVAILABLE');
-    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(R6)};`), 'estimated');
-    equal(await scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)} and signature=${literal(s6)};`), '0');
+    // The guarded switch (docs/outfitgen-manifest-switch.sql): one transaction, the claim's lock order, refused while outfit work is held.
+    const template = await readFile(new URL('../../docs/outfitgen-manifest-switch.sql', import.meta.url), 'utf8');
+    const guardSql = (from, to, sleep = 0) => template.replaceAll('<owner>', a.uid).replaceAll('<from>', from).replaceAll('<to>', to)
+      .replace('commit;', `${sleep ? `select pg_sleep(${sleep});\n` : ''}commit;`);
+    const runGuard = async (from, to, sleep = 0) => { try { await sql(guardSql(from, to, sleep)); return null; } catch (error) { return error; } };
+    const installed = () => scalar(`select outfitgen_manifest_id from private.ai_controls where owner_id=${literal(a.uid)};`);
+    const s7 = await sig([top2, bottom, shoes, layer]);
+    const waitSleeping = async (marker) => {
+      for (let attempt = 0; attempt < 40; attempt++) {
+        if (Number(await scalar(`select count(*) from pg_stat_activity where datname=current_database() and pid<>pg_backend_pid() and query like '%${marker}%';`)) > 0) return;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      ok(false);
+    };
+
+    note('guard-refuses-held');
+    equal(await installed(), MANIFEST_V2);
+    const R7 = randomUUID();
+    equal((await claimWith(R7, MANIFEST_V2, [s7], [top2])).code, 'OK');
+    ok((await runGuard(MANIFEST_V2, MANIFEST)) !== null);
+    equal(await installed(), MANIFEST_V2);
+    equal((await finish(R7, 'OK', USAGE, [], [top2])).code, 'OK');
+
+    note('guard-refuses-wrong-installed');
+    ok((await runGuard(MANIFEST, MANIFEST_V2)) !== null);
+    ok((await runGuard(MANIFEST_V2, 'azure-eu-terra-outfitgen-v3')) !== null);
+    equal(await installed(), MANIFEST_V2);
+
+    note('guard-blocks-admission');
+    // While the guard's transaction is open (it holds the profile and controls rows), a claim fails its no-wait lock: BUSY, nothing written.
+    const open = runGuard(MANIFEST_V2, MANIFEST, 5);
+    await waitSleeping('pg_sleep(5)');
+    const R8 = randomUUID();
+    equal((await claimWith(R8, MANIFEST_V2, [s7], [top2])).code, 'BUSY');
+    equal(await rows(R8), '0');
+    equal(await open, null);
+    equal(await installed(), MANIFEST);
+    const R9 = randomUUID();
+    equal((await claimWith(R9, MANIFEST_V2, [s7], [top2])).code, 'CONFIG_CHANGED');
+    equal(await rows(R9), '0');
+
+    note('guard-waits-for-lock');
+    // A claim already holding the profile row finishes first; the guard waits for it (lock timeout 10 s) and then moves the manifest.
+    const holder = sql(`begin; select 1 from public.profiles where owner_id=${literal(a.uid)} for update; select pg_sleep(3); commit;`).then(() => null, (error) => error);
+    await waitSleeping('pg_sleep(3)');
+    equal(await runGuard(MANIFEST, MANIFEST_V2), null);
+    equal(await holder, null);
+    equal(await installed(), MANIFEST_V2);
+    equal(await scalar(`select outfitgen_consent_revision::text||outfitgen_notice_revision::text||outfitgen_activated::text from private.ai_controls where owner_id=${literal(a.uid)};`), '22true');
   } catch (error) {
     if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
     throw error;

@@ -3,7 +3,7 @@ import {
   parseOutfitGenBody, parseOutfitGenItem, validateOutfitGenReply, type OutfitGenItem, type OutfitGenMode,
 } from '../../../src/domain/outfitgen.ts';
 import { buildBatch, setKey, type CandidateBans, type CandidateItem } from '../../../src/domain/outfit-candidates.ts';
-import { selectSuggestions, verdictScore, type SelectionCategory, type SelectionSeen } from '../../../src/domain/outfit-selection.ts';
+import { selectSuggestions, verdictScore, type SeenLook, type SelectionCategory, type SelectionSeen } from '../../../src/domain/outfit-selection.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
 import { AI_GUARD_CODE, guardRefusal } from '../../../src/domain/ai-guard.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
@@ -49,13 +49,15 @@ function base64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-type Plan = { items: OutfitGenItem[]; pairs: Set<string>; disliked: Set<string>; known: Set<string>; seen: SelectionSeen };
-const SEEN_MAX = 500;
+type Plan = { items: OutfitGenItem[]; pairs: Set<string>; disliked: Set<string>; known: Set<string>; seen: SelectionSeen; pendingRoom: number };
+// Waiting suggestions are all returned (at most the cap of 100 and a race's overshoot); kept ones are the newest 200, best effort.
+const SEEN_MAX = 400;
 const idList = (value: unknown, min: number, max: number): value is string[] => Array.isArray(value) && value.length >= min && value.length <= max
   && value.every((id) => typeof id === 'string' && UUID.test(id));
 function parsePlan(value: JsonObject): Plan | null {
   if (!Array.isArray(value.items) || value.items.length > OUTFITGEN_LIMITS.items || !Array.isArray(value.pairs)
-    || !Array.isArray(value.disliked) || !Array.isArray(value.known) || !Array.isArray(value.seen) || value.seen.length > SEEN_MAX) return null;
+    || !Array.isArray(value.disliked) || !Array.isArray(value.known) || !Array.isArray(value.seen) || value.seen.length > SEEN_MAX
+    || !count(value.pendingRoom, OUTFITGEN_LIMITS.pending)) return null;
   const items: OutfitGenItem[] = [];
   for (const entry of value.items) {
     const item = parseOutfitGenItem(entry);
@@ -63,7 +65,7 @@ function parsePlan(value: JsonObject): Plan | null {
     items.push(item);
   }
   const pairs = new Set<string>(), disliked = new Set<string>(), known = new Set<string>();
-  const pending: string[][] = [], kept: string[][] = [], removed: string[][] = [];
+  const pending: SeenLook[] = [], kept: SeenLook[] = [];
   for (const pair of value.pairs) {
     if (!Array.isArray(pair) || pair.length !== 2 || !pair.every((id) => typeof id === 'string' && UUID.test(id))) return null;
     pairs.add(setKey(pair as string[]));
@@ -71,17 +73,17 @@ function parsePlan(value: JsonObject): Plan | null {
   for (const set of value.disliked) {
     if (!idList(set, 1, 12)) return null;
     disliked.add(setKey(set));
-    removed.push(set);
   }
   for (const signature of value.known) {
     if (typeof signature !== 'string' || !HEX64.test(signature)) return null;
     known.add(signature);
   }
   for (const entry of value.seen) {
-    if (!Array.isArray(entry) || entry.length !== 2 || (entry[0] !== 'suggested' && entry[0] !== 'kept') || !idList(entry[1], 2, 6)) return null;
-    (entry[0] === 'suggested' ? pending : kept).push(entry[1]);
+    if (!Array.isArray(entry) || entry.length !== 3 || (entry[0] !== 'suggested' && entry[0] !== 'kept') || !idList(entry[1], 0, 3)
+      || !idList(entry[2], 1, 5)) return null;
+    (entry[0] === 'suggested' ? pending : kept).push({ base: entry[1], garments: entry[2] });
   }
-  return { items, pairs, disliked, known, seen: { pending, kept, removed } };
+  return { items, pairs, disliked, known, seen: { pending, kept }, pendingRoom: value.pendingRoom };
 }
 
 /**
@@ -213,7 +215,7 @@ export function createOutfitGenHandler(config: OutfitGenConfig, registrar: Outfi
       let accept!: (registered: boolean) => void;
       const registration = new Promise<boolean>((resolve) => { accept = resolve; });
       const work = runClaimed({ config, owner, requestId: input.requestId, built, sets: batch.sets.map((set) => set.ids),
-        assessable, remaining, dispatchBeforeMs: claim.dispatchBeforeMs, registration, azureTransport, seen: plan.seen,
+        assessable, remaining, dispatchBeforeMs: claim.dispatchBeforeMs, registration, azureTransport, seen: plan.seen, room: plan.pendingRoom,
         categoryOf: (id: string) => byId.get(id)?.category as SelectionCategory | undefined });
       try { registrar(work); accept(true); } catch { accept(false); }
       const outcome = await work;
@@ -257,7 +259,7 @@ async function downloadGarment(config: OutfitGenConfig, bearer: string, item: Ou
 type Claimed = {
   config: OutfitGenConfig; owner: string; requestId: string; built: ReturnType<typeof buildOutfitGenRequest>; sets: string[][];
   assessable: string[]; remaining: boolean; dispatchBeforeMs: number; registration: Promise<boolean>; azureTransport: AzureTransport;
-  seen: SelectionSeen; categoryOf: (id: string) => SelectionCategory | undefined;
+  seen: SelectionSeen; room: number; categoryOf: (id: string) => SelectionCategory | undefined;
 };
 type ClaimedOutcome = { code: string; suggested: number; judged: number; remaining: boolean };
 
@@ -289,10 +291,12 @@ function runClaimed(work: Claimed): Promise<ClaimedOutcome> {
       const outcome = await callOutfitGen(work.config.azure, work.built.body, stage(server, OUTFITGEN_LIMITS.requestMs), work.azureTransport);
       const verdicts = outcome.code === 'OK' ? validateOutfitGenReply(outcome.content, work.built.candidateRefs) : null;
       const code = outcome.code === 'OK' && !verdicts ? 'FAILED' : outcome.code;
-      const chosen = verdicts ? selectSuggestions({ sets: work.sets, verdicts, bar: OUTFITGEN_SCORE_BAR, seen: work.seen, categoryOf: work.categoryOf }) : [];
-      const results = verdicts ? verdicts.map((verdict, index) => ({ items: work.sets[index]!,
-        decision: chosen[index] ? 'suggested' : 'declined', score: verdictScore(verdict), occasion: verdict.occasion,
-        title: chosen[index] ? verdict.title : null, reason: chosen[index] ? verdict.reason : null })) : null;
+      const selection = verdicts ? selectSuggestions({ sets: work.sets, verdicts, bar: OUTFITGEN_SCORE_BAR, seen: work.seen, room: work.room, categoryOf: work.categoryOf }) : null;
+      // Results go out in ranking order, kept suggestions first, each carrying its own candidate's set, so any truncation the database must
+      // make (a race for room) drops the lowest-ranked ones and never a tied winner by call order.
+      const results = verdicts && selection ? [...selection.order.filter((index) => selection.chosen[index]), ...selection.order.filter((index) => !selection.chosen[index])]
+        .map((index) => ({ items: work.sets[index]!, decision: selection.chosen[index] ? 'suggested' : 'declined', score: verdictScore(verdicts[index]!),
+          occasion: verdicts[index]!.occasion, title: selection.chosen[index] ? verdicts[index]!.title : null, reason: selection.chosen[index] ? verdicts[index]!.reason : null })) : null;
       const finished = await finish(code, outcome.usage, results, results ? work.assessable : null);
       if (finished.code !== 'OK' || code !== 'OK' || !results) return fail(closedCode(finished.code === 'OK' ? code : String(finished.code)));
       const recorded = object(finished.recorded) ? finished.recorded : null;
