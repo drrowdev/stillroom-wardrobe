@@ -4,15 +4,15 @@
 
 // Manifest v2 (TRYON-LIMITS1) added the layer, outerwear and accessory prompts, six chained garments and results kept until the owner
 // deletes them. Manifest v3 (TRYON-PROMPT1) changes only the layer and outerwear wording so a coat or jacket with a front opening is
-// shown open. Manifests v1 and v2 stay installed unchanged; their frozen prompts and settings are pinned in
-// tests/fixtures/tryon-v1-frozen.ts and tests/fixtures/tryon-v2-frozen.ts.
-export const TRYON_MANIFEST = 'azure-global-image25-sunburst-tryon-v3';
+// shown open. Manifest v4 (TRYON-PROMPT2) rewords those two again so a pullover is never given a zip or an opening. Manifests v1 to
+// v3 stay installed unchanged; their frozen prompts and settings are pinned in tests/fixtures/tryon-v{1,2,3}-frozen.ts.
+export const TRYON_MANIFEST = 'azure-global-image25-sunburst-tryon-v4';
 export const TRYON_MODEL = 'gpt-image-2.5-sunburst';
 export const TRYON_DEPLOYMENT = 'eval-image25-sunburst-20260908';
 // The same immutable provider identity as photo enhancement: both features share its capacity and switch (ADR28).
 export const TRYON_DEPLOYMENT_KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';
 export const TRYON_ENDPOINT = 'https://stillroom-ai-eval.openai.azure.com/openai/v1/images/edits';
-export const TRYON_PROMPT_VERSION = 3;
+export const TRYON_PROMPT_VERSION = 4;
 // Revision 3 is the notice that says a saved picture stays until the owner deletes it (TRYON-LIMITS1); revision 2 stated the one
 // reusable reference photo (TRYON-PHOTO1) and revision 1 was never kept. The deployed Edge function checks the configured
 // revision for equality with this constant, so the Edge function must be redeployed together with the migration that moves the
@@ -50,12 +50,17 @@ const PERSON_KEEP = 'Keep the person\'s face, hair, skin, body shape, pose, othe
 const GARMENT_KEEP = `${PERSON_KEEP}Keep the garment's colour, pattern, logos, length and shape.`;
 const REPLACING = `Show the same person wearing this garment, replacing only the clothing it covers. ${GARMENT_KEEP}`;
 // TRYON-PROMPT1: a layer or outerwear garment with a front opening is worn open so the existing clothing shows through, without
-// inventing clothing; "keep the shape" alone made the model copy a closed coat. The sentences below are fixed words, pinned verbatim.
-const OPEN_RULES = 'If this garment has an existing front opening, wear it fully unfastened with its front panels naturally parted, '
-  + 'keeping existing underlying clothing visible through the opening. Do not invent a top or other clothing, or reveal clothing '
-  + 'hidden by another closed layer. If it has no front opening, wear it naturally without creating one. '
-  + `${PERSON_KEEP}Preserve the garment's colour, pattern, logos, length, cut and design; allow only fastening and natural drape `
-  + 'changes needed to wear it open.';
+// inventing clothing; "keep the shape" alone made the model copy a closed coat. TRYON-PROMPT2: the construction is copied from the
+// photo first, because a pullover hoodie was drawn with an invented zip; pullovers and neck-only zips stay as shown, while a
+// full-length front opening is still worn open even when the coat is photographed fastened. The sentences below are fixed words,
+// pinned verbatim.
+const OPEN_RULES = 'Copy the garment\'s construction from image 2; never invent or extend an opening or fastening. Pullovers, '
+  + 'including hooded sweatshirts, stay closed; a neck-only zip or placket stays as shown. Garments with a full-length front opening, '
+  + 'including jackets and coats photographed fastened, are worn fully open with the front panels naturally parted, keeping existing '
+  + 'underlying clothing visible through the opening. Do not mistake a kangaroo pocket or drawstrings for a zipper. Do not invent a '
+  + 'top or other clothing, or reveal clothing hidden by another closed layer. '
+  + `${PERSON_KEEP}Preserve the garment's colour, pattern, logos, length, cut and design; when worn open, change only the fastening `
+  + 'and drape.';
 const TRYON_SLOT_ACTIONS: Readonly<Record<TryOnSlot, string>> = Object.freeze({
   top: REPLACING, bottom: REPLACING, one_piece: REPLACING, footwear: REPLACING,
   layer: `Show the same person wearing this garment over their existing clothing. ${OPEN_RULES}`,

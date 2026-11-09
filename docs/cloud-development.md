@@ -2649,3 +2649,87 @@ plan critique by GPT-6.1 Sol applied as binding amendments. Source packet: nothi
   which proves it takes the profile row first). Historical kept looks keep
   the base and garment ids computed from the garments' current categories, so a later category edit can leave 0 to 6 ids; the Edge reads them as they are instead of rejecting the plan. Not verified here: the real provider's behaviour under the new
   prompt, the cost and latency per call, the owner's real calls per garment, and any visual or subjective quality.
+
+## TRYON-PROMPT2 a pullover stays a pullover in try-on pictures - 9 November 2026
+
+Owner report of 8 November 2026: "The black hoodie that I have categorized as a layer, shows up as a zippered hoodie in the generated picture while it isnt one". Owner decision:
+"Yes, queue a prompt fix for pullovers". Tier A (AI prompt and manifest, database, Edge); plan critique by GPT-6.1 Sol applied by the coordinator. Source packet: nothing here is installed,
+deployed or consented, and no provider is called.
+
+- **Cause (read from the code).** `OPEN_RULES` (TRYON-PROMPT1, shared by the layer and outerwear prompts) began with a conditional that opens a garment ("If this garment has an existing front opening, wear it
+  fully unfastened ...") and only afterwards said that a garment without one is worn "naturally without creating one". "Has an existing front opening" was left to the image model's own reading of the photo,
+  and the strong instruction came first, so a pullover hoodie (kangaroo pocket, drawstrings) was sometimes read as zipped and drawn unzipped.
+- **What changes (manifest `azure-global-image25-sunburst-tryon-v4`, prompt version 4).** Only the layer and outerwear wording, still fixed words with no item or user text (exact text pinned in `tests/unit/tryon-chain.test.ts`).
+  The core rule: "Copy the garment's construction from image 2; never invent or extend an opening or fastening. Pullovers, including hooded sweatshirts, stay closed; a neck-only zip or placket stays as shown. Garments
+  with a full-length front opening, including jackets and coats photographed fastened, are worn fully open with the front panels naturally parted, keeping existing underlying clothing visible through the opening. Do not
+  mistake a kangaroo pocket or drawstrings for a zipper." The "do not invent a top or other clothing, or reveal clothing hidden by another closed layer", the person-keep sentence and the colour, pattern, logos, length, cut
+  and design preservation stay (and "when worn open, change only the fastening and drape"). **Coats and jackets stay worn open**, which is the owner's TRYON-PROMPT1 requirement: the rule keys on the garment having a
+  full-length front opening, not on a visible fastener, so a coat photographed fastened (a concealed placket, buttons done up) is still opened. The cost of that is that the model has to tell a full-length opening from a
+  pullover or a neck-only zip, which it can only be asked to do: that is what the trial below checks, with the original closed-coat case as a mandatory render. The prompts are within 30 % of v3 (the outerwear prompt is 978
+  characters against 769, the layer prompt 976 against 767; a test caps each at 130 % of v3 and the outerwear prompt at 999; characters, not tokens), small against the 15,000-token input envelope, which is dominated by the two
+  images.
+- **Top prompt reviewed, unchanged.** The top, bottom, one-piece, shoes and accessory prompts are byte for byte as in v3 (and v2). The invented zip came from the open-front instruction, which those prompts do not carry; adding
+  construction wording to every tee and shirt would prime "no zipper" everywhere without an evidenced fault. If a hoodie categorised as a top shows the same fault in the trial, a one-sentence addition is a later manifest.
+- **No new data field.** Nothing from the garment's fields (category, coverage and the rest) is sent, and no closure or hood tag is added: the model already receives the garment photo, which is the evidence, and a field
+  would put owner data into the provider request and need consent text, schema and tagging work for a wording problem.
+- **Unchanged.** Model, deployment, request parameters (same hash), rates, limits, 360,000 micro reservation, six steps, result handling and **notice revision 3**, so nobody consents again and the saved reference photo stays
+  (as in v3). v1, v2 and v3 stay installed and frozen; v3's prompts and settings are pinned in `tests/fixtures/tryon-v3-frozen.ts` (never edited), next to the v1 and v2 fixtures. The settings hash records notice revision 1 as in
+  v1 to v3 (the provider-facing profile was reviewed against it).
+- **Migration `20261109110000_tryon_prompt_v4.sql` (inert for the running stack).** Adds the immutable v4 manifest row (the v3 row's model, endpoint, tariff, rates, envelope, reservation, limits and review date; the id, prompt
+  version, prompt and settings hashes and the description differ) and its provider-deployment row on the shared key, and replaces `public.tryon_claim` and `public.tryon_bootstrap` (each its latest body, `20261102090000`, with
+  only `m.id<>'..v3'` changed to `m.id not in ('..v3','..v4')`; every other function compares with the account's configured manifest). `create or replace` keeps owner, security, `search_path`, `lock_timeout` and ACLs.
+  It writes no controls, consent, notice, result, chain or photo row, so there is no drain and no admission lock (nothing moves; the claim still admits v3). Preconditions (properties, the pin occurs once, v1 to v3 and
+  the v3 deployment installed on one key, v4 absent) and postconditions (v4 on the shared key, the v1 to v3 rows and every account's controls unchanged, both bodies equal to the installed ones plus the stated delta) are in the
+  transaction. `begin ... commit`, LF.
+- **Guarded switch `docs/tryon-manifest-switch.sql`** (owner-run, one transaction, `<from>` and `<to>`; swap them to roll back). It moves **every configured account** at once because the try-on Edge function and the app accept
+  exactly one manifest, so an account left behind would fail closed after the redeploy. **Configuration freeze:** from before the switch starts until the read-back is done, nobody runs `tryon_bootstrap` or any other write to
+  `private.ai_controls.tryon_*`. Row locks over the existing configured accounts are not a global admission barrier (the configuration writer for a previously unconfigured account takes only that account's own locks,
+  `20261102090000` lines 260 to 281), so the transaction collects the configured account ids once, locks exactly those (in owner order, each account's profile row and then its controls row: the claim's own order, so a claim
+  that has committed a held row or a chain is seen, and one that starts afterwards fails its no-wait lock: BUSY, nothing written), refuses, changing nothing, when `<to>` is not installed, when any configured account is not
+  on `<from>`, or when any of them has a running chain, a try-on charge that is reserved or held, or a reserved result, then updates **only those ids**, asserts that the updated row count equals the collected count and
+  finally refuses (rolling back) if the set of configured accounts is no longer exactly the collected one. Unconfigured accounts are never written. It writes only `tryon_manifest_id` (and `updated_at`). Its running, held and
+  reserved predicates are unrestricted by age and are the drain check: an abandoned chain can stay `running` for up to 30 minutes and then until the next 15-minute maintenance tick ends it, so wait for the switch to accept
+  rather than reading `tryon_purge_health().heldUsage`, which only counts charges older than 10 minutes. Provider slots are not checked: they are capacity throttles shared with photo enhancement and not bound to a manifest,
+  and held try-on work is already covered by the usage rows. **Because it refuses while a chain runs, no chain ever continues across the move: all steps of a chain use one manifest**; normal-chain isolation depends on
+  exactly that refusal. A step that is refused for a manifest mismatch before it is claimed (`CONFIG_CHANGED`, `UNCONFIGURED`) writes nothing and is free; a step that was already dispatched stays chargeable, because
+  settlement records the observed cost whatever manifest the controls say by then (`20261101200000_tryon_limits.sql` lines 647 to 659). There is no chain-manifest column; the CI probes assert that every step of a chain
+  records one manifest. A deadlock with another multi-owner job fails the switch with nothing changed.
+- **Recovery `docs/tryon-manifest-recover-owner.sql`** (a separate text with its own owner authorisation). If a read-back ever shows a **mixed** v3/v4 state, the switch refuses (an account differs from `<from>`) and
+  "the same guarded switch" is not the way out. The recovery moves exactly one account (`<owner>`, `<from>`, `<to>`) under the same lock order and the same refusals for that account, asserts that exactly one row was
+  updated and writes only `tryon_manifest_id`. Consent, notice revision and the saved reference photo are never touched by either text.
+- **Rollout (each step a separate owner gate; this packet does none).** 1. The coordinator's guarded hosted install of the migration (the ledger ends at `20261109100000`; read back both `prosrc`, properties, ACLs, the v4 row and
+  its deployment row). 2. Under the configuration freeze (no bootstrap or other try-on configuration write until the read-back is done): the guarded switch v3 to v4, then the `try-on` Edge function redeploy, then Pages, back
+  to back in that order. The switch goes first because it is the only step that can refuse on in-flight work, and
+  once it commits nothing can start under v3 (the old Edge sees policy v4 at its preflight: `UNCONFIGURED`, nothing claimed). 3. Read-only check:
+  `select tryon_manifest_id, count(*) from private.ai_controls where tryon_manifest_id is not null group by 1;` shows only v4. A mixed result is repaired per account with the separately authorised recovery text above, not with the switch.
+  Backout: the same guarded text with `<from>` and `<to>` swapped, the previous Edge function and the previous Pages; the migration stays (inert); no DDL, no history repair.
+
+  | Migration | Controls | Edge `try-on` | Pages | Result |
+  |---|---|---|---|---|
+  | no | v3 | v4 | any | the new Edge reads policy v3 at its preflight: `UNCONFIGURED`; a v3 request from the old app: ingress `CONFIG_CHANGED`; the switch would refuse (v4 not installed); nothing is claimed or charged |
+  | yes | v3 | v3 | v3 or v4 | unchanged (the claim admits v3); a v4 app reads policy v3 and does not offer Try on |
+  | yes | v4 | v3 | v3 | the old Edge answers `UNCONFIGURED` at its preflight; the old app reads v4 and does not offer Try on; nothing is claimed |
+  | yes | v3 | v4 | v3 | a v3 request meets the new Edge: ingress `CONFIG_CHANGED`; a v4 app does not offer Try on |
+  | yes | v4 | v4 | v3 (cached) | the old app does not recognise v4 and shows try-on as unavailable until reloaded; if it sends anyway, ingress `CONFIG_CHANGED`; nothing is charged |
+  | yes | v4 | v4 | v4 | the full feature with the new prompts, no new consent |
+- **Cost.** No change: 360,000 micro per step reserved, the same rates and envelope, at most six steps, no extra step. The prompt is under 210 characters longer, negligible against the image tokens.
+- **Owner acceptance trial (after the deploys; a smoke gate, not demonstrated reliability, and the only evidence of prompt quality since no provider is called here).** Same body photo and the same top and bottoms for each
+  render: (1) the black pullover hoodie as a layer, **three renders** (the fault was intermittent): none may show a zipper, pull-tab, centre seam, parted panels or an unzipped look, and the kangaroo pocket, drawstrings and hood
+  must be as in the photo, worn closed over the top; (2) a real zip jacket, one render: worn open, the top underneath visible, no zip drawn closed, no invented top; (3) **the real closed coat of the original report (photographed
+  fastened), one render, mandatory**: worn open, the top visible, colour, length and cut kept (this replaces the already-open coat). That is five renders. A neck-only zip or half-zip garment is a further case only with separately
+  approved extra cost. Cost: five renders at three selected steps each is up to 15 steps at the 360,000 micro reservation, **USD 5.40 nominal reservations**, valid only if each render selects exactly three steps; it is not an
+  invoice ceiling (the images API has no token cap). If (1) fails the answer is a v5 wording (or a reconsidered data field, a new decision); if (2) or (3) fails, roll back with the guarded switch.
+- **Validation.** Node 24.19.0: lint, typecheck, `check:translations`, the whole unit suite (the new `tests/unit/tryon-prompt-v4-schema.test.ts` for the migration, the exact-body reconstruction of both functions and the text
+  and lock order of the switch and of the recovery; `tryon-chain.test.ts`, `tryon-endpoint.test.ts`, `tryon-client.test.ts`, `tryon-prompt-schema.test.ts` against the frozen v3 fixture; the updated preservation,
+  purge-schedule and storage-guard tests) and the try-on browser specs (`tryon.spec.ts`, `tryon-idea.spec.ts`, three projects). A scratch run (outside the repository) in PGlite over the whole migration chain, with stubs for Auth,
+  Storage and the cron schedule migrations (there is no Docker here), applied the migration to a checkpoint with a genuine held claim (the other state, functions and rows unchanged, both bodies equal the predecessor plus the pin,
+  a second run refused) and ran the admission cases (v4 under v3 controls `CONFIG_CHANGED`, v2 `UNCONFIGURED`) and the guarded switch: refused for a held charge alone (a stopped chain whose dispatched step is still held), a running
+  chain with and without its reserved result, a reserved result alone, a wrong installed manifest, an uninstalled target and a mixed account; the recovery refused a wrong `<from>` and an unknown account and moved one account out of
+  a mixed state; the switch moved both configured accounts after the chain ended and wrote only the manifest; v3 was refused afterwards, a v4 chain recorded one manifest on both steps, the rollback restored v3; with one account
+  unconfigured only the other moved and the unconfigured row stayed identical; a simulated configuration write during the transaction made the closing check refuse with nothing changed. PGlite has one connection, so lock
+  interleavings are not checked there; it is a smoke check, not the rehearsal. **CI-only, authored here and not run:** the preservation rehearsal's stages 46 to 47 (QUALITY1, now in main) and then `tryon4-prior` (47
+  migrations) to `target` (48), each compared before any destructive probe, with the same cases as sequential probes with a label per statement (`tests/integration/tryon-prompt2.sessions.mjs`) plus one bounded contention probe:
+  a detached transaction holds the second owner's profile row and sleeps (readiness confirmed from `pg_locks` and `pg_stat_activity` with fresh statements, no cross-session rendezvous, no write that references the held
+  row, the holder awaited in a `finally`); a claim by that owner answers BUSY and the switch, with its own `set local lock_timeout = '1s'`, fails as a whole and leaves the first owner unchanged. It also checks, for the two
+  configured owners, that consent and the saved photo bytes survive the move and the rollback. The Edge runtime stage with the new prompt hashes in the provider double is CI-only as well. Not verified here: how the image model
+  renders the new prompt, which only the trial shows.
