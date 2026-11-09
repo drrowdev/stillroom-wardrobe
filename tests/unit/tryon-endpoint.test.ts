@@ -147,7 +147,7 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
     expect(names(calls)).toEqual(['user', 'tryon_status', 'tryon_claim', 'storage', 'tryon_dispatch', 'tryon_finish']);
   });
 
-  it('sends each slot its own fixed prompt, with the person first and the garment second, including the open-coat wording', async () => {
+  it('sends each slot its own fixed prompt, with the person first and the garment second, including the construction and open-coat wording', async () => {
     for (const slot of ['one_piece', 'top', 'bottom', 'layer', 'outerwear', 'footwear', 'accessory'] as const) {
       const claim = { code: 'OK', claimed: true, manifestId: TRYON_MANIFEST, chainId: CHAIN, step: 2, steps: 3, last: false, slot,
         garment: { path: PATH, mainSha256: sha(GARMENT), bytes: GARMENT.length }, dispatchBeforeMs: Date.now() + 15_000,
@@ -164,10 +164,12 @@ describe('try-on handler (mocked Auth, RPC, Storage and image provider)', () => 
       expect(new Uint8Array(await images[0]!.arrayBuffer()), slot).toEqual(PERSON);
       expect(new Uint8Array(await images[1]!.arrayBuffer()), slot).toEqual(GARMENT);
       if (slot === 'layer' || slot === 'outerwear') {
-        for (const text of ['If this garment has an existing front opening, wear it fully unfastened with its front panels naturally parted',
+        for (const text of ['Copy the garment\'s construction from image 2; never invent or extend an opening or fastening',
+          'Pullovers, including hooded sweatshirts, stay closed; a neck-only zip or placket stays as shown',
+          'including jackets and coats photographed fastened, are worn fully open',
           'keeping existing underlying clothing visible through the opening',
-          'Do not invent a top or other clothing, or reveal clothing hidden by another closed layer',
-          'If it has no front opening, wear it naturally without creating one']) expect(String(body.get('prompt')), slot).toContain(text);
+          'Do not mistake a kangaroo pocket or drawstrings for a zipper',
+          'Do not invent a top or other clothing, or reveal clothing hidden by another closed layer']) expect(String(body.get('prompt')), slot).toContain(text);
       }
       vi.unstubAllGlobals();
     }

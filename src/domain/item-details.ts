@@ -63,8 +63,13 @@ function capitalise(text: string, language: Language): string {
 }
 const firstColour = (colours: readonly string[]) => colours.find(isColourCode);
 // "Green top" / "Vihreä yläosa" / "Grön överdel" from the category and the first colour only.
-export function defaultItemName(category: string | null | undefined, colours: readonly string[], language: Language): string {
+// A type (the AI's free-text subcategory) replaces the category word and stays as written: "Navy single-breasted blazer".
+export function defaultItemName(category: string | null | undefined, colours: readonly string[], language: Language, type?: string | null): string {
   const colour = firstColour(colours);
+  const kind = (type ?? '').replace(/\s+/gu, ' ').trim();
+  if (kind && !kind.includes('\0')) {
+    return colour ? `${capitalise(colourWord(colour, 'base', language), language)} ${kind}` : capitalise(kind, language);
+  }
   const known = category && isCategory(category) ? category : null;
   if (known && colour) return capitalise(translate(language, `itemName.${known}`, { colour: colourWord(colour, nameForms[known], language) }), language);
   if (known) return translate(language, `categoryOne.${known}`);

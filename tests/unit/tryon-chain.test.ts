@@ -10,6 +10,7 @@ import {
 import { selectTryOnStepsV1 } from '../fixtures/tryon-select-v1';
 import { TRYON_V1_MANIFEST, TRYON_V1_PROMPTS, TRYON_V1_SETTINGS } from '../fixtures/tryon-v1-frozen';
 import { TRYON_V2_MANIFEST, TRYON_V2_PROMPTS, TRYON_V2_SETTINGS } from '../fixtures/tryon-v2-frozen';
+import { TRYON_V3_MANIFEST, TRYON_V3_PROMPTS, TRYON_V3_SETTINGS } from '../fixtures/tryon-v3-frozen';
 import { ENHANCE_PARAMETERS } from '../../src/domain/enhancement';
 import { categories } from '../../src/domain/wardrobe';
 
@@ -107,25 +108,47 @@ describe('try-on request contract', () => {
     expect(Object.keys(TRYON_PROMPTS)).toEqual(Object.keys(TRYON_V2_PROMPTS));
   });
 
-  it('words the layer and outerwear prompts verbatim to wear a garment with a front opening open, adding rather than replacing', () => {
-    const OPEN = 'If this garment has an existing front opening, wear it fully unfastened with its front panels naturally parted, keeping '
-      + 'existing underlying clothing visible through the opening. Do not invent a top or other clothing, or reveal clothing hidden by '
-      + 'another closed layer. If it has no front opening, wear it naturally without creating one. Keep the person\'s face, hair, skin, '
-      + 'body shape, pose, other clothing and background unchanged. Preserve the garment\'s colour, pattern, logos, length, cut and '
-      + 'design; allow only fastening and natural drape changes needed to wear it open.';
+  it('words the layer and outerwear prompts verbatim: construction copied from the photo, pullovers closed, a full-length front opening worn open even when photographed fastened', () => {
+    const RULES = 'Copy the garment\'s construction from image 2; never invent or extend an opening or fastening. Pullovers, including '
+      + 'hooded sweatshirts, stay closed; a neck-only zip or placket stays as shown. Garments with a full-length front opening, including '
+      + 'jackets and coats photographed fastened, are worn fully open with the front panels naturally parted, keeping existing '
+      + 'underlying clothing visible through the opening. Do not mistake a kangaroo pocket or drawstrings for a zipper. Do not invent a '
+      + 'top or other clothing, or reveal clothing hidden by another closed layer. Keep the person\'s face, hair, skin, body shape, '
+      + 'pose, other clothing and background unchanged. Preserve the garment\'s colour, pattern, logos, length, cut and design; when '
+      + 'worn open, change only the fastening and drape.';
     expect(TRYON_PROMPTS.outerwear).toBe('Image 1 shows a person. Image 2 shows one garment (outerwear). Show the same person wearing this '
-      + `garment as the outermost layer over their existing clothing. ${OPEN} Photorealistic, whole person in frame.`);
+      + `garment as the outermost layer over their existing clothing. ${RULES} Photorealistic, whole person in frame.`);
     expect(TRYON_PROMPTS.layer).toBe('Image 1 shows a person. Image 2 shows one garment (layer worn over other clothing). Show the same '
-      + `person wearing this garment over their existing clothing. ${OPEN} Photorealistic, whole person in frame.`);
+      + `person wearing this garment over their existing clothing. ${RULES} Photorealistic, whole person in frame.`);
     for (const slot of ['layer', 'outerwear'] as const) {
-      expect(TRYON_PROMPTS[slot]).not.toContain('clearly shown');
-      expect(TRYON_PROMPTS[slot]).not.toContain('including the top');
-      expect(TRYON_PROMPTS[slot]).not.toContain('apart from how it is fastened');
+      const text = TRYON_PROMPTS[slot];
+      // The construction rule leads; pullovers and neck-only zips stay as shown; a full-length opening is worn open even when photographed
+      // fastened (the original closed-coat case), and a pocket or drawstrings are not read as a zipper.
+      const at = (part: string) => { const index = text.indexOf(part); expect(index, part).toBeGreaterThan(-1); return index; };
+      expect(at('Copy the garment\'s construction from image 2')).toBeLessThan(at('Pullovers, including hooded sweatshirts, stay closed'));
+      expect(at('Pullovers, including hooded sweatshirts, stay closed; a neck-only zip or placket stays as shown')).toBeLessThan(at('are worn fully open'));
+      expect(at('including jackets and coats photographed fastened, are worn fully open')).toBeLessThan(at('Do not mistake a kangaroo pocket or drawstrings for a zipper'));
+      expect(text.match(/worn fully open/g)).toHaveLength(1);
+      for (const gone of ['If this garment has an existing front opening', 'allow only fastening', 'clearly shows', 'Only if', 'unzipped look']) {
+        expect(text).not.toContain(gone);
+      }
+      // Not larger than needed: at most 30 % over the v3 wording the request limits were reviewed with (characters, not tokens).
+      expect(text.length).toBeLessThanOrEqual(Math.floor(TRYON_V3_PROMPTS[slot].length * 1.3));
     }
+    expect(TRYON_PROMPTS.outerwear.length).toBeLessThanOrEqual(999);
     expect(TRYON_PROMPTS.accessory).toContain('adding it without removing or changing any clothing');
     for (const slot of ['layer', 'outerwear', 'accessory'] as const) expect(TRYON_PROMPTS[slot]).not.toContain('replacing only the clothing it covers');
     // Fixed words only: no user text or item field can reach a prompt.
     for (const prompt of Object.values(TRYON_PROMPTS)) expect(prompt).toMatch(/^Image 1 shows a person\. Image 2 shows one garment \([a-z -]+\)\. [^{}$]+$/);
+  });
+
+  it('keeps the other five v4 prompts byte for byte as in v3 and v2', () => {
+    for (const slot of ['one_piece', 'top', 'bottom', 'footwear', 'accessory'] as const) {
+      expect(TRYON_PROMPTS[slot]).toBe(TRYON_V3_PROMPTS[slot]);
+      expect(TRYON_PROMPTS[slot]).toBe(TRYON_V2_PROMPTS[slot]);
+    }
+    for (const slot of ['layer', 'outerwear'] as const) expect(TRYON_PROMPTS[slot]).not.toBe(TRYON_V3_PROMPTS[slot]);
+    expect(Object.keys(TRYON_PROMPTS)).toEqual(Object.keys(TRYON_V3_PROMPTS));
   });
 
   it('pins the installed v1 prompt, parameter and settings hashes from the frozen fixture', async () => {
@@ -146,22 +169,34 @@ describe('try-on request contract', () => {
     expect(sql).toContain(`'USD',800,3000,15000,8000,${TRYON_RESERVATION_MICRO},512000,1600,4194304,512000,70,'2027-01-01T00:00:00Z'`);
   });
 
-  it('pins the v3 prompt, parameter and settings hashes and the manifest envelope in TRYON-PROMPT1', async () => {
+  it('pins the v3 prompt, parameter and settings hashes from the frozen fixture in TRYON-PROMPT1', async () => {
     const sql = await readFile(new URL('../../supabase/migrations/20261102090000_tryon_prompt_v3.sql', import.meta.url), 'utf8');
+    for (const hash of [sha(JSON.stringify(TRYON_V3_PROMPTS)), sha(JSON.stringify(TRYON_PARAMETERS)), sha(JSON.stringify(TRYON_V3_SETTINGS))]) {
+      expect(sql).toContain(`'${hash}'`);
+    }
+    expect(sql).toContain(`'${TRYON_V3_MANIFEST}','${TRYON_MODEL}',3,`);
+    expect(sql).toContain(`'USD',800,3000,15000,8000,${TRYON_RESERVATION_MICRO},512000,1600,4194304,512000,70,'2027-01-01T00:00:00Z'`);
+    expect(sha(JSON.stringify(TRYON_V3_PROMPTS))).not.toBe(sha(JSON.stringify(TRYON_V2_PROMPTS)));
+    expect(JSON.stringify(TRYON_V3_SETTINGS.limits)).toBe(JSON.stringify(TRYON_V2_SETTINGS.limits));
+    expect(JSON.stringify({ ...TRYON_V3_SETTINGS, profileId: TRYON_V2_MANIFEST, promptVersion: 2 })).toBe(JSON.stringify(TRYON_V2_SETTINGS));
+  });
+
+  it('pins the v4 prompt, parameter and settings hashes and the manifest envelope in TRYON-PROMPT2', async () => {
+    const sql = await readFile(new URL('../../supabase/migrations/20261109110000_tryon_prompt_v4.sql', import.meta.url), 'utf8');
     for (const hash of [sha(JSON.stringify(TRYON_PROMPTS)), sha(JSON.stringify(TRYON_PARAMETERS)), sha(JSON.stringify(TRYON_SETTINGS))]) {
       expect(sql).toContain(`'${hash}'`);
     }
     expect(sql).toContain(`'${TRYON_MANIFEST}','${TRYON_MODEL}',${TRYON_PROMPT_VERSION},`);
-    expect(TRYON_MANIFEST).toBe('azure-global-image25-sunburst-tryon-v3');
-    expect(TRYON_PROMPT_VERSION).toBe(3);
+    expect(TRYON_MANIFEST).toBe('azure-global-image25-sunburst-tryon-v4');
+    expect(TRYON_PROMPT_VERSION).toBe(4);
     expect(sql).toContain(`'USD',800,3000,15000,8000,${TRYON_RESERVATION_MICRO},512000,1600,4194304,512000,70,'2027-01-01T00:00:00Z'`);
-    // The earlier manifests are not edited: the new migration inserts v3 only, and neither the parameters nor the limits changed.
+    // The earlier manifests are not edited: the new migration inserts v4 only, and neither the parameters nor the limits changed.
     expect(sql.match(/insert into private\.ai_execution_manifests/g)).toHaveLength(1);
     expect(sha(JSON.stringify(TRYON_PARAMETERS))).toBe(sha(JSON.stringify(TRYON_V1_SETTINGS.parameters)));
-    expect(sha(JSON.stringify(TRYON_PARAMETERS))).toBe(sha(JSON.stringify(TRYON_V2_SETTINGS.parameters)));
-    expect(JSON.stringify(TRYON_SETTINGS.limits)).toBe(JSON.stringify(TRYON_V2_SETTINGS.limits));
-    expect(JSON.stringify({ ...TRYON_SETTINGS, profileId: TRYON_V2_MANIFEST, promptVersion: 2 })).toBe(JSON.stringify(TRYON_V2_SETTINGS));
-    expect(sha(JSON.stringify(TRYON_PROMPTS))).not.toBe(sha(JSON.stringify(TRYON_V2_PROMPTS)));
+    expect(sha(JSON.stringify(TRYON_PARAMETERS))).toBe(sha(JSON.stringify(TRYON_V3_SETTINGS.parameters)));
+    expect(JSON.stringify(TRYON_SETTINGS.limits)).toBe(JSON.stringify(TRYON_V3_SETTINGS.limits));
+    expect(JSON.stringify({ ...TRYON_SETTINGS, profileId: TRYON_V3_MANIFEST, promptVersion: 3 })).toBe(JSON.stringify(TRYON_V3_SETTINGS));
+    expect(sha(JSON.stringify(TRYON_PROMPTS))).not.toBe(sha(JSON.stringify(TRYON_V3_PROMPTS)));
     expect(TRYON_SETTINGS.maxSteps).toBe(TRYON_MAX_STEPS);
     expect(TRYON_SETTINGS.maxResults).toBe(TRYON_MAX_RESULTS);
     // The notice is unchanged, so owners are not asked to consent again.

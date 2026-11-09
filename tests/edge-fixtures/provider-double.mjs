@@ -193,8 +193,8 @@ export const TRYON_PROMPT_SHA256 = Object.freeze({
   one_piece: '165e9af0fc725de675db7c6a276c16a59b6ed0c5e34f68780f7fbb3210136784',
   top: '54dcbf9096530fd423eb1190845b3723adeb40aa762f3d673bae62bf840f46a2',
   bottom: 'e81cc7a7e85f3307d5d3826657bf04d587be932dddbce3e7afc60eda8a4c1a22',
-  layer: 'de560ca911237ad7c3a70faa69caaae6911e5ff8e147b622e0e3f1d31084d366',
-  outerwear: 'ea9b6f22b4bc59bec51086bc0744113ba8787d006f59cef9a24c2d93b0e2e2b4',
+  layer: 'c93e0d0c8403df05cfca653b44b8398ca1c1f9ec36361aeff9fe1d4d87092797',
+  outerwear: 'c133e2040c4004abf274ebbbcf75608b0e7436f7813a46aa199f8b162f76ab33',
   footwear: '4e2439bf92f0c3c4b3eff6e0520e7cfc020e14dd69c12c3cdab5a58393c68ff3',
   accessory: 'ddf6d8ea3e349725a00060abcaacd1f2f50a22f55293f76e344f442f406b93da',
 });

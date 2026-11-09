@@ -1271,7 +1271,7 @@ export async function outfitgenJudgeCompare(checkpoint, snapshot, sql, mark = ()
   }
 }
 
-// OUTFITGEN-QUALITY2 after the judge probes, at the same (target) inventory and with no migration of its own: a plain look (a skip scoring 7, which the Edge
+// OUTFITGEN-QUALITY2 at the final target inventory and with no migration of its own: a plain look (a skip scoring 7, which the Edge
 // stores with its fixed text) goes through claim and finish to a stored suggestion that the ordinary owner lists, keeps and removes; and the owner-run
 // re-judge reset (docs/outfitgen-rejudge-reset.sql, the placeholders substituted) is run against the real database. Everything is sequential, one claim at a
 // time, and each statement is marked. The local SQL runner suppresses error text, so every refusal is read from the state it leaves: a digest of every table the

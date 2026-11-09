@@ -633,6 +633,22 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(api.requests.some((call) => /reserve_item_save|commit_image|finalize_item_save/.test(call.path))).toBe(false);
   });
 }
+test('the suggested title is the first colour and the type the AI found, else the category name', async ({ page }) => {
+  const api = await aiFixture(page);
+  api.type('single-breasted blazer');
+  await addAiPhoto(page, api);
+  await filled(page);
+  await expect(page.locator('#item-title')).toHaveValue('Green single-breasted blazer');
+  await page.locator('#item-title').fill('My corrected title');
+  expect(api.calls.filter((call) => call.route.endsWith('/analyze-clothing'))).toHaveLength(1);
+  await expect(page.locator('#item-title')).toHaveValue('My corrected title');
+});
+test('without a type the suggested title keeps the category name', async ({ page }) => {
+  const api = await aiFixture(page);
+  await addAiPhoto(page, api);
+  await filled(page);
+  await expect(page.locator('#item-title')).toHaveValue('Green top');
+});
 test('language change never regenerates draft title, description, tags or analysis', async ({ page }) => {
   const api = await aiFixture(page);
   await addAiPhoto(page, api);

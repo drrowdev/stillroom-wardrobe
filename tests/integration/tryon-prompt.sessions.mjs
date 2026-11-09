@@ -49,7 +49,7 @@ const output = (label) => {
 const PHOTO = flatJpeg({ width: 1024, height: 1280 });
 const without = (c, keys) => Object.fromEntries(Object.entries(c).filter(([key]) => !keys.includes(key)));
 
-function helpers(snapshot, sql) {
+export function helpers(snapshot, sql) {
   const { client, owners: [a, b] } = snapshot;
   const one = async (text) => JSON.parse(await sql(text));
   const scalar = async (text) => (await sql(text)).trim();
