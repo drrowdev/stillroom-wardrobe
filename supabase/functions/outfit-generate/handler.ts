@@ -1,8 +1,9 @@
 import {
-  OUTFITGEN_LIMITS, OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION, OUTFITGEN_RESERVATION_MICRO, buildOutfitGenRequest, isSuggestion,
+  OUTFITGEN_LIMITS, OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION, OUTFITGEN_RESERVATION_MICRO, OUTFITGEN_SCORE_BAR, buildOutfitGenRequest,
   parseOutfitGenBody, parseOutfitGenItem, validateOutfitGenReply, type OutfitGenItem, type OutfitGenMode,
 } from '../../../src/domain/outfitgen.ts';
 import { buildBatch, setKey, type CandidateBans, type CandidateItem } from '../../../src/domain/outfit-candidates.ts';
+import { selectSuggestions, verdictScore, type SelectionCategory, type SelectionSeen } from '../../../src/domain/outfit-selection.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
 import { AI_GUARD_CODE, guardRefusal } from '../../../src/domain/ai-guard.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
@@ -48,10 +49,13 @@ function base64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-type Plan = { items: OutfitGenItem[]; pairs: Set<string>; disliked: Set<string>; known: Set<string> };
+type Plan = { items: OutfitGenItem[]; pairs: Set<string>; disliked: Set<string>; known: Set<string>; seen: SelectionSeen };
+const SEEN_MAX = 500;
+const idList = (value: unknown, min: number, max: number): value is string[] => Array.isArray(value) && value.length >= min && value.length <= max
+  && value.every((id) => typeof id === 'string' && UUID.test(id));
 function parsePlan(value: JsonObject): Plan | null {
   if (!Array.isArray(value.items) || value.items.length > OUTFITGEN_LIMITS.items || !Array.isArray(value.pairs)
-    || !Array.isArray(value.disliked) || !Array.isArray(value.known)) return null;
+    || !Array.isArray(value.disliked) || !Array.isArray(value.known) || !Array.isArray(value.seen) || value.seen.length > SEEN_MAX) return null;
   const items: OutfitGenItem[] = [];
   for (const entry of value.items) {
     const item = parseOutfitGenItem(entry);
@@ -59,19 +63,25 @@ function parsePlan(value: JsonObject): Plan | null {
     items.push(item);
   }
   const pairs = new Set<string>(), disliked = new Set<string>(), known = new Set<string>();
+  const pending: string[][] = [], kept: string[][] = [], removed: string[][] = [];
   for (const pair of value.pairs) {
     if (!Array.isArray(pair) || pair.length !== 2 || !pair.every((id) => typeof id === 'string' && UUID.test(id))) return null;
     pairs.add(setKey(pair as string[]));
   }
   for (const set of value.disliked) {
-    if (!Array.isArray(set) || set.length < 1 || set.length > 12 || !set.every((id) => typeof id === 'string' && UUID.test(id))) return null;
-    disliked.add(setKey(set as string[]));
+    if (!idList(set, 1, 12)) return null;
+    disliked.add(setKey(set));
+    removed.push(set);
   }
   for (const signature of value.known) {
     if (typeof signature !== 'string' || !HEX64.test(signature)) return null;
     known.add(signature);
   }
-  return { items, pairs, disliked, known };
+  for (const entry of value.seen) {
+    if (!Array.isArray(entry) || entry.length !== 2 || (entry[0] !== 'suggested' && entry[0] !== 'kept') || !idList(entry[1], 2, 6)) return null;
+    (entry[0] === 'suggested' ? pending : kept).push(entry[1]);
+  }
+  return { items, pairs, disliked, known, seen: { pending, kept, removed } };
 }
 
 /**
@@ -170,7 +180,7 @@ export function createOutfitGenHandler(config: OutfitGenConfig, registrar: Outfi
       const anchors = anchorOrder(plan.items, input.mode);
       const candidateItems: (CandidateItem & { imageBytes: number })[] = plan.items.map((item) => ({ id: item.id, category: item.category,
         colours: item.colours, pattern: item.pattern, seasons: item.seasons, formality: item.formality, favourite: item.favourite,
-        imageBytes: item.image.bytes }));
+        imageBytes: item.image.bytes, garmentLength: item.garment_length, warmth: item.warmth }));
       const bans: CandidateBans = { pairs: plan.pairs, disliked: plan.disliked };
       const batch = await buildBatch({ items: candidateItems, anchors, known: plan.known, bans });
       const assessable = batch.covered.filter((id) => unassessed.has(id));
@@ -203,7 +213,8 @@ export function createOutfitGenHandler(config: OutfitGenConfig, registrar: Outfi
       let accept!: (registered: boolean) => void;
       const registration = new Promise<boolean>((resolve) => { accept = resolve; });
       const work = runClaimed({ config, owner, requestId: input.requestId, built, sets: batch.sets.map((set) => set.ids),
-        assessable, remaining, dispatchBeforeMs: claim.dispatchBeforeMs, registration, azureTransport });
+        assessable, remaining, dispatchBeforeMs: claim.dispatchBeforeMs, registration, azureTransport, seen: plan.seen,
+        categoryOf: (id: string) => byId.get(id)?.category as SelectionCategory | undefined });
       try { registrar(work); accept(true); } catch { accept(false); }
       const outcome = await work;
       // Delivery only: the settlement has already run whether or not the browser is still there.
@@ -246,6 +257,7 @@ async function downloadGarment(config: OutfitGenConfig, bearer: string, item: Ou
 type Claimed = {
   config: OutfitGenConfig; owner: string; requestId: string; built: ReturnType<typeof buildOutfitGenRequest>; sets: string[][];
   assessable: string[]; remaining: boolean; dispatchBeforeMs: number; registration: Promise<boolean>; azureTransport: AzureTransport;
+  seen: SelectionSeen; categoryOf: (id: string) => SelectionCategory | undefined;
 };
 type ClaimedOutcome = { code: string; suggested: number; judged: number; remaining: boolean };
 
@@ -277,9 +289,10 @@ function runClaimed(work: Claimed): Promise<ClaimedOutcome> {
       const outcome = await callOutfitGen(work.config.azure, work.built.body, stage(server, OUTFITGEN_LIMITS.requestMs), work.azureTransport);
       const verdicts = outcome.code === 'OK' ? validateOutfitGenReply(outcome.content, work.built.candidateRefs) : null;
       const code = outcome.code === 'OK' && !verdicts ? 'FAILED' : outcome.code;
+      const chosen = verdicts ? selectSuggestions({ sets: work.sets, verdicts, bar: OUTFITGEN_SCORE_BAR, seen: work.seen, categoryOf: work.categoryOf }) : [];
       const results = verdicts ? verdicts.map((verdict, index) => ({ items: work.sets[index]!,
-        decision: isSuggestion(verdict) ? 'suggested' : 'declined', score: verdict.score, occasion: verdict.occasion,
-        title: isSuggestion(verdict) ? verdict.title : null, reason: isSuggestion(verdict) ? verdict.reason : null })) : null;
+        decision: chosen[index] ? 'suggested' : 'declined', score: verdictScore(verdict), occasion: verdict.occasion,
+        title: chosen[index] ? verdict.title : null, reason: chosen[index] ? verdict.reason : null })) : null;
       const finished = await finish(code, outcome.usage, results, results ? work.assessable : null);
       if (finished.code !== 'OK' || code !== 'OK' || !results) return fail(closedCode(finished.code === 'OK' ? code : String(finished.code)));
       const recorded = object(finished.recorded) ? finished.recorded : null;

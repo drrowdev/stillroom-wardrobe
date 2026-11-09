@@ -50,8 +50,8 @@ describe('pending cap of 100 (OUTFITGEN-PENDING100; source proofs, the SQL itsel
     }
   });
 
-  it('replaces exactly these four functions, is the latest definition of each and changes nothing else', async () => {
-    const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
+  it('replaces exactly these four functions, was the latest definition of each until the judge migration and changes nothing else', async () => {
+    const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql') && name <= FORWARD).sort();
     expect(names.at(-1)).toBe(FORWARD);
     const sql = await read(FORWARD);
     const code = sql.split('\n').filter((line) => !line.startsWith('--')).join('\n');
@@ -63,10 +63,12 @@ describe('pending cap of 100 (OUTFITGEN-PENDING100; source proofs, the SQL itsel
       'public.outfitgen_plan', 'public.outfitgen_claim', 'private.outfitgen_record', 'public.outfitgen_undo_remove']);
     expect(code.match(/\$\$/g)).toHaveLength(8);
     expect(sql).not.toMatch(/\$mig\$|\$w\$|\r|cron\./);
+    // The judge migration (OUTFITGEN-QUALITY1) later replaces the claim and the plan; the other two stay as this migration left them.
+    const later: Record<string, string> = { 'public.outfitgen_claim': '20261109100000_outfitgen_judge_v2.sql', 'public.outfitgen_plan': '20261109100000_outfitgen_judge_v2.sql' };
     for (const entry of FUNCTIONS) {
       let last = '';
-      for (const name of names) if ((await read(name)).includes(`function ${entry.name}(`)) last = name;
-      expect(last, entry.name).toBe(FORWARD);
+      for (const name of (await readdir(DIR)).filter((file) => file.endsWith('.sql')).sort()) if ((await read(name)).includes(`function ${entry.name}(`)) last = name;
+      expect(last, entry.name).toBe(later[entry.name] ?? FORWARD);
     }
   });
 

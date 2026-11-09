@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { OUTFITGEN_NOTICE_REVISION, OUTFITGEN_SETTINGS } from '../../src/domain/outfitgen';
+import { OUTFITGEN_V1_SETTINGS_JSON } from '../fixtures/outfitgen-v1-frozen';
 import { OUTFITGEN_NOTICE_KEYS } from '../../src/features/outfitgen/outfitgen-store';
 import { messages } from '../../src/i18n/all';
 
@@ -23,8 +24,9 @@ describe('suggested outfits notice', () => {
     expect(OUTFITGEN_NOTICE_REVISION).toBe(2);
     expect(pin(OUTFITGEN_NOTICE_REVISION, OUTFITGEN_NOTICE_KEYS)).toBe('2e69ce4ee3c4bc2c42987b3eceaf86a4ee746f61c6ba87708afcb0ef2ab1018b');
   });
-  it('keeps the reviewed manifest settings at their original revision', () => {
-    expect(OUTFITGEN_SETTINGS.noticeRevision).toBe(1);
+  it('records the real notice revision in the v2 settings and keeps the frozen v1 settings at their original revision', () => {
+    expect(OUTFITGEN_SETTINGS.noticeRevision).toBe(OUTFITGEN_NOTICE_REVISION);
+    expect(JSON.parse(OUTFITGEN_V1_SETTINGS_JSON).noticeRevision).toBe(1);
   });  it('is shown in full by the Settings card, in the same order', () => {
     const source = readFileSync('src/features/settings/outfitgen-settings.tsx', 'utf8');
     const used = [...source.matchAll(/t\('((?:outfitgenC|stylistC|aiC)\.[A-Za-z0-9]+)'\)/g)].map((match) => match[1]);

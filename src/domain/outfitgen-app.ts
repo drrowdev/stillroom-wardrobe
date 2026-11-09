@@ -2,7 +2,7 @@
 // decision RPCs and of the outfit-generate route, the view each state shows, and the rule that decides whether an
 // automatic run may start. The contract and limits come from `outfitgen.ts`, which the Edge function shares.
 import {
-  OUTFITGEN_LIMITS, OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION, OUTFITGEN_OCCASIONS,
+  OUTFITGEN_APP_MANIFESTS, OUTFITGEN_LIMITS, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION, OUTFITGEN_OCCASIONS,
   OUTFITGEN_RESERVATION_MICRO, type OutfitGenOccasion,
 } from './outfitgen';
 import { budgetExhausted, parseOptionalAiBudget, type AiBudget } from './ai-budget';
@@ -70,7 +70,7 @@ export function parseOutfitGenStatus(value: unknown): OutfitGenStatus | null {
 /** The policy this app version has a notice for: the reviewed manifest, model and notice revision. */
 export function supportedOutfitGenPolicy(status: OutfitGenStatus): boolean {
   const p = status.policy;
-  return p !== null && p.noticeRevision === OUTFITGEN_NOTICE_REVISION && p.manifestId === OUTFITGEN_MANIFEST && p.modelId === OUTFITGEN_MODEL;
+  return p !== null && p.noticeRevision === OUTFITGEN_NOTICE_REVISION && OUTFITGEN_APP_MANIFESTS.includes(p.manifestId) && p.modelId === OUTFITGEN_MODEL;
 }
 
 export type OutfitGenRead = { kind: 'unknown' } | { kind: 'missing' } | { kind: 'failed' } | { kind: 'ready'; status: OutfitGenStatus };

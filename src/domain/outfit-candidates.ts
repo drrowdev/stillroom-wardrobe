@@ -3,18 +3,22 @@
 // of distinct eligible garments) and the owner's explicit bans (avoided pairs, disliked sets). Everything else only orders
 // and diversifies. Each garment is an "anchor": its candidate list is a finite, deterministic, diverse selection of at most
 // `perAnchor` sets that contain it, computed without looking at what was already judged, so assessing an item always ends.
+// OUTFITGEN-QUALITY1: sets that differ only by shoes are one idea and an anchor offers at most `perBase` looks of one top+bottoms.
 
 export type CandidateCategory = 'top' | 'bottom' | 'one_piece' | 'layer' | 'outerwear' | 'footwear';
 export type CandidateItem = {
   id: string; category: CandidateCategory; colours: readonly string[]; pattern: string | null; seasons: readonly string[];
   formality: number | null; favourite: boolean;
+  /** Optional ordering hints (OUTFITGEN-QUALITY1): a short bottom under warm outerwear, or outerwear out of season, ranks lower. */
+  garmentLength?: string | null; warmth?: number | null;
 };
 export type CandidateBans = { pairs: ReadonlySet<string>; disliked: ReadonlySet<string> };
-export type CandidateSet = { ids: string[]; key: string; anchor: string; score: number; addOn: boolean };
+export type CandidateSet = { ids: string[]; key: string; anchor: string; score: number; addOn: boolean; base: string };
 export type SignedSet = CandidateSet & { signature: string };
 
 export const CANDIDATE_LIMITS = Object.freeze({
-  perAnchor: 8, exploration: 3, partnerReuse: 2, explorationReuse: 3, poolCore: 24, poolAddOnAnchor: 8, addOnsPerKind: 2, maxAnchors: 12,
+  perAnchor: 5, exploration: 2, partnerReuse: 2, explorationReuse: 3, perBase: 2, shoeTie: 0.02, poolCore: 24, poolAddOnAnchor: 8, addOnsPerKind: 2,
+  maxAnchors: 12,
   maxGarments: 8, maxSets: 24, imageBytes: 3_145_728, plannedTokens: 40_000, textTokens: 8_000, imageTokens: 3_300,
 });
 
@@ -48,6 +52,18 @@ export function colourPairScore(a: string, b: string): number {
 }
 
 const isCore = (item: CandidateItem) => item.category !== 'layer' && item.category !== 'outerwear';
+const isBase = (item: CandidateItem) => item.category === 'top' || item.category === 'bottom' || item.category === 'one_piece';
+/** Outerwear or a layer that shares no season with what the base is worn in, or warm outerwear over a short bottom. Ordering only. */
+function seasonClash(items: readonly CandidateItem[]): boolean {
+  const base = items.filter(isBase), over = items.filter((item) => !isCore(item));
+  if (!base.length || !over.length) return false;
+  const common = base.reduce<string[] | null>((all, item) => all === null ? [...item.seasons] : all.filter((s) => item.seasons.includes(s)), null) ?? [];
+  const shortBottom = base.some((item) => item.category === 'bottom' && (item.garmentLength === 'short' || item.garmentLength === 'cropped'));
+  return over.some((item) => (common.length > 0 && item.seasons.length > 0 && !item.seasons.some((s) => common.includes(s)))
+    || (shortBottom && (item.warmth ?? 0) >= 3));
+}
+const baseOf = (members: readonly CandidateItem[]) => members.filter(isBase).map((item) => item.id).sort(compare).join('|');
+const lookOf = (members: readonly CandidateItem[]) => members.filter((item) => item.category !== 'footwear').map((item) => item.id).sort(compare).join('|');
 const loud = (item: CandidateItem) => item.pattern !== null && item.pattern !== 'solid';
 /** Ordering score only (0..~1.1): colour pairing, formality agreement, season overlap, pattern clash, favourites. Never a filter. */
 export function softScore(items: readonly CandidateItem[]): number {
@@ -58,7 +74,8 @@ export function softScore(items: readonly CandidateItem[]): number {
   const colour = pairs.length ? pairs.reduce((a, b) => a + b, 0) / pairs.length : 0.5;
   const known = items.filter((item) => isCore(item) && item.formality !== null).map((item) => item.formality!);
   const formality = known.length >= 2 ? Math.max(0, 1 - (Math.max(...known) - Math.min(...known)) / 3) : 0.7;
-  const season = Math.max(...['spring', 'summer', 'autumn', 'winter'].map((s) => items.filter((item) => item.seasons.includes(s)).length)) / items.length;
+  const season = Math.max(...['spring', 'summer', 'autumn', 'winter'].map((s) => items.filter((item) => item.seasons.includes(s)).length)) / items.length
+    * (seasonClash(items) ? 0.5 : 1);
   const patterns = items.filter(loud).length;
   const pattern = patterns >= 3 ? 0.4 : patterns === 2 ? 0.7 : 1;
   const favourite = items.filter((item) => item.favourite).length / items.length;
@@ -104,37 +121,66 @@ export function anchorSets(anchor: CandidateItem, items: readonly CandidateItem[
   const add = (members: CandidateItem[], addOn: boolean) => {
     if (!members.some((item) => item.id === anchor.id) || banned(members, bans)) return;
     const key = setKey(members.map((item) => item.id));
-    if (!sets.has(key)) sets.set(key, { ids: ordered(members).map((item) => item.id), key, anchor: anchor.id, score: softScore(members), addOn });
+    if (!sets.has(key)) sets.set(key, { ids: ordered(members).map((item) => item.id), key, anchor: anchor.id, score: softScore(members), addOn,
+      base: baseOf(members) });
+  };
+  const looks = new Map<string, CandidateSet[]>();
+  const lookByKey = new Map<string, string>();
+  const addLook = (members: CandidateItem[], addOn: boolean) => {
+    add(members, addOn);
+    const key = setKey(members.map((item) => item.id));
+    if (sets.has(key)) { const look = lookOf(members); lookByKey.set(key, look); }
   };
   for (const core of cores) {
     if (core.some((item, index) => core.findIndex((other) => other.id === item.id) !== index)) continue;
-    if (!addOnAnchor) add(core, false);
+    if (!addOnAnchor) addLook(core, false);
     const kinds = addOnAnchor ? [[anchor]] : [
       [...layers].sort((a, b) => fit(core[0]!, b) - fit(core[0]!, a) || compare(a.id, b.id)).slice(0, CANDIDATE_LIMITS.addOnsPerKind),
       [...outer].sort((a, b) => fit(core[0]!, b) - fit(core[0]!, a) || compare(a.id, b.id)).slice(0, CANDIDATE_LIMITS.addOnsPerKind)];
-    for (const kind of kinds) for (const extra of kind) add([...core, extra], true);
+    for (const kind of kinds) for (const extra of kind) addLook([...core, extra], true);
   }
-  const all = [...sets.values()].sort((a, b) => b.score - a.score || compare(a.key, b.key));
+  // Sets that differ only by footwear are one idea: keep the best-scoring shoe, and let a stable hash of the look choose among
+  // near-equal ones so the shoes still vary from look to look.
+  for (const set of sets.values()) {
+    const look = lookByKey.get(set.key)!;
+    looks.set(look, [...(looks.get(look) ?? []), set]);
+  }
+  const all: CandidateSet[] = [];
+  for (const [look, variants] of looks) {
+    const best = Math.max(...variants.map((set) => set.score));
+    const near = variants.filter((set) => set.score >= best - CANDIDATE_LIMITS.shoeTie)
+      .sort((a, b) => hashOf(look + a.key) - hashOf(look + b.key) || compare(a.key, b.key));
+    all.push(near[0]!);
+  }
+  all.sort((a, b) => b.score - a.score || compare(a.key, b.key));
   const k = CANDIDATE_LIMITS.perAnchor, explore = Math.min(CANDIDATE_LIMITS.exploration, Math.max(0, all.length - 1));
-  const picks: CandidateSet[] = [], uses = new Map<string, number>();
-  const take = (set: CandidateSet, cap: number) => {
-    if (picks.includes(set) || set.ids.some((id) => id !== anchor.id && (uses.get(id) ?? 0) >= cap)) return false;
+  const footwearIds = new Set(items.filter((item) => item.category === 'footwear').map((item) => item.id));
+  const picks: CandidateSet[] = [], uses = new Map<string, number>(), bases = new Map<string, number>();
+  const take = (set: CandidateSet, cap: number, baseCap: number) => {
+    if (picks.includes(set) || (bases.get(set.base) ?? 0) >= baseCap
+      || set.ids.some((id) => id !== anchor.id && !footwearIds.has(id) && (uses.get(id) ?? 0) >= cap)) return false;
     picks.push(set);
-    for (const id of set.ids) if (id !== anchor.id) uses.set(id, (uses.get(id) ?? 0) + 1);
+    bases.set(set.base, (bases.get(set.base) ?? 0) + 1);
+    for (const id of set.ids) if (id !== anchor.id && !footwearIds.has(id)) uses.set(id, (uses.get(id) ?? 0) + 1);
     return true;
   };
-  for (const set of all) { if (picks.length >= k - explore) break; take(set, CANDIDATE_LIMITS.partnerReuse); }
+  for (const set of all) { if (picks.length >= k - explore) break; take(set, CANDIDATE_LIMITS.partnerReuse, CANDIDATE_LIMITS.perBase); }
   const hasKind = (addOn: boolean) => picks.some((set) => set.addOn === addOn);
   for (const wanted of [false, true]) {
     if (hasKind(wanted) || !all.some((set) => set.addOn === wanted)) continue;
     const swap = all.find((set) => set.addOn === wanted && !picks.includes(set));
     if (!swap) continue;
-    if (picks.length >= k - explore) picks.pop();
-    take(swap, CANDIDATE_LIMITS.explorationReuse);
+    if (picks.length >= k - explore) {
+      const dropped = picks.pop()!;
+      bases.set(dropped.base, (bases.get(dropped.base) ?? 1) - 1);
+      for (const id of dropped.ids) if (id !== anchor.id && !footwearIds.has(id)) uses.set(id, (uses.get(id) ?? 1) - 1);
+    }
+    take(swap, CANDIDATE_LIMITS.explorationReuse, Infinity);
   }
   const rest = all.filter((set) => !picks.includes(set)).sort((a, b) => hashOf(a.key) - hashOf(b.key) || compare(a.key, b.key));
-  for (const cap of [CANDIDATE_LIMITS.partnerReuse, CANDIDATE_LIMITS.explorationReuse, Infinity]) {
-    for (const set of rest) { if (picks.length >= k) break; take(set, cap); }
+  for (const [cap, baseCap] of [[CANDIDATE_LIMITS.partnerReuse, CANDIDATE_LIMITS.perBase], [CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase],
+    [Infinity, CANDIDATE_LIMITS.perBase], [Infinity, Infinity]] as const) {
+    for (const set of rest) { if (picks.length >= k) break; take(set, cap, baseCap); }
   }
   return picks.sort((a, b) => b.score - a.score || compare(a.key, b.key));
 }

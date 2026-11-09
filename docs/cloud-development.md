@@ -2553,3 +2553,81 @@ cap is untouched.
   | Backout of E or P (stale clients) | An old Edge or page simply meets the cap of 40 on the page or in the Edge; with D at 100 the pending rows above 40 stay and are shown (the old page cannot read more than about 70 of them). |
 - **Validation.** Node 24.19.0: lint, typecheck, `check:translations`, the unit suites above, `outfitgen.spec.ts` and `outfitgen-pictures.spec.ts` on chromium, mobile and webkit-photo (216 passed). CI-only and not run
   locally: the preservation rehearsal and all integration suites.
+
+## OUTFITGEN-QUALITY1 judge v2, fewer and more varied suggestions - 9 November 2026
+
+Owner feedback of 8 November 2026 on the live Suggested outfits ("It feels like the AI has just matched every single garment I have in the wardrobe with each other. Some of the outfit
+examples are really bad. What can be done to improve this?"), then about one picture: a hybrid jacket worn open over a flat tonal base was bad "because ... what happens when I go indoors and
+wear only the t-shirt and trousers? It wont look good then!". The owner chose a quality fix: stricter ranking and no near-duplicates. Tier A (prompt and manifest, candidate generation, paid AI);
+plan critique by GPT-6.1 Sol applied as binding amendments. Source packet: nothing here is installed, deployed or consented, and no provider is called.
+
+- **Evidence (aggregates of the owner's 65 latest suggestions, read-only query, v1 judge; no garment names are recorded here).** 64 of 65 scored exactly the bar (8), one scored 9, so the score ranks nothing; 46 of
+  65 were removed. Only 17 distinct top+bottoms bases appeared in the 65 (about three quarters repeat a base); one top was in 63 % of them; two jackets of one colour were in about three quarters of the
+  suggestions that had outerwear; two pairs of shoes in all. Cause of the repeats: the candidate ranking treats every neutral colour as the best partner for every garment, so each garment's list picks
+  the same few; its only cap (`partnerReuse`) is per garment, so nothing limited the global list; sets that differed only by shoes took separate slots. The judge scored the whole outfit, jacket included.
+- **Judge v2 (manifest `azure-eu-terra-outfitgen-v2`, prompt and schema version 2).** The request lists each candidate as `base` (top or one-piece, bottoms, shoes) and `over` (layer, jacket). The verdict has
+  `baseScore` (the look indoors, jackets off) and `fullScore` (the whole outfit, jacket worn open) on one anchored 1 to 10 scale (10 almost never, 9 rare, 8 would recommend without hesitation, 7 fine, 5 to 6
+  clear weakness, 4 or less poor), ranked against the other candidates in the call (8 or more for at most one in four and never more than four, never for two sharing top and bottoms), with explicit marks down
+  for season, weather and length mismatches (shorts under a warm jacket), all-tonal looks and pattern or formality clashes, and a favourite flag that is not a quality signal; reasons are asked at 100
+  characters (the 160 limit stays). The database is unchanged: the Edge function stores `score = min(baseScore, fullScore)` (a base that works only under a jacket stays low) and records the same results shape.
+  v1 keeps its rows (`prompt_version` 1, one score); nothing reads the score for ordering or filtering, so the mixed history is harmless. The consent notice stays at revision 2: the same garment
+  fields, photos, model, region and retention, only the instructions and the server's post-processing differ, so nobody consents again. What the judge receives per garment is unchanged (category,
+  colours, pattern, sleeve and garment length, seasons, formality, warmth only when set by the owner, coverage, favourite, and the photo); subcategory and material were considered and **not added**: free text
+  would break the manifest's "enum, number and boolean fields only, no titles, notes or brands" and the data-minimisation rule, shorts are already `garment_length`, and the photos show cut and material.
+- **Candidates and selection (Edge and domain).** `src/domain/outfit-candidates.ts` stays deterministic and independent of what was judged or seen, so an anchor's list is still finite and assessing a
+  garment still ends: sets that differ only by shoes are one idea (the best-scoring shoe, near-ties of 0.02 broken by a stable hash of the look so the shoes still vary), at most two looks per top+bottoms
+  base in an anchor's list (relaxed only to fill a small wardrobe), `perAnchor` 8 to 5 and exploration 3 to 2 (see Cost), and a season/length mismatch term in the ordering. `src/domain/outfit-selection.ts`
+  then decides, per call, which good verdicts become suggestions: score at least 8 (the weaker of the two), at most `min(4, ceil(n / 4))` per call, one look per base per call, at most 2 looks per base
+  across the waiting, kept and removed sets, and at most 6 waiting suggestions per garment (shoes are exempt: a wardrobe has few). A good verdict that a cap blocks is recorded as judged (declined, cached per
+  prompt version), never dropped unrecorded. These constants are Edge settings, not part of the manifest hash, so tuning them is an Edge redeploy.
+- **Removal learning.** A removal records the exact set (a disliked vote, state removed, a ticket for Undo) and no reason, and the owner's own removals were inconsistent per base (near-copies were both kept
+  and removed), so no pair or garment is banned from it. The only use is that removed bases count toward the two-per-base cap. A reason on Remove would be a UI change and is left to the trial.
+- **Migration `20261109100000_outfitgen_judge_v2.sql` (inert for the running stack).** Adds the immutable v2 manifest row (the v1 row's model, endpoint, tariff, rates, envelope, reservation 373,402 micro,
+  limits and review date; only the id, prompt version, three hashes and description differ; no deployment row exists for either), replaces `public.outfitgen_claim` (its latest body, `20261109090000`, with
+  the manifest pin changed from v1 to v1 or v2) and `public.outfitgen_plan` (its latest body plus a read-only `seen` key: the item sets of the newest 500 waiting and kept suggestions; removed sets
+  are already in `disliked`). `create or replace` keeps owner, security definer, `search_path`, `lock_timeout` and ACLs. It writes no controls, consent or suggestion row. An in-transaction postcondition
+  compares the installed bodies with the predecessors plus the stated deltas, the v1 row, v2 against v1 on everything but its identity and hashes, and `private.ai_controls`. `begin ... commit`, LF, one `$$`
+  pair per function, no wrapper tag. Hash pins: v1's prompt, schema and settings are frozen byte for byte in `tests/fixtures/outfitgen-v1-frozen.ts` and pinned against `20261106090000`; the live
+  constants pin against the v2 row (`tests/unit/outfitgen-judge-schema.test.ts`). The settings now record the true notice revision (2) instead of the literal 1 that the v1 row pinned.
+- **Cost.** The per-call envelope is unchanged: 48,000 input and 8,192 output tokens, reservation USD 0.373 (373,402 micro), `outfitgen_max_request_micro` as configured, the same model, deployment, rates and
+  limits. The prompt grows by about 300 to 400 tokens (inside the 8,000-token text budget of the 40,000 planned input); output should not grow (title and reason only for at most four good verdicts per
+  call, though two scores per verdict); reasoning tokens may rise (unmeasured; the output cap still bounds the worst case). No typical per-call cost is claimed before the trial. **Calls per garment:**
+  measured offline with the real `buildBatch` on a synthetic 23-garment wardrobe shaped like a small real one (5 tops, 7 bottoms, 2 shoes, 8 jackets, 1 layer), the same loop a whole-wardrobe press runs:
+  the previous generator needed 20 calls (0.87 per garment, 133 sets judged); the first v2 draft at 8 sets per garment needed 27 (1.17), so `perAnchor` was lowered; at 6 it was 22 (0.96); at 5 it is 19 (0.83,
+  89 sets judged, every base but five covered). The real figure is about 1.8 calls per garment on the earlier synthetic wardrobes and is not measured on the owner's data. Fewer, more varied suggestions
+  (at most 4 per call, base and garment caps) should also shrink the picture queue (each waiting suggestion queues 2 to 6 try-on steps at the 360,000 micro reservation); 71 % of the owner's decided
+  suggestions were removed, each with a picture made for nothing. The first v2 plan drops the v1 declined rows (the existing version rule), so some of those sets may be judged again when picked, bounded by the
+  same calls. A full re-pass of an already-checked wardrobe needs the owner's own SQL (clearing `private.outfit_assessed_items` for the owner), about one call per garment, and is a separate owner decision.
+- **Offline evaluation (no provider, no real data).** `tests/unit/outfitgen-quality.test.ts` runs the real generator and selection, with the waiting list fed back as `seen` and a deliberately lenient stand-in
+  judge, on the synthetic wardrobe: the pass ends, 19 calls, 89 sets judged, 22 suggestions over 18 distinct bases (the same stand-in without selection liked more than twice as many sets), no top+bottoms with more than two,
+  no garment in more than 27 % of the list, both shoes used. It measures how candidates are chosen and capped, not whether an outfit looks good: **quality can only be judged by the owner's trial after deploy.**
+- **Acceptance on the owner's data (read-only, after the trial; the v1 figures above are the baseline).** Run per `prompt_version` (the `declined` rows are the denominator of how selective the judge was):
+  `select prompt_version, state, score, count(*) from public.suggested_outfits where owner_id = '<owner>' group by 1, 2, 3 order by 1, 2, 3;` for the distribution, and, for the list that was offered
+  (`state in ('suggested','kept','removed')`), `count(*)` against `count(distinct base)` with `base` = the sorted ids of the set's top, bottom and one-piece items, and each non-footwear garment's count over
+  `unnest(item_ids)` joined to `public.items`. Expectations, as trial indicators and not gates: good verdicts at most about a quarter of the judged sets, at least three distinct scores among them,
+  at most two sets per base, no non-footwear garment in more than about a third of the list, and a removal rate clearly below the 71 % of v1.
+- **Rollout (each step a separate gate; this packet does none of it).** 1. The coordinator's guarded hosted install of the migration (precondition: the ledger ends at `20261109090000`, the claim and plan bodies
+  are the predecessors; read back each `prosrc`, the properties and ACLs, the v2 row). It changes nothing the running stack uses. 2. The owner's Pages deploy (the app accepts the v1 or the v2 manifest for one
+  release, so it may come before or after the controls move). 3. With nothing in flight (`select count(*) from private.ai_usage where purpose = 'outfitgen' and charge_state in ('reserved','held')` is 0
+  and the status shows no live batch), back to back: the owner's SQL `update private.ai_controls set outfitgen_manifest_id = 'azure-eu-terra-outfitgen-v2', updated_at = clock_timestamp() where owner_id =
+  '<owner>' and outfitgen_manifest_id = 'azure-eu-terra-outfitgen-v1';` (notice and consent untouched) and the coordinator's redeploy of the Edge function `outfit-generate`. 4. Optional, owner decision: the
+  re-pass SQL above. Backout: the controls SQL back to v1 plus the previous Edge function (the claim still admits v1); no compensating DDL and no history repair.
+
+  | State | Effect |
+  |---|---|
+  | migration only, or with Pages | unchanged: the claim admits v1, the old Edge ignores `seen`, the app accepts v1 |
+  | controls v2, old Edge | the old Edge sees policy v2 at its status preflight: `UNCONFIGURED` (503) before any plan or claim; nothing is claimed or charged |
+  | new Edge, controls v1 | the new Edge sees policy v1: `UNCONFIGURED` before any plan or claim |
+  | new Edge, no migration | the plan has no `seen` (the Edge refuses it, `FAILED`), and the old claim would refuse v2; no hold is made |
+  | old Pages after step 3 | the old app does not recognise v2 and shows suggestions as unavailable until it is reloaded; nothing is charged |
+  | a request in flight across the controls move | its accounting settles at the usage recorded, nothing is recorded as suggestions (`UNAVAILABLE`); hence the drain check |
+  | migration, Pages, controls and Edge all done | the full feature with judge v2, no new consent |
+- **Validation.** Node 24.19.0: lint, typecheck, `check:translations`, the unit suites (`outfitgen.test.ts` incl. the handler's quality rules, `outfit-selection.test.ts`, `outfit-candidates.test.ts`,
+  `outfitgen-quality.test.ts`, `outfitgen-judge-schema.test.ts`, the updated pending, limits, notice, app, preservation, purge-schedule and storage-guard tests) and the outfit browser specs
+  (`outfitgen.spec.ts`, `outfitgen-pictures.spec.ts`). A scratch run (outside the repository) of the migration, the manifest and the finish, plan and in-flight cases in PGlite over the whole migration chain
+  with stubs for Auth, Storage and pg_cron (there is no Docker here) was green; that is a smoke test, not the rehearsal. **CI-only, authored here and not run:** the preservation rehearsal's new stage
+  `judge-prior` (46 migrations) to `target` (47) with checkpoint and compare (`outfitgenJudgeCheckpoint` / `Compare` / `Probes`: the installed predecessors, every other function body and ACL, controls,
+  consent, usage, evidence, requests, suggestions, assessed rows and the earlier manifests equal; the claim and plan differ by exactly the stated deltas; the held request survives and settles) and
+  probes (v1 admitted under v1 controls, v2 under v2 controls and the cross cases `CONFIG_CHANGED`, an unknown manifest `UNCONFIGURED` with nothing written; a v2 settlement stores manifest v2 and prompt
+  version 2; the plan's `seen` lists waiting and kept sets newest first and not removed or declined ones; a controls move in flight). Not verified here: the real provider's behaviour under the new
+  prompt, the cost and latency per call, the owner's real calls per garment, and any visual or subjective quality.

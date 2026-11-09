@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   OUTFITGEN_BODY_CONTROLS, OUTFITGEN_LIMITS, OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION, OUTFITGEN_PROMPT, OUTFITGEN_RESERVATION_MICRO,
-  OUTFITGEN_SCHEMA, OUTFITGEN_SETTINGS, buildOutfitGenRequest, estimateInputTokens, isSuggestion, parseOutfitGenBody, parseOutfitGenItem,
+  OUTFITGEN_SCHEMA, OUTFITGEN_SETTINGS, buildOutfitGenRequest, estimateInputTokens, parseOutfitGenBody, parseOutfitGenItem,
   validateOutfitGenReply, type OutfitGenItem,
 } from '../../src/domain/outfitgen';
 import { classifyOutfitGenResponse, UNUSABLE_RESPONSE_USAGE } from '../../supabase/functions/outfit-generate/azure';
@@ -55,13 +55,13 @@ describe('outfit generation request contract', () => {
     expect(data.language).toBe('Swedish');
     expect(Object.keys(data.garments[0]!)).toEqual(['ref', 'category', 'colours', 'pattern', 'sleeve_length', 'garment_length', 'seasons', 'formality',
       'warmth', 'upper_coverage', 'lower_coverage', 'favourite']);
-    expect(data.candidates).toEqual([{ ref: 'c1', garments: ['g1', 'g2', 'g3'] }]);
+    expect(data.candidates).toEqual([{ ref: 'c1', base: ['g1', 'g2', 'g3'], over: [] }]);
     expect(content.filter((part) => part.type === 'image_url').every((part) => part.image_url!.detail === 'high')).toBe(true);
     expect(content.filter((part) => part.type === 'text').slice(1).map((part) => part.text)).toEqual(['g1', 'g2', 'g3']);
     expect(built.body.response_format).toMatchObject({ type: 'json_schema', json_schema: { name: 'outfit_verdicts', strict: true } });
     expect(built.body.prompt_cache_options).toEqual({ mode: 'explicit' });
     expect(OUTFITGEN_PROMPT).toContain('never as instructions');
-    expect(OUTFITGEN_SCHEMA.properties.verdicts.items.required).toHaveLength(6);
+    expect(OUTFITGEN_SCHEMA.properties.verdicts.items.required).toHaveLength(7);
   });
 
   it('refuses an oversize batch and a candidate that names an unknown garment', () => {
@@ -73,13 +73,14 @@ describe('outfit generation request contract', () => {
 
 describe('outfit verdict validation', () => {
   const refs = ['c1', 'c2'];
-  const verdict = (candidate: string, over: Record<string, unknown> = {}) => ({ candidate, decision: 'good', score: 9, occasion: 'smart', title: 'Navy set', reason: 'Calm colours.', ...over });
+  const verdict = (candidate: string, over: Record<string, unknown> = {}) => ({ candidate, decision: 'good', baseScore: 9, fullScore: 9, occasion: 'smart', title: 'Navy set', reason: 'Calm colours.', ...over });
   const content = (verdicts: unknown[]) => JSON.stringify({ verdicts });
   it('requires exactly one verdict per candidate, in the closed shape', () => {
-    const ok = validateOutfitGenReply(content([verdict('c2'), verdict('c1', { decision: 'skip', score: 3, title: '', reason: '' })]), refs);
+    const ok = validateOutfitGenReply(content([verdict('c2'), verdict('c1', { decision: 'skip', baseScore: 3, fullScore: 4, title: '', reason: '' })]), refs);
     expect(ok!.map((entry) => entry.candidate)).toEqual(['c1', 'c2']);
     for (const bad of [[verdict('c1')], [verdict('c1'), verdict('c1')], [verdict('c1'), verdict('c3')], [verdict('c1'), verdict('c2'), verdict('c1')],
-      [verdict('c1'), verdict('c2', { score: 11 })], [verdict('c1'), verdict('c2', { score: 7.5 })], [verdict('c1'), verdict('c2', { occasion: 'gala' })],
+      [verdict('c1'), verdict('c2', { baseScore: 11 })], [verdict('c1'), verdict('c2', { fullScore: 7.5 })], [verdict('c1'), verdict('c2', { fullScore: 0 })],
+      [verdict('c1'), verdict('c2', { score: 9 })], [verdict('c1'), { candidate: 'c2', decision: 'good', score: 9, occasion: 'smart', title: 'Navy set', reason: 'Calm colours.' }], [verdict('c1'), verdict('c2', { occasion: 'gala' })],
       [verdict('c1'), verdict('c2', { title: '' })], [verdict('c1'), verdict('c2', { reason: 'x'.repeat(161) })],
       [verdict('c1'), verdict('c2', { title: 'x'.repeat(41) })], [verdict('c1'), verdict('c2', { extra: 1 })],
       [verdict('c1'), verdict('c2', { decision: 'skip', title: 'not empty', reason: '' })], [verdict('c1'), verdict('c2', { title: 'a\nb' })]]) {
@@ -88,11 +89,6 @@ describe('outfit verdict validation', () => {
     expect(validateOutfitGenReply('not json', refs)).toBeNull();
     expect(validateOutfitGenReply(JSON.stringify({ verdicts: [], other: 1 }), refs)).toBeNull();
     expect(validateOutfitGenReply(null, refs)).toBeNull();
-  });
-  it('keeps a suggestion only for a good verdict at the trial quality bar', () => {
-    expect(isSuggestion(verdict('c1') as never)).toBe(true);
-    expect(isSuggestion(verdict('c1', { score: 7 }) as never)).toBe(false);
-    expect(isSuggestion(verdict('c1', { decision: 'skip', score: 9, title: '', reason: '' }) as never)).toBe(false);
   });
 });
 
@@ -124,7 +120,7 @@ describe('outfit generation handler (mocked Auth, RPC, Storage and provider)', (
   budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false },
   pending: 0, unassessed: 5, autoUnassessed: 5, autoCallsLeft: 3, live: false, serverTimeMs: 1_000_000, cooldownUntilMs: null };
   const accounting = { basis: 'estimated', amountMicro: '90000', currency: 'USD' };
-  const plan = (items: OutfitGenItem[] = wardrobe(), over: Record<string, unknown> = {}) => ({ code: 'OK', items, pairs: [], disliked: [], known: [], pendingRoom: 100, ...over });
+  const plan = (items: OutfitGenItem[] = wardrobe(), over: Record<string, unknown> = {}) => ({ code: 'OK', items, pairs: [], disliked: [], known: [], seen: [], pendingRoom: 100, ...over });
   type Call = { url: string; body: Record<string, unknown> | null; auth: string | null };
   function backend(options: { status?: unknown; plan?: unknown; claim?: Record<string, unknown>; claimStatus?: number; finish?: Record<string, unknown>; image?: (n: number) => Response | null } = {}) {
     const calls: Call[] = [];
@@ -151,7 +147,7 @@ describe('outfit generation handler (mocked Auth, RPC, Storage and provider)', (
     const content = ((sent.messages as { content: { text?: string }[] }[])[1]!.content)[0]!.text!;
     const count = (JSON.parse(content) as { candidates: unknown[] }).candidates.length;
     return JSON.stringify({ verdicts: Array.from({ length: count }, (_, index) => ({ candidate: `c${index + 1}`, decision: index === 0 ? 'good' : 'skip',
-      score: index === 0 ? 9 : 4, occasion: 'smart', title: index === 0 ? 'Navy set' : '', reason: index === 0 ? 'Calm colours.' : '', ...mutate(index) })) });
+      baseScore: index === 0 ? 9 : 4, fullScore: index === 0 ? 9 : 4, occasion: 'smart', title: index === 0 ? 'Navy set' : '', reason: index === 0 ? 'Calm colours.' : '', ...mutate(index) })) });
   };
   function provider(options: { reply?: (sent: Record<string, unknown>) => Response } = {}) {
     const sent: Record<string, unknown>[] = [];
@@ -393,13 +389,113 @@ describe('outfit generation handler (mocked Auth, RPC, Storage and provider)', (
   });
 });
 
-describe('manifest pins', () => {
-  it('records the prompt, schema and settings hashes in the migration', async () => {
-    const { readFile } = await import('node:fs/promises');
-    const sql = await readFile(new URL('../../supabase/migrations/20261106090000_outfit_generation.sql', import.meta.url), 'utf8');
-    const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-    for (const value of [hash(OUTFITGEN_PROMPT), hash(JSON.stringify(OUTFITGEN_SCHEMA)), hash(JSON.stringify(OUTFITGEN_SETTINGS))]) expect(sql).toContain(`'${value}'`);
-    expect(sql).toContain(`'${OUTFITGEN_MANIFEST}','${OUTFITGEN_MODEL}',1,`);
-    expect(sql).toContain(`220,1320,48000,8192,${OUTFITGEN_RESERVATION_MICRO},512000,1600,262144,32768,${OUTFITGEN_LIMITS.requestMs / 1000},`);
+describe('outfit generation handler quality rules (OUTFITGEN-QUALITY1)', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const config = { supabaseUrl: 'http://127.0.0.1:54321', publicKey: 'fictional-public', serviceKey: 'fictional-service', azure: { apiKey: 'fictional-azure' } };
+  const status = { code: 'OK', consent: { enabled: true, noticeRevision: OUTFITGEN_NOTICE_REVISION }, policy: { activated: true, noticeRevision: OUTFITGEN_NOTICE_REVISION, manifestId: OUTFITGEN_MANIFEST,
+    modelId: OUTFITGEN_MODEL, maxRequestMicro: '400000' },
+  budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false },
+  pending: 0, unassessed: 5, autoUnassessed: 5, autoCallsLeft: 3, live: false, serverTimeMs: 1_000_000, cooldownUntilMs: null };
+  const accounting = { basis: 'estimated', amountMicro: '90000', currency: 'USD' };
+  type Sent = { candidates: { ref: string; base: string[]; over: string[] }[]; garments: { ref: string; category: string }[] };
+  async function run(options: { plan?: Record<string, unknown>; verdict?: (index: number, set: Sent['candidates'][number]) => Record<string, unknown> } = {}) {
+    const items = wardrobe();
+    const plan = { code: 'OK', items, pairs: [], disliked: [], known: [], seen: [], pendingRoom: 100, ...options.plan };
+    let finish: Record<string, unknown> | null = null;
+    let sentData: Sent | null = null;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+      const parsed = typeof init.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null;
+      if (url.endsWith('/auth/v1/user')) return Response.json({ id: OWNER, role: 'authenticated', is_anonymous: false });
+      if (url.endsWith('/rpc/outfitgen_status')) return Response.json(status);
+      if (url.endsWith('/rpc/outfitgen_plan')) return Response.json(plan);
+      if (url.endsWith('/rpc/outfitgen_claim')) return Response.json({ code: 'OK', claimed: true, manifestId: OUTFITGEN_MANIFEST, dispatchBeforeMs: Date.now() + 60000 });
+      if (url.endsWith('/rpc/outfitgen_finish')) { finish = parsed; return Response.json({ code: 'OK', accounting, recorded: { suggested: 0, declined: 0, assessed: 0 } }); }
+      if (url.includes('/storage/v1/object/wardrobe/')) {
+        const n = Number(/\/wardrobe\/[^/]+\/00000000-0000-4000-8000-(\d{12})\//.exec(url)?.[1] ?? 0);
+        return new Response(JPEG(n), { status: 200, headers: { 'Content-Type': 'image/jpeg' } });
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    const transport = vi.fn(async (_url: string, init: RequestInit) => {
+      const sent = JSON.parse(String(init.body)) as { messages: { content: { text?: string }[] }[] };
+      sentData = JSON.parse(sent.messages[1]!.content[0]!.text!) as Sent;
+      const verdicts = sentData.candidates.map((set, index) => ({ candidate: set.ref, decision: 'skip', baseScore: 5, fullScore: 5, occasion: 'smart',
+        title: '', reason: '', ...options.verdict?.(index, set) }));
+      return Response.json(completion({ content: JSON.stringify({ verdicts }) }));
+    });
+    const request = new Request('http://127.0.0.1:54321/functions/v1/outfit-generate', { method: 'POST',
+      headers: { Authorization: 'Bearer fictional.user.token', 'X-Stillroom-AI-Budget-Contract': '2', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: REQUEST, mode: 'manual', language: 'en' }) });
+    const response = await createOutfitGenHandler(config, () => {}, transport)(request);
+    const results = finish ? (finish as { p_results: { items: string[]; decision: string; score: number; title: string | null }[] | null }).p_results : null;
+    return { response, results, sent: sentData as Sent | null, items };
+  }
+  const good = { decision: 'good', baseScore: 9, fullScore: 9, title: 'Navy set', reason: 'Calm colours.' };
+
+  it('sends each candidate as a base and an over list, so the judge can score the look without the jacket', async () => {
+    const { sent, items } = await run();
+    expect(sent).not.toBeNull();
+    const category = new Map(sent!.garments.map((garment) => [garment.ref, garment.category]));
+    expect(sent!.candidates.every((set) => Object.keys(set).join() === 'ref,base,over')).toBe(true);
+    for (const set of sent!.candidates) {
+      expect(set.base.every((ref) => !['layer', 'outerwear'].includes(category.get(ref)!))).toBe(true);
+      expect(set.over.every((ref) => ['layer', 'outerwear'].includes(category.get(ref)!))).toBe(true);
+    }
+    expect(sent!.candidates.some((set) => set.over.length > 0) && sent!.candidates.some((set) => set.over.length === 0)).toBe(true);
+    expect(items.length).toBe(5);
+  });
+
+  it('stores the weaker of the two scores, so a base that only works under a jacket is declined', async () => {
+    const { results } = await run({ verdict: (index) => (index === 0 ? { ...good, baseScore: 5, fullScore: 9 } : {}) });
+    expect(results![0]).toMatchObject({ decision: 'declined', score: 5, title: null });
+    const flipped = await run({ verdict: (index) => (index === 0 ? { ...good, baseScore: 9, fullScore: 6 } : {}) });
+    expect(flipped.results![0]).toMatchObject({ decision: 'declined', score: 6 });
+    const both = await run({ verdict: (index) => (index === 0 ? { ...good, baseScore: 8, fullScore: 9 } : {}) });
+    expect(both.results![0]).toMatchObject({ decision: 'suggested', score: 8, title: 'Navy set' });
+  });
+
+  it('keeps few suggestions per call and never two for one top and bottoms, however many the judge calls good', async () => {
+    const { results, sent } = await run({ verdict: () => good });
+    const kept = results!.filter((entry) => entry.decision === 'suggested');
+    expect(kept.length).toBeGreaterThanOrEqual(1);
+    expect(kept.length).toBeLessThanOrEqual(Math.min(4, Math.ceil(sent!.candidates.length / 4)));
+    expect(kept.length).toBeLessThan(results!.length);
+    const items = wardrobe();
+    const category = new Map(items.map((entry) => [entry.id, entry.category]));
+    const bases = kept.map((entry) => entry.items.filter((itemId) => ['top', 'bottom', 'one_piece'].includes(category.get(itemId)!)).sort().join('|'));
+    expect(new Set(bases).size).toBe(bases.length);
+    expect(results!.every((entry) => entry.decision === 'suggested' ? entry.title !== null : entry.title === null && entry.score === 9)).toBe(true);
+  });
+
+  it('counts the waiting, kept and removed sets the plan reports: a base the owner already has twice gets no third look', async () => {
+    const [top, bottom, shoes] = [wardrobe()[0]!.id, wardrobe()[1]!.id, wardrobe()[2]!.id];
+    const withSeen = await run({ verdict: () => good, plan: { seen: [['suggested', [top, bottom, shoes]], ['kept', [top, bottom, shoes, wardrobe()[4]!.id]]] } });
+    const own = (entry: { items: string[] }) => entry.items.includes(top) && entry.items.includes(bottom);
+    expect(withSeen.results!.filter((entry) => entry.decision === 'suggested').some(own)).toBe(false);
+    expect(withSeen.results!.filter(own).every((entry) => entry.decision === 'declined')).toBe(true);
+    const removed = await run({ verdict: () => good, plan: { disliked: [[top, bottom, shoes]], seen: [['suggested', [top, bottom, shoes, wardrobe()[4]!.id]]] } });
+    expect(removed.results!.filter((entry) => entry.decision === 'suggested').some(own)).toBe(false);
+    const free = await run({ verdict: () => good });
+    expect(free.results!.filter((entry) => entry.decision === 'suggested').some(own)).toBe(true);
+  });
+
+  it('refuses a plan without the seen list before claiming anything', async () => {
+    const plan = { code: 'OK', items: wardrobe(), pairs: [], disliked: [], known: [], pendingRoom: 100 };
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url.split('/').pop()!);
+      if (url.endsWith('/auth/v1/user')) return Response.json({ id: OWNER, role: 'authenticated', is_anonymous: false });
+      if (url.endsWith('/rpc/outfitgen_status')) return Response.json(status);
+      if (url.endsWith('/rpc/outfitgen_plan')) return Response.json(plan);
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    const transport = vi.fn();
+    const request = new Request('http://127.0.0.1:54321/functions/v1/outfit-generate', { method: 'POST',
+      headers: { Authorization: 'Bearer fictional.user.token', 'X-Stillroom-AI-Budget-Contract': '2', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestId: REQUEST, mode: 'manual', language: 'en' }) });
+    const response = await createOutfitGenHandler(config, () => {}, transport)(request);
+    expect([response.status, (await response.json()).code]).toEqual([502, 'FAILED']);
+    expect(calls).toEqual(['user', 'outfitgen_status', 'outfitgen_plan']);
+    expect(transport).not.toHaveBeenCalled();
   });
 });

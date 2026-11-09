@@ -3,7 +3,7 @@ import { createClient, type Session } from '@supabase/supabase-js';
 import type { Database } from '../../src/data/database.types';
 import type { OutfitGenClient } from '../../src/data/outfitgen';
 import { AI_GUARD_RESUMED_EVENT } from '../../src/domain/ai-guard';
-import { OUTFITGEN_MANIFEST, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION } from '../../src/domain/outfitgen';
+import { OUTFITGEN_MANIFEST, OUTFITGEN_MANIFEST_V1, OUTFITGEN_MODEL, OUTFITGEN_NOTICE_REVISION } from '../../src/domain/outfitgen';
 import { passLines } from '../../src/domain/outfitgen-pass';
 import {
   AUTO_COOLDOWN_MS, autoBlock, outfitGenView, parseDecision, parseGenerateReply, parseOutfitGenStatus, parseSuggestionList,
@@ -93,6 +93,17 @@ describe('suggested outfits: what each state shows', () => {
     expect(outfitGenView({ kind: 'failed' }, true, false)).toMatchObject({ kind: 'loadFailed', section: true });
     const other = { ...status(), policy: { ...status().policy!, manifestId: 'other' } };
     expect(outfitGenView(ready(other), true, false)).toMatchObject({ kind: 'unavailable', turnOff: true, run: false });
+  });
+  it('supports both judge manifests for one release, so a Pages deploy may come before or after the controls move', () => {
+    for (const manifestId of [OUTFITGEN_MANIFEST_V1, OUTFITGEN_MANIFEST]) {
+      const current = { ...status(), policy: { ...status().policy!, manifestId } };
+      expect(outfitGenView(ready(current), false, false)).toMatchObject({ kind: 'on', run: true });
+      expect(autoBlock(current, local())).toBeNull();
+    }
+    const future = { ...status(), policy: { ...status().policy!, manifestId: 'azure-eu-terra-outfitgen-v3' } };
+    expect(outfitGenView(ready(future), false, false)).toMatchObject({ kind: 'unavailable', run: false });
+    const model = { ...status(), policy: { ...status().policy!, modelId: 'another-model' } };
+    expect(outfitGenView(ready(model), false, false)).toMatchObject({ kind: 'unavailable', run: false });
   });
 });
 
