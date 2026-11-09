@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { TRYON_PARAMETERS, TRYON_PROMPTS, TRYON_SETTINGS } from '../../src/domain/tryon';
+import { TRYON_PARAMETERS } from '../../src/domain/tryon';
+import { TRYON_V3_PROMPTS, TRYON_V3_SETTINGS } from '../fixtures/tryon-v3-frozen';
 
 // TRYON-PROMPT1 source pins: the v3 manifest changes only the layer and outerwear wording. The CI preservation and security jobs prove
 // the migration applies and behaves; these checks keep the reviewed contract from drifting.
@@ -94,7 +95,7 @@ describe('TRYON-PROMPT1 migration', () => {
 
   it('pins the v3 manifest row: new prompt and settings hashes, the unchanged parameter hash and the v2 envelope', async () => {
     const sql = await read(MAIN);
-    for (const hash of [sha(JSON.stringify(TRYON_PROMPTS)), sha(JSON.stringify(TRYON_PARAMETERS)), sha(JSON.stringify(TRYON_SETTINGS))]) {
+    for (const hash of [sha(JSON.stringify(TRYON_V3_PROMPTS)), sha(JSON.stringify(TRYON_PARAMETERS)), sha(JSON.stringify(TRYON_V3_SETTINGS))]) {
       expect(sql).toContain(`'${hash}'`);
     }
     expect(sql).toContain(`${V3},'gpt-image-2.5-sunburst',3,`);
