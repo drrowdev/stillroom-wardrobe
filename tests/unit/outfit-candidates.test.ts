@@ -221,6 +221,32 @@ describe('candidate formal add-ons (OUTFITGEN-QUALITY2)', () => {
     expect(anchorSets(bad[0]!, bad, none).every((set) => !set.ids.includes(bad[3]!.id))).toBe(true);
     expect(anchorSets(bad[0]!, bad, none).length).toBeGreaterThan(0);
   });
+  it('replace a list\'s only casual add-on with the formal one when the base cap leaves no free place (bare + casual layer + blazer on one base)', () => {
+    counter = 1;
+    const top = make('top', { ...casual, colours: ['navy'] }), trousers = make('bottom', { ...casual, colours: ['grey'] }), shoes = make('footwear', { ...casual, colours: ['white'] });
+    const hoodie = make('layer', { ...casual, colours: ['grey'], seasons: allSeasons }), blazer = make('layer', { ...formal, seasons: allSeasons });
+    const sets = anchorSets(top, [top, trousers, shoes, hoodie, blazer], none);
+    expect(sets.some((set) => set.ids.includes(blazer.id))).toBe(true);
+    expect(sets.some((set) => !set.addOn)).toBe(true);
+    expect(sets.length).toBeLessThanOrEqual(CANDIDATE_LIMITS.perBase);
+  });
+  it('choose the formal candidate after bans: a banned blazer leaves the overcoat in every list that can have one', () => {
+    counter = 1;
+    const top = make('top', { ...casual, colours: ['navy'] });
+    const trousers = ['grey', 'khaki', 'brown', 'olive', 'black'].map((c) => make('bottom', { ...casual, colours: [c] }));
+    const shoes = make('footwear', { ...casual, colours: ['white'] });
+    const hoodies = [make('layer', { ...casual, seasons: allSeasons }), make('layer', { ...casual, colours: ['grey'], seasons: allSeasons })];
+    const jackets = [make('outerwear', { ...casual, warmth: 2 }), make('outerwear', { ...casual, colours: ['olive'], warmth: 2 })];
+    const blazer = make('layer', { ...formal, seasons: allSeasons }), overcoat = make('outerwear', { ...formal, colours: ['grey'], seasons: allSeasons, warmth: 3 });
+    const items = [top, ...trousers, shoes, ...hoodies, ...jackets, blazer, overcoat];
+    const bans: CandidateBans = { pairs: new Set([pairKeyOf(top.id, blazer.id)]), disliked: new Set() };
+    const sets = anchorSets(top, items, bans);
+    expect(sets.some((set) => set.ids.includes(blazer.id))).toBe(false);
+    expect(sets.some((set) => set.ids.includes(overcoat.id))).toBe(true);
+    expect(sets.length).toBeLessThanOrEqual(CANDIDATE_LIMITS.perAnchor);
+    // The overcoat's own list still has valid pairings with it.
+    expect(anchorSets(overcoat, items, bans).length).toBeGreaterThan(0);
+  });
   it('change nothing for a wardrobe with no formal layer or jacket', () => {
     counter = 1;
     const items = [make('top', casual), make('top', casual), ...Array.from({ length: 4 }, () => make('bottom', casual)), make('footwear', casual),

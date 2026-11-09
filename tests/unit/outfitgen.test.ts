@@ -481,6 +481,14 @@ describe('outfit generation handler quality rules (OUTFITGEN-QUALITY1)', () => {
     expect(own.results![0]).toMatchObject({ decision: 'suggested', score: 7, title: 'Navy set', reason: 'Calm colours.' });
   });
 
+  it('declines a skip that scores 8, 9 or 10 (the model broke its own rule) instead of storing it as a plain look', async () => {
+    for (const score of [8, 9, 10]) {
+      const { results } = await run({ verdict: (index) => (index === 0 ? { decision: 'skip', baseScore: score, fullScore: score } : {}) });
+      expect(results![0]).toMatchObject({ decision: 'declined', score, title: null, reason: null });
+      expect(results!.filter((entry) => entry.decision === 'suggested')).toHaveLength(0);
+    }
+  });
+
   it('keeps better looks ahead of plain ones within the same call', async () => {
     const { results } = await run({ plan: { pendingRoom: 1 }, verdict: (index) => (index === 2 ? { ...good, baseScore: 8, fullScore: 8 }
       : { decision: 'skip', baseScore: 7, fullScore: 7, occasion: 'smart' }) });

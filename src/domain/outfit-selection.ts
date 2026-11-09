@@ -73,6 +73,9 @@ export function selectSuggestions(input: SelectionInput): { chosen: boolean[]; o
     const verdict = verdicts[index]!;
     const score = verdictScore(verdict);
     if (score < bar) continue;
+    // A plain look is a verdict the model did not call good and scored below the prompt's own bar (a 7). A skip scoring 8 or more broke the
+    // prompt's rules (good only from 8, or the cap on eights) and is declined, never kept with fixed text ahead of the sevens.
+    if (verdict.decision !== 'good' && score >= SELECTION_LIMITS.goodScore) continue;
     const ids = sets[index]!;
     // A candidate with an unknown garment cannot be placed in a base or counted, so it is never kept.
     if (ids.some((id) => categoryOf(id) === undefined)) continue;

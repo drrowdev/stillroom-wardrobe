@@ -48,14 +48,27 @@ describe('suggestion scoring', () => {
 });
 
 describe('which candidates become suggestions', () => {
-  it('keeps a verdict from the bar of 7 (the weaker score), whatever its decision, and never one below it', () => {
+  it('keeps a verdict from the bar of 7 (the weaker score): a plain skip at 7 and a good one from 8, and never one below it', () => {
     const pad = Array.from({ length: 12 }, (_, index) => [1 + (index % 6), 11 + ((index + 1) % 6), 22]);
     const sets = [[1, 11, 21], [2, 12, 21], [3, 13, 21], [4, 14, 21], ...pad];
-    // Three candidates reach 7 or more (one is a skip, which is what the model calls a plain look); good with a weak base and a plain 6 do not.
+    // A skip is what the model calls a plain look; good with a weak base and a plain 6 do not reach the bar.
     const verdicts = [{ decision: 'skip' as const, baseScore: 7, fullScore: 8 }, good(6, 9), { decision: 'skip' as const, baseScore: 6, fullScore: 6 }, good(7, 7), ...pad.map(() => skip)];
     expect(chosen(sets, verdicts)).toEqual([0, 3]);
     // The bar is a parameter: at the prompt's own bar of 8 the same verdicts keep nothing.
     expect(run(sets, verdicts, none, 100, 8).chosen.some(Boolean)).toBe(false);
+  });
+  it('never keeps a skip scoring 8, 9 or 10 (it broke the prompt\'s rules): declined, and it takes no quota from the sevens', () => {
+    const pad = Array.from({ length: 12 }, () => [6, 16, 21]);
+    const sets = [[1, 11, 21], [2, 12, 21], [3, 13, 21], [4, 14, 21], ...pad];
+    for (const score of [8, 9, 10]) {
+      const verdicts = [{ decision: 'skip' as const, baseScore: score, fullScore: score }, { decision: 'skip' as const, baseScore: 7, fullScore: 7 }, ...sets.slice(2).map(() => skip)];
+      expect(chosen(sets, verdicts)).toEqual([1]);
+      // With room for one, the seven is still the one kept.
+      expect(chosen(sets, verdicts, none, 1)).toEqual([1]);
+      expect(run(sets, verdicts).chosen[0]).toBe(false);
+    }
+    // A good verdict at the same scores is kept.
+    expect(chosen(sets, [good(9, 9), ...sets.slice(1).map(() => skip)])).toEqual([0]);
   });
   it('ranks better scores first, so plain sevens only fill what the eights leave of the per-call quota', () => {
     const pad = Array.from({ length: 12 }, () => [6, 16, 21]);

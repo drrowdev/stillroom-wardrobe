@@ -280,6 +280,27 @@ test.describe('OUTFITGEN1b suggested outfits', () => {
       await expect(section(page).getByText(text('outfitgen.scoreHelpSummary', language), { exact: true })).toBeVisible();
     });
   }
+  for (const language of ['en', 'fi', 'sv'] as const) {
+    test(`the score help opens and closes from the keyboard and fits 320 px at 200% text (${language})`, async ({ page }) => {
+      await start(page, { language, setup: {}, consent: true, suggestions: true });
+      await expect(cards(page)).toHaveCount(2);
+      await page.setViewportSize({ width: 320, height: 900 });
+      await page.addStyleTag({ content: zoom });
+      const summary = section(page).locator('details.suggested-help summary');
+      const help = section(page).locator('details.suggested-help p');
+      await expect(summary).toHaveText(text('outfitgen.scoreHelpSummary', language));
+      await expect(help).toBeHidden();
+      await summary.focus();
+      await page.keyboard.press('Enter');
+      await expect(help).toBeVisible();
+      await expect(help).toHaveText(text('outfitgen.scoreHelp', language));
+      expect(await help.evaluate((node) => node.getBoundingClientRect().left >= 0 && node.getBoundingClientRect().right <= innerWidth + 1)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      await axe(page);
+      await page.keyboard.press('Space');
+      await expect(help).toBeHidden();
+    });
+  }
 });
 
 /** A reply that waits until the test lets it go, so the state in between can be looked at. */

@@ -168,11 +168,21 @@ describe('re-judge reset (docs/outfitgen-rejudge-reset.sql, OUTFITGEN-QUALITY2)'
     expect(script.trimStart().startsWith('begin;')).toBe(true);
     expect(code).toContain("set local lock_timeout = '10s';");
     const order = ['from public.profiles where owner_id=v_owner for update', 'from private.ai_controls where owner_id=v_owner for update',
-      'from private.ai_execution_manifests m where m.id=c.outfitgen_manifest_id', "charge_state in ('reserved','held')",
-      "delete from public.suggested_outfits where owner_id=v_owner and state='declined' and prompt_version=v_version and score>=v_min",
-      'delete from private.outfit_assessed_items where owner_id=v_owner'].map((part) => code.indexOf(part));
+      'from private.ai_execution_manifests m where m.id=c.outfitgen_manifest_id',
+      'if c.outfitgen_manifest_id is distinct from v_expected_manifest or v_version is distinct from v_expected_version then',
+      "if exists(select 1 from private.ai_usage where owner_id=v_owner and purpose='outfitgen' and charge_state in ('reserved','held')) then",
+      "delete from public.suggested_outfits where owner_id=v_owner and state='declined' and prompt_version=v_expected_version and score>=v_min;",
+      'delete from private.outfit_assessed_items where owner_id=v_owner;'].map((part) => code.indexOf(part));
     expect(order.every((at) => at >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // The expected manifest and prompt version are explicit constants, and a missing or out-of-range threshold is refused.
+    expect(code).toContain("v_expected_manifest constant text := 'azure-eu-terra-outfitgen-v2';");
+    expect(code).toContain('v_expected_version constant integer := 2;');
+    expect(code).toContain('if v_min is null or v_min not between 1 and 10 then raise exception');
+    // Nothing weakens a guard or broadens a deletion (a re-execution of these strings is the scratch PGlite run in the guide).
+    expect(code).not.toMatch(/\bfalse and\b|\bor true\b|\band false\b|\bor 1=1\b/i);
+    expect(script.match(/^\s*delete from public\.suggested_outfits /gm)).toHaveLength(1);
+    expect(script.match(/^\s*delete from private\.outfit_assessed_items /gm)).toHaveLength(1);
     expect(script.match(/^\s*(delete|update|insert) /gm)).toHaveLength(2);
     expect(script).not.toMatch(/consent|ai_controls\s+set|ai_usage\s+set|state in \('suggested'|state='(suggested|kept|removed)'/);
     expect(sql.match(/<min_score>/g)?.length).toBeGreaterThanOrEqual(1);

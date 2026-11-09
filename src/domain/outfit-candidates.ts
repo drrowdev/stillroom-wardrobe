@@ -149,13 +149,14 @@ export function anchorSets(anchor: CandidateItem, items: readonly CandidateItem[
   const looks = new Map<string, CandidateSet[]>();
   const lookByKey = new Map<string, string>();
   const formalKeys = new Set<string>();
-  const addLook = (members: CandidateItem[], addOn: boolean) => {
+  /** Adds the look when it is valid and unbanned; true when the set exists afterwards. */
+  const addLook = (members: CandidateItem[], addOn: boolean): boolean => {
     add(members, addOn);
     const key = setKey(members.map((item) => item.id));
-    if (sets.has(key)) {
-      const look = lookOf(members); lookByKey.set(key, look);
-      if (addOn && members.some((item) => !isCore(item) && (item.formality ?? 0) >= CANDIDATE_LIMITS.formalFrom)) formalKeys.add(key);
-    }
+    if (!sets.has(key)) return false;
+    const look = lookOf(members); lookByKey.set(key, look);
+    if (addOn && members.some(dressy)) formalKeys.add(key);
+    return true;
   };
   const formalAddOns = [...layers, ...outer].filter((item) => (item.formality ?? 0) >= CANDIDATE_LIMITS.formalFrom);
   for (const core of cores) {
@@ -164,12 +165,14 @@ export function anchorSets(anchor: CandidateItem, items: readonly CandidateItem[
     const kinds = addOnAnchor ? [[anchor]] : [
       [...layers].sort((a, b) => fit(core[0]!, b) - fit(core[0]!, a) || compare(a.id, b.id)).slice(0, CANDIDATE_LIMITS.addOnsPerKind),
       [...outer].sort((a, b) => fit(core[0]!, b) - fit(core[0]!, a) || compare(a.id, b.id)).slice(0, CANDIDATE_LIMITS.addOnsPerKind)];
-    for (const kind of kinds) for (const extra of kind) addLook([...core, extra], true);
-    // OUTFITGEN-QUALITY2: when the add-ons chosen for this core include no formal one, the formal add-on that fits it best is a candidate too,
-    // even when casual layers fit the top better.
-    if (!addOnAnchor && formalAddOns.length && !kinds.flat().some((item) => (item.formality ?? 0) >= CANDIDATE_LIMITS.formalFrom)) {
-      const formal = [...formalAddOns].sort((a, b) => fit(core[0]!, b) - fit(core[0]!, a) || compare(a.id, b.id))[0]!;
-      addLook([...core, formal], true);
+    let formalHere = false;
+    for (const kind of kinds) for (const extra of kind) if (addLook([...core, extra], true) && dressy(extra)) formalHere = true;
+    // OUTFITGEN-QUALITY2: when no formal add-on made a valid, unbanned look with this core, the best-fitting one that does is a candidate too,
+    // even when casual layers fit the top better: the choice is made after validity and the owner's bans, so a banned blazer leaves the overcoat.
+    if (!addOnAnchor && !formalHere) {
+      for (const formal of [...formalAddOns].sort((a, b) => fit(core[0]!, b) - fit(core[0]!, a) || compare(a.id, b.id))) {
+        if (addLook([...core, formal], true)) break;
+      }
     }
   }
   // Sets that differ only by footwear are one idea: keep the best-scoring shoe, and let a stable hash of the look choose among
@@ -213,15 +216,20 @@ export function anchorSets(anchor: CandidateItem, items: readonly CandidateItem[
     const taken = all.some((set) => set.addOn === wanted && take(set, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase));
     if (!taken && dropped) take(dropped, Infinity, Infinity);
   }
-  // OUTFITGEN-QUALITY2: when a formal layer or jacket exists, the list holds at least one look with one (the best-scored). It takes the place of
-  // a pick that no other guarantee needs; the base cap stays on and the list is never longer.
+  // OUTFITGEN-QUALITY2: when a formal layer or jacket makes a valid look, the list holds at least one (the best-scored). It takes a free place, or
+  // replaces the lowest-ranked pick whose removal keeps the bare look the list already has; the replacement is itself an add-on look, so the add-on
+  // guarantee holds after it, and a casual add-on that was the list's only one can be replaced. The base cap stays on and the list is never longer.
   if (!addOnAnchor && formalKeys.size && !picks.some((set) => formalKeys.has(set.key))) {
-    const needed: ((set: CandidateSet) => boolean)[] = [(set) => !set.addOn, (set) => set.addOn];
-    const spare = (set: CandidateSet) => needed.every((has) => !has(set) || picks.some((other) => other !== set && has(other)));
-    const dropped = picks.length >= k - explore ? [...picks].reverse().find(spare) ?? null : null;
-    if (dropped) drop(dropped);
-    const taken = all.some((set) => formalKeys.has(set.key) && take(set, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase));
-    if (!taken && dropped) take(dropped, Infinity, Infinity);
+    const hadBare = all.some((set) => !set.addOn);
+    done: for (const formal of all.filter((set) => formalKeys.has(set.key))) {
+      if (picks.length < k - explore && take(formal, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase)) break;
+      for (const victim of [...picks].sort((a, b) => a.score - b.score || compare(b.key, a.key))) {
+        if (hadBare && !picks.some((other) => other !== victim && !other.addOn)) continue;
+        drop(victim);
+        if (take(formal, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase)) break done;
+        take(victim, Infinity, Infinity);
+      }
+    }
   }
   const rest = all.filter((set) => !picks.includes(set)).sort((a, b) => hashOf(a.key) - hashOf(b.key) || compare(a.key, b.key));
   for (const cap of [CANDIDATE_LIMITS.partnerReuse, CANDIDATE_LIMITS.explorationReuse, Infinity]) {
