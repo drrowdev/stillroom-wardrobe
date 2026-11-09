@@ -862,15 +862,19 @@ export async function outfitgenLimitProbes(snapshot, sql, mark = () => {}) {
 const CAP_MIGRATION = '20261109090000_outfitgen_pending_100.sql';
 const CAP_CHANGES = [
   { name: 'public.outfitgen_claim', sig: CLAIM, before: '20261108100000_outfitgen_call_limits.sql',
+    config: ['search_path=""', 'lock_timeout=2s'], like: FINISH,
     from: "if (select count(*) from public.suggested_outfits where owner_id=p.owner_id and state='suggested')>=40 then",
     to: "if (select count(*) from public.suggested_outfits where owner_id=p.owner_id and state='suggested')>=100 then" },
   { name: 'public.outfitgen_undo_remove', sig: 'public.outfitgen_undo_remove(uuid)', before: '20261107090000_outfitgen_undo_capacity.sql',
+    config: ['search_path=""', 'lock_timeout=2s'], like: 'public.outfitgen_remove(uuid)',
     from: "if (select count(*) from public.suggested_outfits where owner_id=v_owner and state='suggested')>=40 then",
     to: "if (select count(*) from public.suggested_outfits where owner_id=v_owner and state='suggested')>=100 then" },
   { name: 'public.outfitgen_plan', sig: 'public.outfitgen_plan(uuid)', before: '20261106090000_outfit_generation.sql',
+    config: ['search_path=""', 'lock_timeout=2s'], like: FINISH,
     from: "'pendingRoom',greatest(0,40-(select count(*) from public.suggested_outfits where owner_id=p_owner_id and state='suggested')));",
     to: "'pendingRoom',greatest(0,100-(select count(*) from public.suggested_outfits where owner_id=p_owner_id and state='suggested')));" },
   { name: 'private.outfitgen_record', sig: 'private.outfitgen_record(uuid,uuid,jsonb,uuid[],private.ai_execution_manifests)', before: '20261106090000_outfit_generation.sql',
+    config: ['search_path=""'], like: 'private.outfitgen_known(uuid,text)',
     from: "select 40-count(*) into v_room from public.suggested_outfits where owner_id=p_owner and state='suggested';",
     to: "select 100-count(*) into v_room from public.suggested_outfits where owner_id=p_owner and state='suggested';" },
 ];
@@ -914,9 +918,20 @@ export async function outfitgenCapCheckpoint(snapshot, sql, mark = () => {}) {
     equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(id)};`), 'held');
     const state = await limitsState(one, CAP_STATE);
     const bodies = {};
+    // The predecessor is proved HERE, before anything is installed: each of the four installed definitions must be exactly the body of the
+    // migration that held it last, with the owner, ACL (those of a sibling function created the same way), security definer and
+    // configuration it must have, so an unexpected definition is never overwritten unseen.
     for (const change of CAP_CHANGES) {
-      note(`body-${change.name.split('.')[1]}`);
+      const short = change.name.split('.')[1];
+      note(`body-${short}`);
       bodies[change.name] = lines(await scalar(`select prosrc from pg_proc where oid='${change.sig}'::regprocedure;`));
+      note(`predecessor-${short}-body`);
+      ok(isDeepStrictEqual(bodies[change.name], await bodyLinesOf(change.before, change.name)));
+      note(`predecessor-${short}-properties`);
+      const props = (sig) => one(`select jsonb_build_object('owner',pg_get_userbyid(p.proowner),'acl',p.proacl::text,'secdef',p.prosecdef,'config',p.proconfig,
+        'kind',p.prokind)::text from pg_proc p where p.oid='${sig}'::regprocedure;`);
+      const [mine, like] = [await props(change.sig), await props(change.like)];
+      ok(mine.secdef === true && mine.kind === 'f' && isDeepStrictEqual(mine.config, change.config) && mine.owner === like.owner && mine.acl === like.acl);
     }
     return { before, id, state, bodies };
   } catch (error) {
@@ -993,8 +1008,11 @@ export async function outfitgenCapProbes(snapshot, sql, mark = () => {}) {
     const pending = async () => Number(await scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)} and state='suggested';`));
     const setPending = async (count) => {
       note(`pending-${count}`);
+      // Every scenario starts from a fresh assessment state: no stored suggestion, no dislike and no assessed marker of the batch's tops.
       await sql(`delete from public.suggested_outfits where owner_id=${literal(a.uid)};
-        delete from public.suggestion_feedback where owner_id=${literal(a.uid)} and item_ids && ${uuids(made)};`);
+        delete from public.suggestion_feedback where owner_id=${literal(a.uid)} and item_ids && ${uuids(made)};
+        delete from private.outfit_assessed_items where owner_id=${literal(a.uid)} and item_id=any(${uuids(tops)});`);
+      equal(await assessed(), 0);
       if (count > 0) await sql(`insert into public.suggested_outfits(owner_id,item_ids,state,title,reason,occasion,score,fingerprint,manifest_id,prompt_version,request_id)
         select ${literal(a.uid)},x.ids,'suggested','capfill','r','smart',9,repeat('d',64),${literal(MANIFEST)},1,gen_random_uuid()
         from (values ${combos.slice(0, count).map((set) => `(${uuids(set)})`).join(',')}) x(ids);`);
@@ -1004,9 +1022,20 @@ export async function outfitgenCapProbes(snapshot, sql, mark = () => {}) {
       values (${literal(a.uid)},${uuids(combos[index])},'suggested','capfill','r','smart',9,repeat('d',64),${literal(MANIFEST)},1,gen_random_uuid());`);
     const batch = tops.map((top) => [top, base[1], base[2]]);
     const signatures = await Promise.all(batch.map((set) => sig(set)));
-    const verdicts = batch.map((set, index) => result(set, 'suggested', 10 - index));
+    // The verdicts arrive in an order that is NOT the order of their scores (8, 10, 9), so choosing the best-scored ones is really tested:
+    // with room for one the 10 (index 1) is recorded, with room for two the 10 and the 9 (indices 1 and 2), never the first listed.
+    const scores = [8, 10, 9];
+    const verdicts = batch.map((set, index) => result(set, 'suggested', scores[index]));
     const recordedOf = (signature) => scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)} and signature=${literal(signature)};`);
+    const assessed = async () => Number(await scalar(`select count(*) from private.outfit_assessed_items where owner_id=${literal(a.uid)} and item_id=any(${uuids(tops)});`));
     const settle = (id) => finish(id, 'OK', USAGE, verdicts, tops);
+    // What a settled request leaves: exactly these verdicts are stored as suggestions. A good verdict that did not fit is not stored (no
+    // signature remains for it) and, because the claimed targets are marked assessed independently of the room, its garments ARE assessed:
+    // the omitted set is not offered again by the plan unless it is judged again for other reasons.
+    const outcome = async (stored) => {
+      equal([await recordedOf(signatures[0]), await recordedOf(signatures[1]), await recordedOf(signatures[2])], [0, 1, 2].map((index) => (stored.includes(index) ? '1' : '0')));
+      equal(await assessed(), 3);
+    };
     const pendingId = () => scalar(`select id from public.suggested_outfits where owner_id=${literal(a.uid)} and title='capfill' and state='suggested' order by id limit 1;`);
 
     note('plan');
@@ -1024,12 +1053,11 @@ export async function outfitgenCapProbes(snapshot, sql, mark = () => {}) {
     const first = randomUUID();
     const admitted = await claim(first, signatures, { targets: tops });
     equal([admitted.code, admitted.claimed], ['OK', true]);
-    // Only one of the three good verdicts fits: the best-scored. The others are neither recorded nor lost for a later call.
     const room1 = await settle(first);
     equal(room1.code, 'OK');
-    equal(room1.recorded.suggested, 1);
+    equal([room1.recorded.suggested, room1.recorded.assessed], [1, 3]);
     equal(await pending(), 100);
-    equal([await recordedOf(signatures[0]), await recordedOf(signatures[1]), await recordedOf(signatures[2])], ['1', '0', '0']);
+    await outcome([1]);
 
     note('claim-100');
     const refused = randomUUID();
@@ -1037,31 +1065,39 @@ export async function outfitgenCapProbes(snapshot, sql, mark = () => {}) {
     equal([full.code, full.claimed], ['PENDING_FULL', false]);
     equal(await scalar(`select count(*) from private.ai_usage where request_id=${literal(refused)};`), '0');
     equal(await pending(), 100);
+    equal(await assessed(), 3);
 
-    note('record-raced');
-    // A claim admitted at 99 whose room is taken before it settles records nothing.
-    await setPending(99);
+    note('record-undo-full');
+    // The real way the room disappears while a request is in flight: at 100 a Remove frees one place, the claim is admitted at 99, the
+    // Undo takes the place back (it is admitted at 99), and the request then settles with no room left.
+    await setPending(100);
+    const taken = await pendingId();
+    equal((await rpc(a, 'outfitgen_remove', { p_id: taken })).code, 'OK');
+    equal(await pending(), 99);
     const raced = randomUUID();
     equal((await claim(raced, signatures, { targets: tops })).code, 'OK');
-    await addRow(99);
+    equal((await rpc(a, 'outfitgen_undo_remove', { p_id: taken })).code, 'OK');
+    equal(await pending(), 100);
     const none = await settle(raced);
     equal(none.code, 'OK');
-    equal(none.recorded.suggested, 0);
+    equal([none.recorded.suggested, none.recorded.assessed], [0, 3]);
     equal(await pending(), 100);
-    equal(await recordedOf(signatures[0]), '0');
+    await outcome([]);
 
     note('record-room');
     await setPending(98);
     const two = randomUUID();
     equal((await claim(two, signatures, { targets: tops })).code, 'OK');
-    equal((await settle(two)).recorded.suggested, 2);
+    const room2 = await settle(two);
+    equal([room2.recorded.suggested, room2.recorded.assessed], [2, 3]);
     equal(await pending(), 100);
-    equal([await recordedOf(signatures[0]), await recordedOf(signatures[1]), await recordedOf(signatures[2])], ['1', '1', '0']);
+    await outcome([1, 2]);
     await setPending(0);
     const roomy = randomUUID();
     equal((await claim(roomy, signatures, { targets: tops })).code, 'OK');
     equal((await settle(roomy)).recorded.suggested, 3);
     equal(await pending(), 3);
+    await outcome([0, 1, 2]);
 
     note('free-room');
     await setPending(100);

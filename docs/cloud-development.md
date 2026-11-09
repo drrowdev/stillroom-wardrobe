@@ -2491,11 +2491,13 @@ cap is untouched.
   the 40 as history. Handler (`outfitgen.test.ts`): 99 pending proceeds to the plan, 100, 101 and an absurd count answer PENDING_FULL before any claim. App and pass tests: 99 is not
   full, 100 and 101 are. `ai-client.test.ts`: 100 worst-size rows are read, above 256 KB is refused, every other reply is still bounded at 32 KB. **Preservation rehearsal
   (CI-only):** a new stage `cap-prior` (45 migrations through `20261108100000`) sits between the B2 and the final inventory (46). The old probes still run at the predecessor
-  (cap 40); the B2 compare and limit probes now end at `cap-prior`; then `outfitgenCapCheckpoint` (one genuine held claim; identity, owner, ACL, security, volatility and the rest of each of the four
+  (cap 40); the B2 compare and limit probes now end at `cap-prior`; then `outfitgenCapCheckpoint` (one genuine held claim; **before anything is installed, each of the four installed definitions is proved equal to the body of the
+  migration that held it last, with the owner, ACL (those of a sibling function created the same way), security definer and configuration it must have, and the checkpoint fails there otherwise**; identity, owner, ACL, security, volatility and the rest of each of the four
   functions, every other function body and ACL, triggers, controls, usage, evidence, requests, suggestions, assessed rows and manifests), the cap migration alone (stage `target`),
   `outfitgenCapCompare` (all of it equal apart from the four bodies, each equal to the migration and differing from its predecessor by exactly its cap line; the held request survives
   and settles) and `outfitgenCapProbes` at 99, 100 and 101 pending (every statement marked): the plan's room; a claim admitted at 99 and refused PENDING_FULL at 100 with no row written;
-  a settled request recording one of three good verdicts at 99 (the best-scored), none when the room was taken before it settled, two at 98 and all three with room; Remove freeing room and a claim being admitted
+  a settled request recording the best-scored verdicts of three listed out of score order (the 10 at room one, the 10 and the 9 at room two, all three with room), none when the room is taken by a real Undo between the claim and the settlement
+  (Remove at 100, claim at 99, Undo, settle), each scenario from fresh assessment state and asserting both the stored signatures and the assessed markers; Remove freeing room and a claim being admitted
   again; Undo restoring at 99 and refused at 100 with nothing changed; and, with 101 rows (an Undo race), claims and Undo refused while Remove still works. Scratch run
   (outside the repository): the real checkpoint, compare and probes ran in PGlite over the real migration chain (stubs for Auth, Storage and cron, items inserted directly), all green, and the same probes against the old bodies fail at the
   plan's room (got 40). Browser (chromium and mobile, plus webkit for the pictures spec): 100 suggestions from a reply far above 32 KB (verified to fail without the new bound),
@@ -2503,20 +2505,24 @@ cap is untouched.
   there is room; with 100 cards only the cards near the screen mount their picture.
 - **Accepted residual, now 101.** Two Undos, or an Undo racing a run's recording, at exactly the cap can overshoot it by one (101 pending). Nothing breaks: the parsers read over-cap counts,
   the Edge handler no longer has a bound below that, claims and Undo are refused until decisions bring the count down, and Remove always works. It is probed (above).
+- **Recording at the cap (existing behaviour, now probed and disclosed).** A settled request records at most the room left under 100, best-scored first. A good verdict that does not fit is **not stored: no signature
+  remains for it**, yet the request's claimed targets are marked assessed independently of the room, so those garments count as checked and the omitted set is not offered again unless it is judged again for another reason
+  (an edit, a newer prompt). The probes assert both (each scenario from fresh assessment state), with verdicts listed out of score order so the choice of the best-scored is really tested.
 - **Cost and interactions.** The cap changes how many pictures can be queued, not how much can be spent.
-  - *Pictures.* Each waiting suggestion queues an automatic try-on picture (OUTFITGEN2): 2 to 6 steps (`plannedKey`), each reserved at USD 0.36 (360,000 micro). 100 pictures reserve at most
-    USD 72 (2 steps each), 108 (3), 144 (4) up to 216 (6); a single step per outfit (USD 36) cannot happen. A reservation is an accounting figure: each step settles at its metered cost, and no
-    typical metered cost is measured yet (as for the earlier packets), so only bounds are stated. The queue runs one chain, one step reservation at a time (a web lock and the server's slots),
-    at the provider's about 2 requests a minute: 100 outfits are some 3 to 7 hours of page-visible time, never 100 reservations at once.
+  - *Pictures.* Each waiting suggestion queues an automatic try-on picture (OUTFITGEN2): 2 to 6 steps (`plannedKey`), each reserved at the configured `tryon_max_request_micro`. **At a configured USD 0.36
+    (360,000 micro)** 100 pictures reserve at most USD 72 (2 steps each), 108 (3), 144 (4) up to 216 (6); at USD 0.40 the same figures are 80 to 240. A single step per outfit (USD 36) cannot happen. A reservation
+    is an accounting figure: each step settles at its metered cost, and no typical metered cost is measured yet (as for the earlier packets), so only bounds are stated. The queue runs one chain, one step reservation
+    at a time (a web lock and the server's slots), at the provider's about 2 requests a minute: 100 outfits are some 3 to 7 hours of page-visible time, never 100 reservations at once.
   - *Backstops, in the order they bind.* The monthly allowance (USD 50 at the current setting; an owner setting) is checked atomically by every `tryon_claim` step: used plus reservation above it answers
-    ALLOWANCE and the queue pauses for 30 minutes. At full reservation USD 50 is about 138 steps (some 35 to 45 outfits); lower metering allows more. The 15 % reserve gate (client, best effort)
+    ALLOWANCE and the queue pauses for 30 minutes. It is an admission accounting check, not an invoice ceiling: the ledger is the app's own view, and unreserved analysis and anomaly settlements can record more than
+    their reservation. At full reservation USD 50 admits about 138 steps (some 35 to 45 outfits); lower metering admits more. The 15 % reserve gate (client, best effort, not a server rule)
     starts no chain that would leave under USD 7.50 unreserved; the owner sees "Pictures are paused to keep room in this month's AI budget." and the later cards wait for the next month. AI-GUARD1 pauses every
     admission when the trailing 60-minute spend across purposes passes USD 25: continuous pictures at about 90 steps an hour reach it when a step meters about USD 0.28 or more (about 70 steps at the full
     reservation), after which Resume is pressed in Settings; this is an expected interaction, and its size depends on the real metering. The Azure budget and cost alert (owner action) is the
-    independent net. **The hard monthly bound does not change.**
+    independent net. This packet adds no spending control and loosens none: it changes how many pictures can be queued, not the admission checks.
   - *Saved pictures cap.* Pictures are stored until deleted (`status.results`, at most 200). The queue stops at 190 and the owner sees "Saved pictures are nearly full, so no new ones are made. Delete some
-    under Try-ons." (looked at again every 5 minutes). Kept suggestions keep their picture, Remove deletes it, so 100 pictured suggestions plus kept outfits' and hand-made pictures can reach it, though the
-    budget will usually stop pictures first. **Recommendation: change nothing now.** If the owner wants more room, raising 200 is a separate try-on packet (SQL, client constant and Edge contract).
+    under Try-ons." (looked at again every 5 minutes). Kept suggestions keep their picture, Remove deletes it, so 100 pictured suggestions plus kept outfits' and hand-made pictures can reach it.
+    **Recommendation: change nothing now.** If the owner wants more room, raising 200 is a separate try-on packet (SQL, client constant and Edge contract).
   - *Pass and screen.* The pass already stops `full` from the status (`pending >= limit`) and on PENDING_FULL; at 100 it needs a few Keep or Remove decisions to continue, as at 40. Unchanged
     existing behaviour: a call that starts with little room still pays for a 24-set judgment and records only the room left; a "stop when the room is small" rule would be a separate packet. Today
     (deterministic ideas) does not read this list; the app-wide picture queue starts a few seconds after the app opens and works through it while the app is visible. The list reads component data in chunks of 100
@@ -2525,14 +2531,16 @@ cap is untouched.
   claim body is the predecessor; check the four predecessor bodies and their ACL, owner and security configuration; the inner SQL runs under the guarded generator with the outer `begin` and `commit`
   stripped, the file has no `$mig$` or `$w$` tag; the ledger row in the same transaction; read back each `prosrc` equal to the migration, the properties and ACLs unchanged); **(b)** the coordinator's redeploy of the Edge
   function `outfit-generate` (the handler and the shared constant); **(c)** the owner's Pages deploy (the client constant and the 256 KB list bound). **Order: Pages, Edge, migration
-    (the database, which is the real enforcement, goes last).** The effective cap is the lowest of the three layers, so every partial state fails closed toward 40 and never above the database, and the page can read a
-    list of 100 before any server allows one: new page on the old Edge and database refuses at 40 and shows the full line from the server; new page and Edge on the old database still meet the old claim's PENDING_FULL at 40;
-    only the migration moves the real cap to 100. (The reverse order is also safe for spend, but an old page reads lists only up to about 70 rows, so a database already at 100 with an old page could make the list
-    unreadable until Pages is deployed; an old page stops its own runs at 40 pending, which makes that unlikely but not impossible, for example through repeated Undo.) **Backout:** a separately authorized compensating `create or replace` of the four old bodies in one
+    (the database, which is the real enforcement of generation, goes last).** The effective cap for **generation** (a new call) is the lowest of the three layers, so a lagging step leaves generation at 40; **Undo and the
+    settlement of an already-admitted call do not pass through the Edge gate** and follow the database alone. The page can read a list of 100 before any server allows one: new page on the old Edge and database sends at
+    40 to 99 and meets the old Edge's refusal at 40; new page and Edge on the old database still meet the old claim's PENDING_FULL at 40 (before any reservation: admission-safe, not lossless, since the Edge did its
+    work first); only the migration moves the real cap to 100. (The reverse order is also safe for spend, but an old page reads lists only up to about 70 rows, so a database already at 100 with an old page could make the list
+    unreadable until Pages is deployed. With the new database and the old Edge, generation still stops at the Edge's 40, but **Undo can restore toward 100 and the concurrent-Undo residual can reach 101, where the old
+    handler's sanity bound of 100 answers UNCONFIGURED** until the Edge is redeployed; an already-admitted call settles with the new record function and its room under 100.) **Backout:** a separately authorized compensating `create or replace` of the four old bodies in one
   transaction with readback, never replaying history; rows above 40 then only block new claims and Undo until decided, and the parsers read over-cap counts. If the B2 claim limits are ever backed out later, the
   claim to restore is this packet's body with the B2 rate block swapped back, not the original from `20261106090000`.
 - **Compatibility matrix (layers: Pages P, Edge E, database D; "old" enforces 40, "new" 100).** The three steps are done in one quiet window with the app idle (no run or picture chain in flight, no second device
-  open), and the owner refreshes the page afterwards. No state spends more than the old one; the partial states below are what the owner could meet if a step lags.
+  open), and the owner refreshes the page afterwards. No state admits a paid call that the database's cap does not allow; the partial states below are what the owner could meet if a step lags.
   | State | Effect |
   |---|---|
   | P new, E old, D old | The page treats 40 to 99 as not full and sends a call; the old Edge refuses PENDING_FULL from the status before any claim. Nothing is reserved or spent; the page shows "Keep or remove some suggestions first." and ends a pass. Same outcome as today plus one refused request. |
@@ -2540,7 +2548,7 @@ cap is untouched.
   | P new, E new, D new | Cap 100 everywhere. |
   | After the switch, a page opened earlier and not refreshed (old P) | Its own gate stops its runs at 40 pending. The server now lets Undo restore up to 100, and the old page reads a list reply only up to 32 KB (about 70 rows): above that its list read fails and the section shows nothing until the page is refreshed. Spend is unchanged. This is why the owner refreshes afterwards. |
   | A call in flight while D switches | A claim admitted under the old body settles under the new one: the record function simply sees room under 100. The quiet window avoids this case. |
-  | E old, D new (only if the order were reversed or the Edge lagged) | The old Edge refuses at 40 pending; its sanity bound would answer UNCONFIGURED only above 100 pending, which nothing can reach while it refuses at 40. The page cannot use the extra room until the Edge is redeployed. |
+  | E old, D new (only if the order were reversed or the Edge lagged) | Generation stops at the old Edge's 40 pending. Undo and settlement follow the database alone: Undo can restore toward 100, and the concurrent-Undo residual can reach 101, where the old handler's sanity bound of 100 answers UNCONFIGURED until the Edge is redeployed. The page cannot use the extra room for generation until then. |
   | Backout of D to 40 while 41 to 100 are pending (new P and E stay) | New claims and Undo are refused PENDING_FULL by the old functions (a claim before any reservation, so nothing is spent), a settling request records nothing for lack of room, and the new page and Edge read the over-cap list and counts. Decisions bring the count under 40 again. |
   | Backout of E or P (stale clients) | An old Edge or page simply meets the cap of 40 on the page or in the Edge; with D at 100 the pending rows above 40 stay and are shown (the old page cannot read more than about 70 of them). |
 - **Validation.** Node 24.19.0: lint, typecheck, `check:translations`, the unit suites above, `outfitgen.spec.ts` and `outfitgen-pictures.spec.ts` on chromium, mobile and webkit-photo (216 passed). CI-only and not run
