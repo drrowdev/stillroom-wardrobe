@@ -502,6 +502,27 @@ describe('outfit generation handler quality rules (OUTFITGEN-QUALITY1)', () => {
     expect(none.results!.every((entry) => entry.decision === 'declined')).toBe(true);
   });
 
+  it('reads kept history whose garments were edited since (no base, no garments, long lists) instead of refusing the plan, and still counts what remains', async () => {
+    const items = wardrobe();
+    const top = items[0]!.id;
+    // A kept one-piece set whose one-piece became shoes: no base and no garments left. A set with six base ids (extra tops edited in).
+    const odd = [['kept', [], []], ['kept', items.map((entry) => entry.id).concat(id(99)).slice(0, 6), items.map((entry) => entry.id).concat(id(99)).slice(0, 6)]];
+    const plain = await run({ verdict: () => good, plan: { seen: odd } });
+    expect(plain.response.status).toBe(200);
+    expect(plain.results).not.toBeNull();
+    // What remains of the history still counts: six kept looks that used the top (and no base) leave the top at its cap.
+    const crowded = await run({ verdict: () => good, plan: { seen: [...odd, ...Array.from({ length: 6 }, () => ['kept', [], [top]])] } });
+    expect(crowded.response.status).toBe(200);
+    expect(crowded.results!.some((entry) => entry.decision === 'suggested')).toBe(true);
+    expect(crowded.results!.filter((entry) => entry.items.includes(top)).every((entry) => entry.decision === 'declined')).toBe(true);
+    expect(plain.results!.filter((entry) => entry.items.includes(top)).some((entry) => entry.decision === 'suggested')).toBe(true);
+    // Arrays longer than a set can be, or a malformed row, are still refused.
+    for (const bad of [['kept', [], Array.from({ length: 7 }, (_, index) => id(index + 1))], ['kept', [top]], ['removed', [], []], ['kept', ['x'], []]]) {
+      const refused = await run({ plan: { seen: [bad] } });
+      expect([refused.response.status, (await refused.response.json()).code]).toEqual([502, 'FAILED']);
+    }
+  });
+
   it('refuses a plan without the seen list before claiming anything', async () => {
     const plan = { code: 'OK', items: wardrobe(), pairs: [], disliked: [], known: [], pendingRoom: 100 };
     const calls: string[] = [];

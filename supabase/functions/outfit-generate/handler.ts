@@ -78,9 +78,11 @@ function parsePlan(value: JsonObject): Plan | null {
     if (typeof signature !== 'string' || !HEX64.test(signature)) return null;
     known.add(signature);
   }
+  // A kept suggestion outlives edits to its garments, and the database reports their categories as they are now: a one-piece turned into
+  // shoes leaves no base and no garment, and extra tops can make a base longer than usual. Such history is read as it is, never refused.
   for (const entry of value.seen) {
-    if (!Array.isArray(entry) || entry.length !== 3 || (entry[0] !== 'suggested' && entry[0] !== 'kept') || !idList(entry[1], 0, 3)
-      || !idList(entry[2], 1, 5)) return null;
+    if (!Array.isArray(entry) || entry.length !== 3 || (entry[0] !== 'suggested' && entry[0] !== 'kept')
+      || !idList(entry[1], 0, OUTFITGEN_LIMITS.setSize) || !idList(entry[2], 0, OUTFITGEN_LIMITS.setSize)) return null;
     (entry[0] === 'suggested' ? pending : kept).push({ base: entry[1], garments: entry[2] });
   }
   return { items, pairs, disliked, known, seen: { pending, kept }, pendingRoom: value.pendingRoom };

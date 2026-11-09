@@ -1340,52 +1340,87 @@ export async function outfitgenJudgeProbes(snapshot, sql, mark = () => {}) {
     ok(!planned.seen.some(([, , garments]) => keys(garments) === keys(setC.filter((entry) => entry !== shoes))));
 
     // The guarded switch (docs/outfitgen-manifest-switch.sql): one transaction, the claim's lock order, refused while outfit work is held.
+    // The two admission orderings are driven with controlled transactions, not sleeps: a holder that cannot commit before it has seen the
+    // other session wait, and a switch whose open transaction cannot end before the competing claim has returned. psql sends one statement
+    // at a time, so a session is recognised by the statement it is running now (a marker comment at the start of a statement, or the
+    // switch's own variable declaration) and by its wait event.
     const template = await readFile(new URL('../../docs/outfitgen-manifest-switch.sql', import.meta.url), 'utf8');
-    const guardSql = (from, to, sleep = 0) => template.replaceAll('<owner>', a.uid).replaceAll('<from>', from).replaceAll('<to>', to)
-      .replace('commit;', `${sleep ? `select pg_sleep(${sleep});\n` : ''}commit;`);
-    const runGuard = async (from, to, sleep = 0) => { try { await sql(guardSql(from, to, sleep)); return null; } catch (error) { return error; } };
+    const guardSql = (from, to, barrierId = null) => {
+      const text = template.replaceAll('<owner>', a.uid).replaceAll('<from>', from).replaceAll('<to>', to);
+      const switchEnd = text.lastIndexOf('commit;');
+      const barrier = barrierId === null ? '' : `do $$ /* switch-barrier */ declare n integer := 0; begin
+        loop
+          exit when exists(select 1 from private.ai_usage where request_id=${literal(barrierId)});
+          n := n+1; if n>600 then raise exception 'switch barrier timeout'; end if;
+          perform pg_sleep(0.1);
+        end loop;
+      end; $$;\n`;
+      return `${text.slice(0, switchEnd)}${barrier}${text.slice(switchEnd)}`;
+    };
+    const runGuard = async (from, to, barrierId = null) => { try { await sql(guardSql(from, to, barrierId)); return null; } catch (error) { return error; } };
     const installed = () => scalar(`select outfitgen_manifest_id from private.ai_controls where owner_id=${literal(a.uid)};`);
     const s7 = await sig([top2, bottom, shoes, layer]);
-    const waitSleeping = async (marker) => {
-      for (let attempt = 0; attempt < 40; attempt++) {
-        if (Number(await scalar(`select count(*) from pg_stat_activity where datname=current_database() and pid<>pg_backend_pid() and query like '%${marker}%';`)) > 0) return;
+    const waitFor = async (label, condition) => {
+      note(label);
+      for (let attempt = 0; attempt < 240; attempt++) {
+        if (Number(await scalar(`select count(*) from pg_stat_activity where datname=current_database() and pid<>pg_backend_pid() and ${condition};`)) > 0) return;
         await new Promise((resolve) => setTimeout(resolve, 250));
       }
       ok(false);
     };
-
-    note('guard-refuses-held');
-    equal(await installed(), MANIFEST_V2);
-    const R7 = randomUUID();
-    equal((await claimWith(R7, MANIFEST_V2, [s7], [top2])).code, 'OK');
-    ok((await runGuard(MANIFEST_V2, MANIFEST)) !== null);
-    equal(await installed(), MANIFEST_V2);
-    equal((await finish(R7, 'OK', USAGE, [], [top2])).code, 'OK');
+    // The switch's own declaration is early in its DO statement, so it survives the default query text truncation.
+    const switchWaits = "query like '%v_from constant text%' and wait_event_type='Lock'";
 
     note('guard-refuses-wrong-installed');
+    equal(await installed(), MANIFEST_V2);
     ok((await runGuard(MANIFEST, MANIFEST_V2)) !== null);
     ok((await runGuard(MANIFEST_V2, 'azure-eu-terra-outfitgen-v3')) !== null);
     equal(await installed(), MANIFEST_V2);
 
+    // 1. A claim that already holds the profile and controls rows: the switch waits for the admission to commit, then sees the new held
+    //    row and refuses. The holder commits only after it has seen the switch waiting on a lock, so the wait is asserted, not assumed.
+    note('guard-vs-admission-claim');
+    const R7 = randomUUID();
+    const holder = sql(`begin;
+      select public.outfitgen_claim(${literal(a.uid)},${literal(R7)},${literal(MANIFEST_V2)},false,${texts([s7])},${uuids([top2])});
+      do $$ /* holder-wait */ declare n integer := 0; begin
+        loop
+          exit when exists(select 1 from pg_stat_activity where pid<>pg_backend_pid() and query like '%v_from constant'||' text%' and wait_event_type='Lock');
+          n := n+1; if n>600 then raise exception 'holder barrier timeout'; end if;
+          perform pg_sleep(0.1);
+        end loop;
+      end; $$;
+      commit;`).then(() => null, (error) => error);
+    await waitFor('guard-holder-in-barrier', "query like '%holder-wait%' and wait_event='PgSleep'");
+    const refused = runGuard(MANIFEST_V2, MANIFEST);
+    await waitFor('guard-switch-waiting', switchWaits);
+    equal(await holder, null);
+    ok((await refused) !== null);
+    note('guard-refused-on-held-row');
+    equal(await installed(), MANIFEST_V2);
+    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(R7)};`), 'held');
+    equal((await finish(R7, 'OK', USAGE, [], [top2])).code, 'OK');
+    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(R7)};`), 'estimated');
+
+    // 2. The switch holds its locks in an open transaction until the competing claim has returned BUSY (nothing written); a row that the
+    //    test commits afterwards releases it. Then the manifest has moved and the next claim meets the new one.
     note('guard-blocks-admission');
-    // While the guard's transaction is open (it holds the profile and controls rows), a claim fails its no-wait lock: BUSY, nothing written.
-    const open = runGuard(MANIFEST_V2, MANIFEST, 5);
-    await waitSleeping('pg_sleep(5)');
+    const barrierId = randomUUID();
+    const moving = runGuard(MANIFEST_V2, MANIFEST, barrierId);
+    await waitFor('guard-switch-in-barrier', "query like '%switch-barrier%' and wait_event='PgSleep'");
     const R8 = randomUUID();
     equal((await claimWith(R8, MANIFEST_V2, [s7], [top2])).code, 'BUSY');
     equal(await rows(R8), '0');
-    equal(await open, null);
+    note('guard-release-barrier');
+    await sql(`insert into private.ai_usage(owner_id,request_id,period,created_at,reserved_micro,accounted_micro,charge_state,purpose)
+      values (${literal(a.uid)},${literal(barrierId)},to_char(now() at time zone 'UTC','YYYY-MM'),clock_timestamp(),1,1,'estimated','outfitgen');`);
+    equal(await moving, null);
     equal(await installed(), MANIFEST);
     const R9 = randomUUID();
     equal((await claimWith(R9, MANIFEST_V2, [s7], [top2])).code, 'CONFIG_CHANGED');
     equal(await rows(R9), '0');
-
-    note('guard-waits-for-lock');
-    // A claim already holding the profile row finishes first; the guard waits for it (lock timeout 10 s) and then moves the manifest.
-    const holder = sql(`begin; select 1 from public.profiles where owner_id=${literal(a.uid)} for update; select pg_sleep(3); commit;`).then(() => null, (error) => error);
-    await waitSleeping('pg_sleep(3)');
+    note('guard-rollback');
     equal(await runGuard(MANIFEST, MANIFEST_V2), null);
-    equal(await holder, null);
     equal(await installed(), MANIFEST_V2);
     equal(await scalar(`select outfitgen_consent_revision::text||outfitgen_notice_revision::text||outfitgen_activated::text from private.ai_controls where owner_id=${literal(a.uid)};`), '22true');
   } catch (error) {
