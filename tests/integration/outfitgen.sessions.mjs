@@ -16,6 +16,9 @@
 //     exactly their stated deltas, the v2 manifest equals v1 apart from its identity, then the manifest follows the controls, a v2 settlement
 //     records prompt version 2, the plan lists the waiting and kept sets, and the guarded controls switch refuses held work, waits for a
 //     claim's lock and blocks admission while its transaction is open.
+//   outfitgenQuality2Probes: OUTFITGEN-QUALITY2 at the same inventory (no migration): a plain 7 through claim, finish, list, Keep and Remove, and the
+//     owner-run re-judge reset (docs/outfitgen-rejudge-reset.sql) run against the real database: refusals read from unchanged digests, both
+//     thresholds, rollback.
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { isDeepStrictEqual } from 'node:util';
@@ -1265,6 +1268,163 @@ export async function outfitgenJudgeCompare(checkpoint, snapshot, sql, mark = ()
   } finally {
     await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(h.a.uid)} and charge_state='held';`);
     await h.restore(checkpoint.before, []);
+  }
+}
+
+// OUTFITGEN-QUALITY2 after the judge probes, at the same (target) inventory and with no migration of its own: a plain look (a skip scoring 7, which the Edge
+// stores with its fixed text) goes through claim and finish to a stored suggestion that the ordinary owner lists, keeps and removes; and the owner-run
+// re-judge reset (docs/outfitgen-rejudge-reset.sql, the placeholders substituted) is run against the real database. Everything is sequential, one claim at a
+// time, and each statement is marked. The local SQL runner suppresses error text, so every refusal is read from the state it leaves: a digest of every table the
+// reset could touch, for both owners, taken before and after. The same text that is refused here later succeeds once its condition is lifted, which shows
+// that the refusal came from that condition.
+const PLAIN_TEXT = Object.freeze({ en: ['Plain look', 'It works, but nothing about it stands out.'], fi: ['Tavallinen asu', 'Toimii, mutta mikään ei erotu edukseen.'],
+  sv: ['Enkel look', 'Fungerar, men inget sticker ut.'] });
+const QUALITY2_TABLES = ['public.suggested_outfits', 'private.outfit_assessed_items', 'private.ai_usage', 'private.ai_usage_evidence', 'private.outfitgen_requests',
+  'private.ai_controls', 'public.suggestion_feedback', 'public.outfits', 'public.outfit_items'];
+export async function outfitgenQuality2Probes(snapshot, sql, mark = () => {}) {
+  note = (label) => { last = label; mark(label); };
+  const h = helpers(snapshot, sql);
+  const { client } = snapshot;
+  const { a, b, one, scalar, rpc, sig, finish, result } = h;
+  const before = await h.configure();
+  const made = [];
+  const sh = saveHarness(client, b);
+  const claimWith = (id, signatures, targets = []) => one(`select public.outfitgen_claim(${literal(a.uid)},${literal(id)},${literal(MANIFEST_V2)},
+    false,${texts(signatures)},${uuids(targets)});`);
+  const garmentOf = async (harness, owner, category, colours) => {
+    note(`q2-garment-${category}`);
+    const value = harness.track(intent());
+    value.p_item.category = category;
+    value.p_item.title = `Fictional outfit ${category}`;
+    const row = await harness.reserve(value);
+    await harness.upload(value);
+    await harness.finalize(value, row);
+    await sql(`update public.items set colours=${texts(colours)} where owner_id=${literal(owner.uid)} and id=${literal(value.p_item.id)};`);
+    return value.p_item.id;
+  };
+  const digest = async (owner) => {
+    const out = {};
+    for (const table of QUALITY2_TABLES) {
+      out[table] = await scalar(`select md5(coalesce(jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text),'[]'::jsonb)::text)::text from ${table} x where owner_id=${literal(owner.uid)};`);
+    }
+    return out;
+  };
+  const rowsDigest = (owner, states) => scalar(`select md5(coalesce(jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text),'[]'::jsonb)::text)::text from public.suggested_outfits x
+    where owner_id=${literal(owner.uid)} and state=any(${texts(states)});`);
+  const countOf = (where) => scalar(`select count(*) from public.suggested_outfits where owner_id=${literal(a.uid)} and ${where};`);
+  const assessedOf = (owner) => scalar(`select count(*) from private.outfit_assessed_items where owner_id=${literal(owner.uid)};`);
+  const template = await readFile(new URL('../../docs/outfitgen-rejudge-reset.sql', import.meta.url), 'utf8');
+  const resetSql = (owner, min) => template.replaceAll('<owner>', owner).replaceAll('<min_score>', String(min));
+  const runReset = async (text) => { try { await sql(text); return null; } catch (error) { return error; } };
+  const unchanged = async (label, step) => {
+    const aBefore = await digest(a), bBefore = await digest(b);
+    ok((await step()) !== null);
+    equal([label, await digest(a)], [label, aBefore]);
+    equal([label, await digest(b)], [label, bBefore]);
+  };
+  try {
+    note('q2-setup');
+    await sql(`update private.ai_controls set outfitgen_activated=true,outfitgen_consent_revision=2,outfitgen_consented_at=clock_timestamp(),
+      outfitgen_manifest_id=${literal(MANIFEST_V2)},updated_at=clock_timestamp() where owner_id in (${literal(a.uid)},${literal(b.uid)});`);
+    const tops = [await h.garment('top'), await h.garment('top', ['red']), await h.garment('top', ['olive'])];
+    const bottoms = [await h.garment('bottom'), await h.garment('bottom', ['grey'])];
+    const shoes = [await h.garment('footwear'), await h.garment('footwear', ['white'])];
+    made.push(...tops, ...bottoms, ...shoes);
+    const bTop = await garmentOf(sh, b, 'top', ['navy']), bTop2 = await garmentOf(sh, b, 'top', ['red']), bBottom = await garmentOf(sh, b, 'bottom', ['grey']);
+    const bShoes = await garmentOf(sh, b, 'footwear', ['white']);
+    const plainSets = [[tops[0], bottoms[0], shoes[0]], [tops[1], bottoms[0], shoes[0]], [tops[2], bottoms[0], shoes[0]]];
+    const declinedSets = [[tops[0], bottoms[1], shoes[0]], [tops[1], bottoms[1], shoes[0]], [tops[2], bottoms[1], shoes[0]]];
+    const heldSet = [tops[0], bottoms[1], shoes[1]], oldSet = [tops[0], bottoms[0], shoes[1]];
+    const wholeA = [...tops, ...bottoms, ...shoes];
+
+    note('q2-plain-claim');
+    const R1 = randomUUID();
+    const claim1 = await claimWith(R1, await Promise.all([...plainSets, ...declinedSets].map(sig)), wholeA);
+    equal([claim1.code, claim1.claimed, claim1.manifestId], ['OK', true, MANIFEST_V2]);
+    note('q2-plain-finish');
+    const plain = (ids, language) => result(ids, 'suggested', 7, { occasion: 'everyday', title: PLAIN_TEXT[language][0], reason: PLAIN_TEXT[language][1] });
+    const done = await finish(R1, 'OK', USAGE, [plain(plainSets[0], 'en'), plain(plainSets[1], 'fi'), plain(plainSets[2], 'sv'),
+      result(declinedSets[0], 'declined', 4), result(declinedSets[1], 'declined', 7), result(declinedSets[2], 'declined', 8)], wholeA);
+    equal(done.code, 'OK');
+    equal(done.recorded, { suggested: 3, declined: 3, assessed: wholeA.length });
+    note('q2-plain-stored');
+    equal(await scalar(`select string_agg(title||'|'||reason||'|'||score||'|'||prompt_version||'|'||manifest_id||'|'||occasion,';' order by title) from public.suggested_outfits
+      where owner_id=${literal(a.uid)} and state='suggested';`), Object.values(PLAIN_TEXT).map(([title, reason]) => `${title}|${reason}|7|2|${MANIFEST_V2}|everyday`).sort().join(';'));
+    note('q2-plain-list');
+    const listed = await rpc(a, 'outfitgen_list');
+    equal([listed.code, listed.suggestions.length], ['OK', 3]);
+    ok(listed.suggestions.every((entry) => entry.score === 7 && entry.title.length > 0 && entry.reason.length > 0));
+    equal((await rpc(b, 'outfitgen_list')).suggestions.length, 0);
+    note('q2-plain-keep');
+    const [first, second] = listed.suggestions;
+    equal((await rpc(a, 'outfitgen_keep', { p_id: first.id, p_outfit_id: randomUUID() })).code, 'OK');
+    note('q2-plain-remove');
+    equal((await rpc(a, 'outfitgen_remove', { p_id: second.id })).code, 'OK');
+    equal(await scalar(`select string_agg(state,',' order by state) from public.suggested_outfits where owner_id=${literal(a.uid)} and state in ('kept','removed','suggested');`), 'kept,removed,suggested');
+
+    note('q2-seed');
+    // The other owner has rows of its own (a waiting plain look, two declined sets, a marker); a version-1 declined row of this owner must survive any reset.
+    const fingerprint = 'c'.repeat(64);
+    await sql(`insert into public.suggested_outfits(owner_id,item_ids,state,title,reason,occasion,score,fingerprint,manifest_id,prompt_version,request_id)
+      values (${literal(b.uid)},${uuids([bTop, bBottom, bShoes])},'suggested','Plain look','It works, but nothing about it stands out.','everyday',7,${literal(fingerprint)},${literal(MANIFEST_V2)},2,${literal(randomUUID())}),
+        (${literal(b.uid)},${uuids([bTop2, bBottom, bShoes])},'declined',null,null,null,8,${literal(fingerprint)},${literal(MANIFEST_V2)},2,${literal(randomUUID())});
+      insert into private.outfit_assessed_items(owner_id,item_id) values (${literal(b.uid)},${literal(bTop)}) on conflict do nothing;
+      insert into public.suggested_outfits(owner_id,item_ids,state,score,fingerprint,manifest_id,prompt_version,request_id)
+      values (${literal(a.uid)},${uuids(oldSet)},'declined',8,${literal(fingerprint)},${literal(MANIFEST)},1,${literal(randomUUID())});`);
+    equal([await countOf(`state='declined' and prompt_version=2`), await countOf(`state='declined' and prompt_version=1`)], ['3', '1']);
+    ok(Number(await assessedOf(a)) > 0 && Number(await assessedOf(b)) > 0);
+
+    note('q2-held-claim');
+    const R2 = randomUUID();
+    equal((await claimWith(R2, [await sig(heldSet)], [tops[0]])).code, 'OK');
+    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(R2)};`), 'held');
+    note('q2-held-refused');
+    await unchanged('held', () => runReset(resetSql(a.uid, 7)));
+    equal(await scalar(`select charge_state from private.ai_usage where request_id=${literal(R2)};`), 'held');
+    note('q2-held-settle');
+    equal((await finish(R2, 'OK', USAGE, [result(heldSet, 'declined', 8)], [tops[0]])).code, 'OK');
+    equal(await countOf(`state='declined' and prompt_version=2`), '4');
+
+    note('q2-manifest-refused');
+    await sql(`update private.ai_controls set outfitgen_manifest_id=${literal(MANIFEST)},updated_at=clock_timestamp() where owner_id=${literal(a.uid)};`);
+    await unchanged('manifest', () => runReset(resetSql(a.uid, 1)));
+    await sql(`update private.ai_controls set outfitgen_manifest_id=${literal(MANIFEST_V2)},updated_at=clock_timestamp() where owner_id=${literal(a.uid)};`);
+
+    note('q2-bad-input-refused');
+    for (const bad of ['null', '0', '11']) await unchanged(`threshold-${bad}`, () => runReset(resetSql(a.uid, bad)));
+    await unchanged('unknown-owner', () => runReset(resetSql(randomUUID(), 7)));
+    await unchanged('placeholders', () => runReset(template));
+
+    note('q2-rollback');
+    const broken = resetSql(a.uid, 7).replace('commit;', 'select 1/0;\ncommit;');
+    ok(broken !== resetSql(a.uid, 7));
+    await unchanged('rollback', () => runReset(broken));
+
+    note('q2-reset-7');
+    const keepSigned = await rowsDigest(a, ['suggested', 'kept', 'removed']);
+    const aShot = await digest(a), bShot = await digest(b);
+    equal(await runReset(resetSql(a.uid, 7)), null);
+    equal([await countOf(`state='declined' and prompt_version=2`), await countOf(`state='declined' and prompt_version=2 and score>=7`),
+      await countOf(`state='declined' and prompt_version=1`)], ['1', '0', '1']);
+    equal(await rowsDigest(a, ['suggested', 'kept', 'removed']), keepSigned);
+    equal(await assessedOf(a), '0');
+    const aAfter = await digest(a);
+    for (const table of QUALITY2_TABLES.filter((table) => !['public.suggested_outfits', 'private.outfit_assessed_items'].includes(table))) equal([table, aAfter[table]], [table, aShot[table]]);
+    equal(await digest(b), bShot);
+    equal(await assessedOf(b), '1');
+
+    note('q2-reset-1');
+    equal(await runReset(resetSql(a.uid, 1)), null);
+    equal([await countOf(`state='declined' and prompt_version=2`), await countOf(`state='declined' and prompt_version=1`)], ['0', '1']);
+    equal(await rowsDigest(a, ['suggested', 'kept', 'removed']), keepSigned);
+    equal(await digest(b), bShot);
+  } catch (error) {
+    if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
+    throw error;
+  } finally {
+    await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(a.uid)} and charge_state='held';`);
+    await h.restore(before, made);
+    await sh.cleanup();
   }
 }
 

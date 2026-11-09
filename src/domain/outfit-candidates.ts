@@ -206,33 +206,36 @@ export function anchorSets(anchor: CandidateItem, items: readonly CandidateItem[
     for (const id of set.ids) if (id !== anchor.id && !footwearIds.has(id)) uses.set(id, (uses.get(id) ?? 1) - 1);
   };
   for (const set of all) { if (picks.length >= k - explore) break; take(set, CANDIDATE_LIMITS.partnerReuse, CANDIDATE_LIMITS.perBase); }
-  const hasKind = (addOn: boolean) => picks.some((set) => set.addOn === addOn);
+  const bare = (set: CandidateSet) => !set.addOn, addOn = (set: CandidateSet) => set.addOn, formal = (set: CandidateSet) => formalKeys.has(set.key);
   // The list offers a bare outfit and an add-on one when both exist. The base cap stays on: if no other base can take the place, the
   // list keeps what it has (a pick that was dropped to make room is put back).
   for (const wanted of [false, true]) {
-    if (hasKind(wanted) || !all.some((set) => set.addOn === wanted)) continue;
+    if (picks.some((set) => set.addOn === wanted) || !all.some((set) => set.addOn === wanted)) continue;
     const dropped = picks.length >= k - explore ? picks[picks.length - 1]! : null;
     if (dropped) drop(dropped);
     const taken = all.some((set) => set.addOn === wanted && take(set, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase));
     if (!taken && dropped) take(dropped, Infinity, Infinity);
   }
-  // OUTFITGEN-QUALITY2: when a formal layer or jacket makes a valid look, the list holds at least one (the best-scored). It takes a free place, or
-  // replaces the lowest-ranked pick whose removal keeps the bare look the list already has; the replacement is itself an add-on look, so the add-on
-  // guarantee holds after it, and a casual add-on that was the list's only one can be replaced. The base cap stays on and the list is never longer.
-  if (!addOnAnchor && formalKeys.size && !picks.some((set) => formalKeys.has(set.key))) {
-    const hadBare = all.some((set) => !set.addOn);
-    done: for (const formal of all.filter((set) => formalKeys.has(set.key))) {
-      if (picks.length < k - explore && take(formal, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase)) break;
+  // OUTFITGEN-QUALITY2, only when a formal layer or jacket makes a valid look (a wardrobe without one keeps exactly the behaviour above): the list
+  // then holds a bare outfit, an add-on one and one with the formal piece, in that order. A wanted look takes a free place, or replaces the
+  // lowest-ranked pick whose removal keeps every kind the list already has (a casual add-on that was the only one can become the formal one, and
+  // a bare look can replace one of two add-ons of a saturated base). The base cap stays on, the list is never longer, and a replaced pick is put
+  // back when nothing could take its place.
+  const kinds = [bare, addOn];
+  const ensure = (wanted: (set: CandidateSet) => boolean) => {
+    if (picks.some(wanted)) return;
+    for (const candidate of all.filter(wanted)) {
+      if (picks.length < k - explore && take(candidate, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase)) return;
+      const held = kinds.filter((has) => picks.some(has));
       for (const victim of [...picks].sort((a, b) => a.score - b.score || compare(b.key, a.key))) {
-        if (hadBare && !picks.some((other) => other !== victim && !other.addOn)) continue;
+        if (!held.every((has) => has(candidate) || picks.some((other) => other !== victim && has(other)))) continue;
         drop(victim);
-        if (take(formal, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase)) break done;
+        if (take(candidate, CANDIDATE_LIMITS.explorationReuse, CANDIDATE_LIMITS.perBase)) return;
         take(victim, Infinity, Infinity);
       }
     }
-  }
-  const rest = all.filter((set) => !picks.includes(set)).sort((a, b) => hashOf(a.key) - hashOf(b.key) || compare(a.key, b.key));
-  for (const cap of [CANDIDATE_LIMITS.partnerReuse, CANDIDATE_LIMITS.explorationReuse, Infinity]) {
+  };
+  if (!addOnAnchor && formalKeys.size) { ensure(bare); ensure(addOn); ensure(formal); }  const rest = all.filter((set) => !picks.includes(set)).sort((a, b) => hashOf(a.key) - hashOf(b.key) || compare(a.key, b.key));  for (const cap of [CANDIDATE_LIMITS.partnerReuse, CANDIDATE_LIMITS.explorationReuse, Infinity]) {
     for (const set of rest) { if (picks.length >= k) break; take(set, cap, CANDIDATE_LIMITS.perBase); }
   }
   return picks.sort((a, b) => b.score - a.score || compare(a.key, b.key));

@@ -247,6 +247,29 @@ describe('candidate formal add-ons (OUTFITGEN-QUALITY2)', () => {
     // The overcoat's own list still has valid pairings with it.
     expect(anchorSets(overcoat, items, bans).length).toBeGreaterThan(0);
   });
+  it('keep a bare look and a formal one when two add-on looks saturate the only base (bans leave one formal jacket per shoe)', () => {
+    counter = 1;
+    const dressed = { seasons: allSeasons };
+    const top = make('top', { formality: 3, colours: ['navy'], ...dressed }), trousers = make('bottom', { formality: 4, colours: ['navy'], ...dressed });
+    const navyShoes = make('footwear', { formality: null, colours: ['navy'], ...dressed }), greyShoes = make('footwear', { formality: null, colours: ['grey'], ...dressed });
+    const jackets = [make('outerwear', { ...formal, warmth: 2, ...dressed }), make('outerwear', { ...formal, colours: ['grey'], warmth: 2, ...dressed }), make('outerwear', { ...formal, colours: ['black'], warmth: 2, ...dressed })];
+    const items = [top, trousers, navyShoes, greyShoes, ...jackets];
+    const bans: CandidateBans = { pairs: new Set([pairKeyOf(top.id, jackets[0]!.id), pairKeyOf(navyShoes.id, jackets[1]!.id)]), disliked: new Set() };
+    const sets = anchorSets(top, items, bans);
+    expect(sets.some((set) => !set.addOn)).toBe(true);
+    expect(sets.some((set) => set.addOn && set.ids.some((entry) => jackets.some((jacket) => jacket.id === entry)))).toBe(true);
+    expect(sets.length).toBeLessThanOrEqual(CANDIDATE_LIMITS.perBase);
+  });
+  it('keep a bare look and the formal one when casual add-ons would take both places of the base', () => {
+    counter = 1;
+    const top = make('top', { ...casual, colours: ['navy'] }), trousers = make('bottom', { ...casual, colours: ['grey'] }), shoes = make('footwear', { ...casual, colours: ['white'] });
+    const hoodies = [make('layer', { ...casual, colours: ['grey'], favourite: true, seasons: allSeasons }), make('layer', { ...casual, colours: ['black'], favourite: true, seasons: allSeasons })];
+    const blazer = make('layer', { ...formal, seasons: allSeasons });
+    const sets = anchorSets(top, [top, trousers, shoes, ...hoodies, blazer], none);
+    expect(sets.some((set) => !set.addOn)).toBe(true);
+    expect(sets.some((set) => set.ids.includes(blazer.id))).toBe(true);
+    expect(sets.length).toBeLessThanOrEqual(CANDIDATE_LIMITS.perBase);
+  });
   it('change nothing for a wardrobe with no formal layer or jacket', () => {
     counter = 1;
     const items = [make('top', casual), make('top', casual), ...Array.from({ length: 4 }, () => make('bottom', casual)), make('footwear', casual),

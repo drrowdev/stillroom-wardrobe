@@ -1851,7 +1851,7 @@ describe('COL1 strict preservation pass and twelve-only probes (source order, no
                         'await outfitgenCapCheckpoint(', "await migrateToStage(run, 'cap-prior', 'judge-prior')",
                         "await history('judge-prior'); await verifyCiStorageGuard();", 'await outfitgenCapCompare(', 'await outfitgenCapProbes(',
                         'await outfitgenJudgeCheckpoint(', "await migrateToStage(run, 'judge-prior', 'target')",
-                        "await history('target'); await verifyCiStorageGuard();", 'await outfitgenJudgeCompare(', 'await outfitgenJudgeProbes(',
+                        "await history('target'); await verifyCiStorageGuard();", 'await outfitgenJudgeCompare(', 'await outfitgenJudgeProbes(', 'await outfitgenQuality2Probes(',
                         'await colourFinalizer.stop()',
       "'--version', COLOUR_VERSION", "await history('colours'); await verifyCiStorageGuard();", 'provision-test-users.mjs',
       "await colourProbes(twelveEnv, privilegedLocalSql, 'colours')", 'await twelveFinalizer.stop()']) {
