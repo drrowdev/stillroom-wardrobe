@@ -57,7 +57,9 @@ describe('a pass over the unchecked garments: whether the next call may be sent'
     expect(stopOf(mem, status({ unassessed: 8 }), local({ visible: false }))).toBe('hidden');
     expect(stopOf(mem, status({ unassessed: 8, budget: { ...BUDGET, usedMicro: '49900000', remainingMicro: '100000' } }))).toBe('limit');
     expect(stopOf(mem, status({ unassessed: 8, live: true }))).toBe('live');
-    expect(stopOf(mem, status({ unassessed: 8, pending: 40 }))).toBe('full');
+    expect(stopOf(mem, status({ unassessed: 8, pending: 100 }))).toBe('full');
+    expect(stopOf(mem, status({ unassessed: 8, pending: 101 }))).toBe('full');
+    expect(stopOf(mem, status({ unassessed: 8, pending: 99 }))).toBeNull();
     expect(stopOf(after({ start: 2, unassessed: 2, calls: passCeiling(2) }), status({ unassessed: 1 }))).toBe('ceiling');
     expect(stopOf(after({ start: 2, unassessed: 2, calls: passCeiling(2) - 1 }), status({ unassessed: 1 }))).toBeNull();
   });
@@ -89,7 +91,9 @@ describe('a pass over the unchecked garments: whether the next call may be sent'
     expect(passSendGate(status({ budget: near }), false, false)).toBe('reserve');
     expect(passSendGate(status({ budget: near }), true, false)).toBeNull();
     expect(passSendGate(status({ live: true }), true, false)).toBe('live');
-    expect(passSendGate(status({ pending: 40 }), false, false)).toBe('full');
+    expect(passSendGate(status({ pending: 100 }), false, false)).toBe('full');
+    expect(passSendGate(status({ pending: 99 }), false, false)).toBeNull();
+    expect(passSendGate(status({ pending: 40 }), false, false)).toBeNull();
     expect(passSendGate(status(), false, true)).toBe('paused');
     expect(passSendGate(status(), true, true)).toBeNull();
     expect(passSendGate(status(), false, false)).toBeNull();

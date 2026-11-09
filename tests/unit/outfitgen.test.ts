@@ -124,7 +124,7 @@ describe('outfit generation handler (mocked Auth, RPC, Storage and provider)', (
   budget: { monthlyAllowanceMicro: '5000000', usedMicro: '0', remainingMicro: '5000000', warning: false },
   pending: 0, unassessed: 5, autoUnassessed: 5, autoCallsLeft: 3, live: false, serverTimeMs: 1_000_000, cooldownUntilMs: null };
   const accounting = { basis: 'estimated', amountMicro: '90000', currency: 'USD' };
-  const plan = (items: OutfitGenItem[] = wardrobe(), over: Record<string, unknown> = {}) => ({ code: 'OK', items, pairs: [], disliked: [], known: [], pendingRoom: 40, ...over });
+  const plan = (items: OutfitGenItem[] = wardrobe(), over: Record<string, unknown> = {}) => ({ code: 'OK', items, pairs: [], disliked: [], known: [], pendingRoom: 100, ...over });
   type Call = { url: string; body: Record<string, unknown> | null; auth: string | null };
   function backend(options: { status?: unknown; plan?: unknown; claim?: Record<string, unknown>; claimStatus?: number; finish?: Record<string, unknown>; image?: (n: number) => Response | null } = {}) {
     const calls: Call[] = [];
@@ -203,7 +203,9 @@ describe('outfit generation handler (mocked Auth, RPC, Storage and provider)', (
       [{ ...status, policy: { ...status.policy, maxRequestMicro: '1' } }, 'UNCONFIGURED', 503, true],
       [{ ...status, budget: null }, 'UNAVAILABLE', 403, true],
       [{ ...status, live: true }, 'BUSY', 503, true],
-      [{ ...status, pending: 40 }, 'PENDING_FULL', 409, true],
+      [{ ...status, pending: 100 }, 'PENDING_FULL', 409, true],
+      [{ ...status, pending: 101 }, 'PENDING_FULL', 409, true],
+      [{ ...status, pending: 1_000_000 }, 'PENDING_FULL', 409, true],
       [status, 'UNCONFIGURED', 503, false],
     ];
     for (const [value, code, statusCode, withRegistrar] of cases) {
@@ -214,6 +216,14 @@ describe('outfit generation handler (mocked Auth, RPC, Storage and provider)', (
       expect(names(calls)).toEqual(['user', 'outfitgen_status']);
       expect(transport).not.toHaveBeenCalled();
     }
+  });
+
+  it('plans while the list still has room: 99 pending is not full', async () => {
+    const calls = backend({ status: { ...status, pending: 99 } });
+    const { transport } = provider();
+    const response = await createOutfitGenHandler(config, registrar().register, transport)(post(body()));
+    expect(response.status).toBe(200);
+    expect(names(calls).slice(0, 3)).toEqual(['user', 'outfitgen_status', 'outfitgen_plan']);
   });
 
   it('judges one server-built batch end to end: photos first, then the claim, then one provider call and the finish', async () => {

@@ -60,7 +60,7 @@ async function usablePhoto(page: Page) {
   }));
 }
 
-type Start = { beforeSignIn?: (api: Api) => void | Promise<void>; shortPlan?: boolean; tryOn?: boolean; photo?: boolean; outfitConsent?: boolean; hash?: string; replies?: Api['tryonControl']['replies']; language?: Language };
+type Start = { beforeSignIn?: (api: Api, clothes: Clothes) => void | Promise<void>; shortPlan?: boolean; tryOn?: boolean; photo?: boolean; outfitConsent?: boolean; hash?: string; replies?: Api['tryonControl']['replies']; language?: Language };
 async function start(page: Page, options: Start = {}, existing?: { api: Api; clothes: Clothes }) {
   // Playwright's WebKit route interception reports an empty body for Blob uploads, so there the try-on POST is re-sent as an ArrayBuffer.
   if (test.info().project.name === 'webkit-photo') {
@@ -94,7 +94,7 @@ async function start(page: Page, options: Start = {}, existing?: { api: Api; clo
     const jpeg = await usablePhoto(page);
     api.tryonControl.photos[owners.a] = { jpeg, sha256: createHash('sha256').update(jpeg).digest('hex'), savedAtMs: Date.now() - 86_400_000 };
   }
-  await options.beforeSignIn?.(api);
+  await options.beforeSignIn?.(api, clothes);
   await page.goto(options.hash ?? '/#/outfits'); await signIn(page);
   await expectSignedIn(page);
   return { api, clothes };
@@ -507,6 +507,27 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
     await expect(page.locator('#tryon-heading')).toBeVisible({ timeout: 30_000 });
     await page.locator('section[aria-labelledby="tryon-heading"]').getByText(text('aiF.about'), { exact: true }).click();
     await expect(page.locator('section[aria-labelledby="tryon-heading"]')).toContainText(text('outfitgenC.photoUse'));
+  });
+
+  // OUTFITGEN-PENDING100: a list of 100 suggestions. The two planned sets share their pictures, so two chains are made; the point is
+  // that 100 cards are listed while only the cards near the screen mount their picture.
+  test('lists 100 suggestions and mounts a picture only on the cards near the screen', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 740 });
+    const { api } = await start(page, {
+      beforeSignIn: (mock, clothes) => {
+        const base = sets(clothes);
+        for (let index = 2; index < 100; index++) mock.outfitgenControl.suggestions.push({ id: randomUUID(), owner: owners.a, state: 'suggested', ...base[index % 2]!,
+          title: `Set ${index}`, createdAt: created() });
+      },
+    });
+    await expect(section(page).getByRole('heading', { level: 2 })).toHaveText(text('outfitgen.titleCount', 'en', { count: 100 }), { timeout: 30_000 });
+    await expect(cards(page)).toHaveCount(100);
+    await expect.poll(() => requestsOf(api).length, { timeout: 60_000 }).toBe(5);
+    await expect.poll(() => api.tryonControl.results.length, { timeout: 60_000 }).toBe(2);
+    await expect.poll(() => section(page).locator('.suggested-picture img').count(), { timeout: 30_000 }).toBeGreaterThan(0);
+    expect(await section(page).locator('.suggested-picture img').count()).toBeLessThan(25);
+    expect(chains(api)).toHaveLength(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 });
 

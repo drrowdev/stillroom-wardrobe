@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthError, createClient, type Session } from '@supabase/supabase-js';
 import type { Database } from '../../src/data/database.types';
 import { AiClient, AiError, AiNotSentError } from '../../src/data/ai';
+import { OutfitGenClient } from '../../src/data/outfitgen';
 import { parseAiStatus, supportedAiPolicy, parseAnalysisReply } from '../../src/domain/ai-controls';
 import { testAccessToken } from './test-token';
 
@@ -29,7 +30,7 @@ function fixture() {
   const ai = new AiClient(client, { url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_test_only', version: 'test' }, scope);
   const photo = { main: new Blob(['synthetic'], { type: 'image/jpeg' }), thumb: new Blob(['thumb'], { type: 'image/jpeg' }),
     mainSha256: context.imageSha256, thumbSha256: 'b'.repeat(64), width: 120, height: 80 };
-  return { ai, auth, refresh, session, scope, abort, photo };
+  return { ai, client, auth, refresh, session, scope, abort, photo };
 }
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 function responseReader(text = JSON.stringify(status())) {
@@ -363,3 +364,33 @@ describe('Settings status version 2', () => {
     expect(parseAiStatus(noticeStatus(null), true)).toMatchObject({ photoModelNoticeUntilMs: null });
   });
 });
+
+describe('suggestion list reply bound (OUTFITGEN-PENDING100)', () => {
+  const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+  // Worst-size rows: six garments and the longest multibyte title and reason the parser accepts.
+  const rows = (count: number) => Array.from({ length: count }, (_, index) => ({
+    id: uuid(index + 1), itemIds: [1, 2, 3, 4, 5, 6].map((part) => uuid(1000 + index * 6 + part)), title: 'ä'.repeat(40), reason: 'ö'.repeat(160),
+    occasion: 'smart', score: 9, createdAt: '2026-11-08T12:34:56.123456+00:00' }));
+  const listOf = (count: number) => JSON.stringify({ code: 'OK', suggestions: rows(count) });
+  const client = (f: ReturnType<typeof fixture>) => new OutfitGenClient(f.client, { url: 'http://127.0.0.1:54321', publishableKey: 'sb_publishable_test_only', version: 'test' }, f.scope);
+
+  it('reads 100 worst-size rows, which are far above the 32 KB of every other reply', async () => {
+    const f = fixture(), text = listOf(100);
+    expect(new TextEncoder().encode(text).length).toBeGreaterThan(32_768);
+    expect(new TextEncoder().encode(text).length).toBeLessThan(131_072);
+    responseReader(text);
+    const list = await client(f).list();
+    expect(list.kind === 'ok' && list.suggestions.length).toBe(100);
+  });
+  it('still refuses a list reply above 256 KB', async () => {
+    const f = fixture();
+    responseReader(JSON.stringify({ code: 'OK', suggestions: rows(100), padding: 'x'.repeat(262_144) }));
+    await expect(client(f).list()).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+  });
+  it('keeps 32 KB for every other reply', async () => {
+    const f = fixture();
+    responseReader(JSON.stringify({ ...status(), padding: 'x'.repeat(32_768) }));
+    await expect(f.ai.status()).rejects.toMatchObject({ code: 'UNAVAILABLE' });
+  });
+});
+
