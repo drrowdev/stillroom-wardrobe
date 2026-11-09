@@ -2643,8 +2643,9 @@ plan critique by GPT-6.1 Sol applied as binding amendments. Source packet: nothi
   `judge-prior` (46 migrations) to `target` (47) with checkpoint and compare (`outfitgenJudgeCheckpoint` / `Compare` / `Probes`: the installed predecessors, every other function body and ACL, controls,
   consent, usage, evidence, requests, suggestions, assessed rows and the earlier manifests equal; the claim and plan differ by exactly the stated deltas; the held request survives and settles) and
   probes (v1 admitted under v1 controls, v2 under v2 controls and the cross cases `CONFIG_CHANGED`, an unknown manifest `UNCONFIGURED` with nothing written; a v2 settlement stores manifest v2 and prompt
-  version 2; the plan's `seen` lists the waiting and kept looks (base and garments) newest first and not removed or declined ones; the guarded switch run against two real sessions: refused while a claim is held and
-  for a wrong installed manifest, claims answered BUSY with nothing written while its transaction is open, and waiting for a session that holds the profile row: a real claim made inside the holder's transaction, the switch observed waiting on a lock, then refusing on the committed held row with the manifest unchanged;
-  the opposite order keeps the switch's locks open until a competing claim has returned BUSY, then lets it commit, after which a v2 claim answers `CONFIG_CHANGED`; both use barriers, not fixed sleeps). Historical kept looks keep
+  version 2; the plan's `seen` lists the waiting and kept looks (base and garments) newest first and not removed or declined ones; the guarded switch, with no probe depending on two sessions meeting in time: refused for a wrong
+  installed manifest and while a real claim is held (the manifest unchanged), then the same text succeeds once the claim has settled, the next v2 claim answers `CONFIG_CHANGED`, the rollback restores v2 and consent, notice and
+  activation are unchanged; and, with a separate open transaction holding the owner's profile row for a fixed 25 s, a claim answers BUSY with nothing written and the switch, with a 1 s lock timeout, fails and changes nothing,
+  which proves it takes the profile row first). Historical kept looks keep
   the base and garment ids computed from the garments' current categories, so a later category edit can leave 0 to 6 ids; the Edge reads them as they are instead of rejecting the plan. Not verified here: the real provider's behaviour under the new
   prompt, the cost and latency per call, the owner's real calls per garment, and any visual or subjective quality.
