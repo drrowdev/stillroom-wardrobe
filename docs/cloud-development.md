@@ -2790,3 +2790,7 @@ deployed or consented, and no provider is called.
   row, the holder awaited in a `finally`); a claim by that owner answers BUSY and the switch, with its own `set local lock_timeout = '1s'`, fails as a whole and leaves the first owner unchanged. It also checks, for the two
   configured owners, that consent and the saved photo bytes survive the move and the rollback. The Edge runtime stage with the new prompt hashes in the provider double is CI-only as well. Not verified here: how the image model
   renders the new prompt, which only the trial shows.
+
+## CI-LIFETIME1 colour finalizer lifetime - 10 November 2026
+
+The colour finalizer that `scripts/preservation-rehearsal.mjs` starts through `startAnalysisServer()` is stopped after a fixed lifetime, and that lifetime must exceed the rehearsal's remaining runtime (the "Real local Supabase" job caps the whole run at 30 minutes). It was raised from 10 to 30 minutes on 10 November 2026, after the OUTFITGEN-QUALITY2 and AI-GUARD1 probes pushed the run past 10 minutes and the job failed at `preservation QUALITY2-returned; EVIDENCE_REQUIRED`.
