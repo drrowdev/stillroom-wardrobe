@@ -24,7 +24,7 @@ export const OUTFITGEN_LIMITS = Object.freeze({
   responseBytes: 262_144, contentBytes: 32_768, requestMs: 75_000, handlerMs: 120_000, downloadMs: 20_000, dispatchMs: 60_000,
   title: 40, reason: 160, scoreBar: 8, pending: 100, declinedCache: 5_000, setSize: 6,
 });
-/** The quality bar is a trial threshold, not quality evidence: the owner trial decides whether it is right. */
+/** The prompt's own "good" bar, pinned in the settings hash. The Edge's selection bar is SELECTION_LIMITS.minScore (7, OUTFITGEN-QUALITY2); a trial threshold, not quality evidence. */
 export const OUTFITGEN_SCORE_BAR = OUTFITGEN_LIMITS.scoreBar;
 
 export const OUTFITGEN_LANGUAGES = ['en', 'fi', 'sv'] as const;

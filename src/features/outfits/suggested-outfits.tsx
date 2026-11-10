@@ -119,6 +119,7 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
     {pass && <p className="suggested-pass">{t('outfitgen.passProgress', { left: plural('outfitgen.passLeft', pass.left), found: plural('outfitgen.passFound', pass.found) })}</p>}
     {(view.kind === 'off' || view.kind === 'renew') && <p><span>{t('outfitgen.off')}</span>{' '}<a className="text-button" href="#/settings">{t('aiC.turnOn')}</a></p>}
     {on && limits?.reached && <p className="notice">{t('outfitgenC.limit')}</p>}
+    {on && suggestions.length > 0 && <details className="suggested-help"><summary>{t('outfitgen.scoreHelpSummary')}</summary><p>{t('outfitgen.scoreHelp')}</p></details>}
     {on && suggestions.length > 0 && <div aria-live="polite" className="suggested-picture-status">
       {pics?.making ? <p className="suggested-picture-line">{progressText(pics, language, t)}</p>
         : pics?.line ? <PictureLineText pics={pics} line={pics.line} language={language} t={t} /> : null}
@@ -210,7 +211,7 @@ function Card({ suggestion, components, images, t, queue, pics, busy, online, on
     </ul>
     <div className="suggested-text">
       <h3>{suggestion.title}</h3>
-      <p className="suggested-occasion">{t(`occasion.${suggestion.occasion}`)}</p>
+      <p className="suggested-occasion">{[t(`occasion.${suggestion.occasion}`), t('outfitgen.score', { score: suggestion.score })].join(' · ')}</p>
       <p>{suggestion.reason}</p>
     </div>
     <div className="suggested-actions">

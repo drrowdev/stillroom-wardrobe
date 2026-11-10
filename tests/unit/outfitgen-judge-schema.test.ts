@@ -157,3 +157,37 @@ describe('guarded manifest switch (docs/outfitgen-manifest-switch.sql)', () => {
     expect(code).not.toMatch(/consent|notice_revision|reserved_micro/);
   });
 });
+
+describe('re-judge reset (docs/outfitgen-rejudge-reset.sql, OUTFITGEN-QUALITY2)', () => {
+  const reset = () => readFile(new URL('../../docs/outfitgen-rejudge-reset.sql', import.meta.url), 'utf8');
+  it('is one transaction in the claim\'s lock order that refuses held work and then deletes only the owner\'s declined rows of the installed version and the assessed markers', async () => {
+    const sql = await reset();
+    expect(sql).not.toMatch(/\r/);
+    const code = sql.split('\n').filter((line) => !line.startsWith('--')).join('\n');
+    const script = code.slice(0, code.indexOf('commit;') + 'commit;'.length);
+    expect(script.trimStart().startsWith('begin;')).toBe(true);
+    expect(code).toContain("set local lock_timeout = '10s';");
+    const order = ['from public.profiles where owner_id=v_owner for update', 'from private.ai_controls where owner_id=v_owner for update',
+      'from private.ai_execution_manifests m where m.id=c.outfitgen_manifest_id',
+      'if c.outfitgen_manifest_id is distinct from v_expected_manifest or v_version is distinct from v_expected_version then',
+      "if exists(select 1 from private.ai_usage where owner_id=v_owner and purpose='outfitgen' and charge_state in ('reserved','held')) then",
+      "delete from public.suggested_outfits where owner_id=v_owner and state='declined' and prompt_version=v_expected_version and score>=v_min;",
+      'delete from private.outfit_assessed_items where owner_id=v_owner;'].map((part) => code.indexOf(part));
+    expect(order.every((at) => at >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // The expected manifest and prompt version are explicit constants, and a missing or out-of-range threshold is refused.
+    expect(code).toContain("v_expected_manifest constant text := 'azure-eu-terra-outfitgen-v2';");
+    expect(code).toContain('v_expected_version constant integer := 2;');
+    expect(code).toContain('if v_min is null or v_min not between 1 and 10 then raise exception');
+    // Nothing weakens a guard or broadens a deletion (a re-execution of these strings is the scratch PGlite run in the guide).
+    expect(code).not.toMatch(/\bfalse and\b|\bor true\b|\band false\b|\bor 1=1\b/i);
+    expect(script.match(/^\s*delete from public\.suggested_outfits /gm)).toHaveLength(1);
+    expect(script.match(/^\s*delete from private\.outfit_assessed_items /gm)).toHaveLength(1);
+    expect(script.match(/^\s*(delete|update|insert) /gm)).toHaveLength(2);
+    expect(script).not.toMatch(/consent|ai_controls\s+set|ai_usage\s+set|state in \('suggested'|state='(suggested|kept|removed)'/);
+    expect(sql.match(/<min_score>/g)?.length).toBeGreaterThanOrEqual(1);
+    // The read-back after the commit is counts only: no titles, reasons or ids are selected.
+    const readBack = code.slice(code.indexOf('commit;'));
+    expect(readBack).not.toMatch(/title|reason|item_ids|\bid\b/);
+  });
+});
