@@ -1254,7 +1254,7 @@ export async function startAnalysisServer() {
       '--agent', 'no', '--workdir', ROOT, 'functions', 'serve'], {
       cwd: ROOT, env: commandEnvironment(), shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const owned = ownAnalysisProcess(child, 600_000, Math.max(1, deadline - Date.now()));
+    const owned = ownAnalysisProcess(child, 1_800_000, Math.max(1, deadline - Date.now()));
     try {
       await waitForAnalysisHandler(owned, { deadline, spawnedAt, previous });
       await warmServedFunctions(owned, deadline);
