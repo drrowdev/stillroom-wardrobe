@@ -1589,6 +1589,7 @@ async function main() {
       // (docs/outfitgen-rejudge-reset.sql) against the real database: refusals by digest, both thresholds, rollback.
       stage = 'QUALITY2-reset';
       await outfitgenQuality2Probes(colourSnapshot, privilegedLocalSql, (label) => { stage = `QUALITY2-${label}`; });
+      stage = 'QUALITY2-returned';
       colourFinalizer.assertRunning();
       // AI-GUARD1: the guard migrations are part of the target inventory above; its probes run last, restore what they touch and never call a provider.
       const { aiGuardProbes } = await import('../tests/integration/aiguard.sessions.mjs');

@@ -1284,25 +1284,21 @@ const QUALITY2_TABLES = ['public.suggested_outfits', 'private.outfit_assessed_it
 export async function outfitgenQuality2Probes(snapshot, sql, mark = () => {}) {
   note = (label) => { last = label; mark(label); };
   const h = helpers(snapshot, sql);
-  const { client } = snapshot;
   const { a, b, one, scalar, rpc, sig, finish, result } = h;
   const before = await h.configure();
   const made = [];
-  const sh = saveHarness(client, b);
+  const bItems = [];
   const claimWith = (id, signatures, targets = []) => one(`select public.outfitgen_claim(${literal(a.uid)},${literal(id)},${literal(MANIFEST_V2)},
     false,${texts(signatures)},${uuids(targets)});`);
-  const garmentOf = async (harness, owner, category, colours) => {
+  // The other owner's garments are plain rows made with privileged SQL (a suggestion only needs the owner's items to exist), so nothing here depends on
+  // photo upload or deletion for that owner; they are removed in finally.
+  const garmentOf = async (owner, category, colours) => {
     note(`q2-garment-${category}`);
-    const value = harness.track(intent());
-    value.p_item.category = category;
-    value.p_item.title = `Fictional outfit ${category}`;
-    const row = await harness.reserve(value);
-    await harness.upload(value);
-    await harness.finalize(value, row);
-    await sql(`update public.items set colours=${texts(colours)} where owner_id=${literal(owner.uid)} and id=${literal(value.p_item.id)};`);
-    return value.p_item.id;
-  };
-  const digest = async (owner) => {
+    const itemId = randomUUID();
+    bItems.push(itemId);
+    await sql(`insert into public.items(id,owner_id,title,category,colours) values (${literal(itemId)},${literal(owner.uid)},${literal(`Fictional other ${category}`)},${literal(category)},${texts(colours)});`);
+    return itemId;
+  };  const digest = async (owner) => {
     const out = {};
     for (const table of QUALITY2_TABLES) {
       out[table] = await scalar(`select md5(coalesce(jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text),'[]'::jsonb)::text)::text from ${table} x where owner_id=${literal(owner.uid)};`);
@@ -1330,8 +1326,8 @@ export async function outfitgenQuality2Probes(snapshot, sql, mark = () => {}) {
     const bottoms = [await h.garment('bottom'), await h.garment('bottom', ['grey'])];
     const shoes = [await h.garment('footwear'), await h.garment('footwear', ['white'])];
     made.push(...tops, ...bottoms, ...shoes);
-    const bTop = await garmentOf(sh, b, 'top', ['navy']), bTop2 = await garmentOf(sh, b, 'top', ['red']), bBottom = await garmentOf(sh, b, 'bottom', ['grey']);
-    const bShoes = await garmentOf(sh, b, 'footwear', ['white']);
+    const bTop = await garmentOf(b, 'top', ['navy']), bTop2 = await garmentOf(b, 'top', ['red']), bBottom = await garmentOf(b, 'bottom', ['grey']);
+    const bShoes = await garmentOf(b, 'footwear', ['white']);
     const plainSets = [[tops[0], bottoms[0], shoes[0]], [tops[1], bottoms[0], shoes[0]], [tops[2], bottoms[0], shoes[0]]];
     const declinedSets = [[tops[0], bottoms[1], shoes[0]], [tops[1], bottoms[1], shoes[0]], [tops[2], bottoms[1], shoes[0]]];
     const heldSet = [tops[0], bottoms[1], shoes[1]], oldSet = [tops[0], bottoms[0], shoes[1]];
@@ -1422,9 +1418,13 @@ export async function outfitgenQuality2Probes(snapshot, sql, mark = () => {}) {
     if (!/^EVIDENCE_REQUIRED/.test(String(error?.message))) note(`${last}-threw-${clean(error?.message)}`);
     throw error;
   } finally {
+    note('q2-restore-held');
     await sql(`delete from private.ai_usage where purpose='outfitgen' and owner_id=${literal(a.uid)} and charge_state='held';`);
+    note('q2-restore');
     await h.restore(before, made);
-    await sh.cleanup();
+    note('q2-restore-other-owner-items');
+    if (bItems.length) await sql(`delete from public.items where owner_id=${literal(b.uid)} and id=any(${uuids(bItems)});`);
+    note('q2-restored');
   }
 }
 
