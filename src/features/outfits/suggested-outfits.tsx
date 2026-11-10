@@ -119,7 +119,6 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
     {pass && <p className="suggested-pass">{t('outfitgen.passProgress', { left: plural('outfitgen.passLeft', pass.left), found: plural('outfitgen.passFound', pass.found) })}</p>}
     {(view.kind === 'off' || view.kind === 'renew') && <p><span>{t('outfitgen.off')}</span>{' '}<a className="text-button" href="#/settings">{t('aiC.turnOn')}</a></p>}
     {on && limits?.reached && <p className="notice">{t('outfitgenC.limit')}</p>}
-    {on && suggestions.length > 0 && <details className="suggested-help"><summary>{t('outfitgen.scoreHelpSummary')}</summary><p>{t('outfitgen.scoreHelp')}</p></details>}
     {on && suggestions.length > 0 && <div aria-live="polite" className="suggested-picture-status">
       {pics?.making ? <p className="suggested-picture-line">{progressText(pics, language, t)}</p>
         : pics?.line ? <PictureLineText pics={pics} line={pics.line} language={language} t={t} /> : null}
@@ -140,7 +139,7 @@ function Section({ store, client, scope, images, online, language, t, onKept }: 
 
 type LineKey = Exclude<PictureLine, 'guard' | 'missing'>;
 const pictureLines: Record<LineKey, MessageKey> = {
-  tryOnOff: 'outfitgen.pictureTryOnOff', noPhoto: 'outfitgen.pictureNoPhoto', full: 'outfitgen.pictureFull',
+  full: 'outfitgen.pictureFull',
   budget: 'outfitgen.pictureBudget', retryLater: 'outfitgen.pictureRetry', otherWindow: 'outfitgen.pictureOtherWindow',
   otherPicture: 'outfitgen.pictureOtherPicture', ownTryOn: 'outfitgen.pictureOwnTryOn', cleanup: 'outfitgen.pictureCleanup',
   stopping: 'outfitgen.pictureStopping', tryOnPaused: 'outfitgen.pictureTryOnPaused',
@@ -159,7 +158,7 @@ function progressText(pics: PictureState, language: Language, t: Translate): str
 function PictureLineText({ pics, line, language, t }: { pics: PictureState; line: PictureLine; language: Language; t: Translate }) {
   const time = pics.lineAtMs === null ? '' : new Intl.DateTimeFormat(locales[language], { hour: '2-digit', minute: '2-digit' }).format(pics.lineAtMs);
   const text = line === 'guard' ? t('aiGuard.paused') : line === 'missing' ? pluralText(language, 'outfitgen.pictureMissing', pics.missing) : t(pictureLines[line], { time });
-  return <p className="suggested-picture-line">{text}{(line === 'tryOnOff' || line === 'noPhoto') && <>{' '}<a className="text-button" href="#/settings">{t('nav.settings')}</a></>}</p>;
+  return <p className="suggested-picture-line">{text}</p>;
 }
 
 /** Mounts the picture only when its card is near the screen, so many cards never fetch their pictures at once. */
