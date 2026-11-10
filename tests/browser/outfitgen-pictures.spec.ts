@@ -408,10 +408,12 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
     expect(api.tryonControl.results.some((entry) => entry.id === older)).toBe(true);
   });
 
-  test('makes no calls without try-on, without a saved photo or without the suggestions consent', async ({ page, browser }) => {
+  test('makes no calls and shows no picture line without try-on, without a saved photo or without the suggestions consent', async ({ page, browser }) => {
     const off = await start(page, { tryOn: false });
-    await expect(section(page).locator('.suggested-picture-line')).toContainText(text('outfitgen.pictureTryOnOff'), { timeout: 30_000 });
+    await expect.poll(() => off.api.tryonControl.statusReads, { timeout: 30_000 }).toBeGreaterThan(0);
+    await expect(cards(page)).not.toHaveCount(0);
     await quiet(page, 3_000);
+    await expect(section(page).locator('.suggested-picture-line')).toHaveCount(0);
     expect(requestsOf(off.api)).toEqual([]);
     expect(off.api.tryonControl.photoCalls.get).toBe(0);
 
@@ -419,8 +421,10 @@ test.describe('OUTFITGEN2 automatic pictures', () => {
     const second = await context.newPage();
     try {
       const noPhoto = await start(second, { photo: false });
-      await expect(section(second).locator('.suggested-picture-line')).toContainText(text('outfitgen.pictureNoPhoto'), { timeout: 30_000 });
+      await expect.poll(() => noPhoto.api.tryonControl.statusReads, { timeout: 30_000 }).toBeGreaterThan(0);
+      await expect(cards(second)).not.toHaveCount(0);
       await quiet(second, 3_000);
+      await expect(section(second).locator('.suggested-picture-line')).toHaveCount(0);
       expect(requestsOf(noPhoto.api)).toEqual([]);
       expect(noPhoto.api.tryonControl.photoCalls.get).toBe(0);
     } finally { await context.close(); }
@@ -711,7 +715,6 @@ test.describe('PICTURES-WAIT1 pictures wait, lines and progress', () => {
   test('a paused try-on service is not called "off", and the queue goes on once it is back', async ({ page }) => {
     const { api } = await start(page, { beforeSignIn: (backend) => { backend.tryonControl.setup[owners.a] = { activated: true, providerAvailable: false }; } });
     await expect(statusLine(page)).toContainText(timed('outfitgen.pictureTryOnPaused'), { timeout: 30_000 });
-    await expect(statusLine(page)).not.toContainText(text('outfitgen.pictureTryOnOff'));
     expect(requestsOf(api)).toHaveLength(0);
     // The service is back: the next look reads the status again before the earlier state blocks anything.
     api.tryonControl.setup[owners.a] = { activated: true, providerAvailable: true };

@@ -26,7 +26,7 @@ import { readTryOnStatus, tryOnStoreFor, type TryOnStore } from '../settings/try
 import { outfitGenStoreFor, readList, readStatus, viewOf, type OutfitGenStore } from './outfitgen-store';
 
 /** The one line the Suggested outfits section shows when pictures are not being made, or `null`. */
-export type PictureLine = 'tryOnOff' | 'tryOnPaused' | 'noPhoto' | 'full' | 'budget' | 'retryLater' | 'guard'
+export type PictureLine = 'tryOnPaused' | 'full' | 'budget' | 'retryLater' | 'guard'
   | 'otherWindow' | 'otherPicture' | 'ownTryOn' | 'cleanup' | 'stopping' | 'unreadable' | 'noLocks' | 'missing' | 'offline';
 /** Why the picture being made is not moving: the provider is busy, a try-on of the owner holds it, or an outcome is being checked. */
 export type MakingReason = 'working' | 'busy' | 'holding' | 'checking';
@@ -72,7 +72,7 @@ type Locks = { request: <T>(name: string, options: { ifAvailable: true }, callba
 const lineOf: Record<Stop['reason'], PictureLine | null> = {
   busy: 'retryLater', allowance: 'budget', consent: null, full: 'full', guard: 'guard', failed: 'retryLater',
 };
-const blockLine: Partial<Record<PictureBlock, PictureLine>> = { tryOn: 'tryOnOff', photo: 'noPhoto', guard: 'guard', offline: 'offline', foreground: 'ownTryOn' };
+const blockLine: Partial<Record<PictureBlock, PictureLine>> = { guard: 'guard', offline: 'offline', foreground: 'ownTryOn' };
 
 export class PictureQueue {
   private state: PictureState = initial;
