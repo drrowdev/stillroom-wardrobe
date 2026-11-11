@@ -149,24 +149,41 @@ test.describe('try-on happy paths', () => {
     expect(api.tryonControl.requests).toHaveLength(3);
     expect(api.tryonControl.deletes).toEqual([]);
   });
-  test('a six-garment outfit sends six requests in a fixed order and leaves the second accessory out', async ({ page }) => {
+  test('a long outfit sends five requests in a fixed order, leaves the second accessory out and keeps the coat as an optional piece that is never sent', async ({ page }) => {
     engineOnly();
-    const { api } = await start(page, { outfit: 'long' });
+    const { api, clothes } = await start(page, { outfit: 'long' });
     await openTryOn(page);
     await expect(page.locator('.tryon-garments li')).toHaveText([
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.top'), name: 'Olive overshirt' }),
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.bottom'), name: 'Navy trousers' }),
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.layer'), name: 'Beige cardigan' }),
-      text('tryon.slotLine', 'en', { slot: text('tryon.slot.outerwear'), name: 'Grey coat' }),
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.footwear'), name: 'White trainers' }),
       text('tryon.slotLine', 'en', { slot: text('tryon.slot.accessory'), name: 'Silver watch' })]);
     await expect(page.getByText(text('tryon.notIncluded', 'en', { names: 'Brown belt' }), { exact: true })).toBeVisible();
+    await expect(page.getByText(text('tryon.optionalLine', 'en', { names: 'Grey coat' }), { exact: true })).toBeVisible();
     await preparePhoto(page);
     await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 40_000 });
-    checkRequests(api, 6);
-    expect(api.tryonControl.chains[0]!.steps.map((step) => step.slot)).toEqual(['top', 'bottom', 'layer', 'outerwear', 'footwear', 'accessory']);
-    expect(api.tryonControl.results[0]!.itemIds).toHaveLength(6);
+    checkRequests(api, 5);
+    expect(api.tryonControl.chains[0]!.steps.map((step) => step.slot)).toEqual(['top', 'bottom', 'layer', 'footwear', 'accessory']);
+    expect(api.tryonControl.chains[0]!.steps.map((step) => step.itemId)).not.toContain(clothes.coat.id);
+    expect(api.tryonControl.results[0]!.itemIds).toHaveLength(5);
+    expect(api.tryonControl.results[0]!.itemIds).not.toContain(clothes.coat.id);
     await expect(page.locator('.tryon-result figcaption')).toHaveText('Made with AI');
+  });
+  test('a coat stays in the outfit with an Optional marker, and an outfit with only a coat offers no picture', async ({ page }) => {
+    engineOnly();
+    const { api, clothes, outfitId } = await start(page, { outfit: 'long' });
+    await expect(page.locator('.outfit-composition li').filter({ hasText: 'Grey coat' })).toContainText(text('tryon.optional'));
+    await expect(page.locator('.outfit-composition li').filter({ hasText: 'Beige cardigan' })).not.toContainText(text('tryon.optional'));
+    await expect(page.locator('#tryon-open')).toBeVisible();
+    // The same coat alone: it is listed, nothing can be drawn, and no Try on is offered.
+    const coatOnly = seedOutfit(api, [clothes.coat.id], 'Just the coat');
+    await page.evaluate((id) => { location.hash = `#/outfits/${id}`; }, coatOnly);
+    await expect(page.locator('#outfit-detail-title')).toHaveText('Just the coat');
+    await expect(page.locator('.outfit-composition li').filter({ hasText: 'Grey coat' })).toContainText(text('tryon.optional'));
+    await expect(page.locator('#tryon-open')).toHaveCount(0);
+    expect(api.tryonControl.requests).toEqual([]);
+    expect(outfitId).not.toBe(coatOnly);
   });
   test('a one-piece outfit takes two steps', async ({ page }) => {
     engineOnly();

@@ -412,7 +412,7 @@ async function main() {
     // (whose final anomaly closes the shared image capacity). A three-step chain for A and a one-step chain for B, then
     // foreign-ID, no-dispatch negatives and one filtered step. The body photo goes only to the double.
     {
-      const MANIFEST = 'azure-global-image25-sunburst-tryon-v4';
+      const MANIFEST = 'azure-global-image25-sunburst-tryon-v5';
       const hex = (bytes) => createHash('sha256').update(bytes).digest('hex');
       const id = (owner, n) => gateId(owner.label, n, '9');
       const person = (height = 1280, colour = undefined) => flatBaselineJpeg(1024, height, colour);

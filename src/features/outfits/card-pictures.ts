@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import type { TryOnClient, TryOnResult } from '../../data/tryon';
-import { newestOutfitPicture, plannedKey } from '../../domain/outfitgen-pictures';
+import { newestOutfitPicture, sameSetOf } from '../../domain/outfitgen-pictures';
 import type { OutfitComponent, OutfitRecord } from '../../domain/outfits';
 import { tryOnStoreFor } from '../settings/tryon-store';
 import { tryOnSelection, useTryOnStatus } from './use-try-on';
@@ -71,7 +71,7 @@ export function useOutfitListPictures(client: AppClient, scope: OwnerScope, onli
     const found = new Map<string, string>();
     if (!results.length || !outfits || !components) return found;
     for (const outfit of outfits) {
-      const match = newestOutfitPicture(results, outfit.id, plannedKey(tryOnSelection(outfit, components).steps));
+      const match = newestOutfitPicture(results, outfit.id, sameSetOf(tryOnSelection(outfit, components)));
       if (match) found.set(outfit.id, match.id);
     }
     return found;

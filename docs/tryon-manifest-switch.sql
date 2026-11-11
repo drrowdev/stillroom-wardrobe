@@ -1,4 +1,4 @@
--- TRYON-PROMPT2: the guarded move of the try-on manifest (docs/cloud-development.md). The owner runs it with the two placeholders replaced:
+-- TRYON-PROMPT2/3: the guarded move of the try-on manifest (docs/cloud-development.md; v3 to v4 in TRYON-PROMPT2, v4 to v5 in TRYON-PROMPT3). The owner runs it with the two placeholders replaced:
 -- <from> (the manifest id every configured account must be on now) and <to> (the new one). The same text moves the accounts back (swap <from>
 -- and <to>). It is one transaction. It moves every configured account at once because the try-on Edge function and the app accept
 -- exactly one manifest: an account left behind would fail closed after the redeploy.
@@ -14,7 +14,8 @@
 -- end an abandoned chain, then run it again; these predicates are unrestricted by age and are the drain check, unlike the 10-minute
 -- threshold of tryon_purge_health().heldUsage). Because it refuses while a chain runs, no chain continues across the move: all steps of a
 -- chain use one manifest. It writes nothing but tryon_manifest_id (and updated_at): consent, the notice revision, the limits and the saved
--- reference photo stay. Run it only after the prompt v4 migration is installed. If a read-back ever shows a MIXED v3/v4 state, this text
+-- reference photo stay. Run it only after the migration that installs <to> (prompt v4 or v5) is installed. If a read-back ever shows a MIXED
+-- state (for example some accounts on v4 and some on v5), this text
 -- refuses (an account differs from <from>); use docs/tryon-manifest-recover-owner.sql, which needs its own authorisation.
 begin;
 set local lock_timeout = '10s';

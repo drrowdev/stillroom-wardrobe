@@ -60,7 +60,9 @@ async function usablePhoto(page: Page) {
   }));
 }
 
-type Start = { beforeSignIn?: (api: Api, clothes: Clothes) => void | Promise<void>; shortPlan?: boolean; tryOn?: boolean; photo?: boolean; outfitConsent?: boolean; hash?: string; replies?: Api['tryonControl']['replies']; language?: Language };
+type Start = { beforeSignIn?: (api: Api, clothes: Clothes) => void | Promise<void>; shortPlan?: boolean; tryOn?: boolean; photo?: boolean; outfitConsent?: boolean; hash?: string; replies?: Api['tryonControl']['replies']; language?: Language;
+  /** Replaces the two default suggestions (TRYON-PROMPT3: outfits with coats). */
+  sets?: (clothes: Clothes, api: Api) => ReturnType<typeof sets> };
 async function start(page: Page, options: Start = {}, existing?: { api: Api; clothes: Clothes }) {
   // Playwright's WebKit route interception reports an empty body for Blob uploads, so there the try-on POST is re-sent as an ArrayBuffer.
   if (test.info().project.name === 'webkit-photo') {
@@ -82,7 +84,7 @@ async function start(page: Page, options: Start = {}, existing?: { api: Api; clo
   const clothes = existing?.clothes ?? seed(api);
   api.outfitgenControl.setup[owners.a] = { configured: true, activated: true };
   if (options.outfitConsent !== false) api.outfitgenControl.consent[owners.a] = OUTFITGEN_NOTICE_REVISION;
-  for (const entry of sets(clothes)) api.outfitgenControl.suggestions.push({ id: randomUUID(), owner: owners.a, state: 'suggested', ...entry });
+  for (const entry of options.sets ? options.sets(clothes, api) : sets(clothes)) api.outfitgenControl.suggestions.push({ id: randomUUID(), owner: owners.a, state: 'suggested', ...entry });
   // Two tops make a plan of one step: too short to get a picture.
   if (options.shortPlan) api.outfitgenControl.suggestions.push({ id: randomUUID(), owner: owners.a, state: 'suggested', itemIds: [clothes.shirt.id, clothes.top2.id],
     title: 'Two tops', reason: 'Just tops.', occasion: 'home', score: 8, createdAt: created() });
@@ -836,5 +838,96 @@ test.describe('PICTURES-WAIT1 pictures wait, lines and progress', () => {
     expect(await section(page).locator('.suggested-pass').evaluate((node) => node.closest('[aria-live], [role="status"]') === null)).toBe(true);
     pass.release();
     picture.release();
+  });
+});
+
+// TRYON-PROMPT3: coats are optional pieces that are never drawn, so outfits that differ only by their coat share one picture, and a picture
+// made before (with a coat) belongs only to an outfit with that same coat.
+test.describe('TRYON-PROMPT3 outfits with coats', () => {
+  const withCoats = (names: string[]) => (clothes: Clothes, api: Api) => {
+    const coats = names.map((title) => { const { item } = api.seedSavedItem('a', title); Object.assign(item as Row, { category: 'outerwear', seasons: ['autumn'], formality: 2 }); return item as Row & { id: string }; });
+    return coats.map((coat, at) => ({ itemIds: [clothes.shirt.id, clothes.trousers.id, clothes.boots.id, coat.id], title: `Look ${names[at]}`,
+      reason: 'Quiet colours that stay calm together.', occasion: 'smart', score: 9 - at, createdAt: created() }));
+  };
+  const coatIds = (api: Api, titles: string[]) => titles.map((title) => String(api.items.find((item) => item.title === title)!.id));
+
+  test('never sends a coat, shares one picture between outfits that differ only by the coat, and lists the coat as optional', async ({ page }) => {
+    const { api, clothes } = await start(page, { sets: withCoats(['Grey coat', 'Green coat']) });
+    await expect(cards(page)).toHaveCount(2);
+    await picturesShown(page, 2);
+    const [coatA, coatB] = coatIds(api, ['Grey coat', 'Green coat']);
+    const requests = requestsOf(api);
+    expect(requests.map((entry) => entry.step)).toEqual([1, 2, 3]);
+    expect(chains(api)).toHaveLength(1);
+    expect(requests.every((entry) => !(entry.itemIds ?? []).includes(coatA!) && !(entry.itemIds ?? []).includes(coatB!))).toBe(true);
+    expect(requests[0]!.itemIds).toEqual([clothes.shirt.id, clothes.trousers.id, clothes.boots.id].map(String));
+    expect(api.tryonControl.results.map((entry) => key(entry.itemIds))).toEqual([key([clothes.shirt.id, clothes.trousers.id, clothes.boots.id])]);
+    // The coat stays in each outfit, listed with its category and a plain Optional marker; the other garments carry none.
+    for (const card of [cards(page).nth(0), cards(page).nth(1)]) {
+      await expect(card.locator('.suggested-garments li')).toHaveCount(4);
+      await expect(card.locator('.suggested-garments li').nth(3)).toContainText(`${text('tryon.slot.outerwear')} · ${text('tryon.optional')}`);
+      await expect(card.locator('.suggested-garments li').nth(0)).not.toContainText(text('tryon.optional'));
+    }
+    await quiet(page, 2_000);
+    expect(requestsOf(api)).toHaveLength(3);
+  });
+
+  test('Keep one outfit and Remove the other: the shared picture survives and nothing is made again', async ({ page }) => {
+    const { api, clothes } = await start(page, { sets: withCoats(['Grey coat', 'Green coat']) });
+    await picturesShown(page, 2);
+    const drawn = key([clothes.shirt.id, clothes.trousers.id, clothes.boots.id]);
+    expect(api.tryonControl.results.map((entry) => key(entry.itemIds))).toEqual([drawn]);
+    await cards(page).nth(1).getByRole('button', { name: text('outfitgen.keepLabel', 'en', { title: 'Look Green coat' }), exact: true }).click();
+    await expect(cards(page)).toHaveCount(1);
+    await cards(page).first().getByRole('button', { name: text('outfitgen.removeLabel', 'en', { title: 'Look Grey coat' }), exact: true }).click();
+    await expect(cards(page)).toHaveCount(0);
+    await quiet(page, 4_500);
+    expect(api.tryonControl.deletes).toEqual([]);
+    expect(api.tryonControl.results.map((entry) => key(entry.itemIds))).toEqual([drawn]);
+    expect(chains(api)).toHaveLength(1);
+    // The kept outfit still shows the picture.
+    const outfitId = String(api.outfits.find((entry) => entry.title === 'Look Green coat')!.id);
+    await page.evaluate((id) => { location.hash = `#/outfits/${id}`; }, outfitId);
+    await expect(page.locator('#outfit-detail-title')).toBeVisible();
+    await expect(page.locator('.tryon-saved-list img')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('.outfit-composition li').filter({ hasText: 'Green coat' })).toContainText(text('tryon.optional'));
+  });
+
+  test('Remove deletes the picture when no other outfit has the same garments', async ({ page }) => {
+    const { api } = await start(page, { sets: withCoats(['Grey coat']) });
+    await picturesShown(page, 1);
+    const picture = api.tryonControl.results[0]!;
+    await cards(page).first().getByRole('button', { name: text('outfitgen.removeLabel', 'en', { title: 'Look Grey coat' }), exact: true }).click();
+    await expect(cards(page)).toHaveCount(0);
+    await expect.poll(() => api.tryonControl.deletes).toEqual([picture.id]);
+  });
+
+  test('a picture made before with the same coat is shown and not made again, and one with another coat is not shown for this coat', async ({ page }) => {
+    const { api, clothes } = await start(page, { sets: withCoats(['Grey coat']), beforeSignIn: (existing, items) => {
+      const other = existing.seedSavedItem('a', 'Green coat').item as Row & { id: string };
+      Object.assign(other, { category: 'outerwear' });
+      // A picture of the same outfit with the other coat, made before coats stopped being drawn.
+      existing.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId: null, image: existing.fixture, completedAtMs: Date.now() - 3_600_000,
+        itemIds: [items.shirt.id, items.trousers.id, items.boots.id, String(other.id)] });
+    } });
+    // The earlier picture shows another coat, so it is not this outfit's picture: a new one is made, without any coat.
+    await picturesShown(page, 1);
+    expect(chains(api)).toHaveLength(1);
+    const [coat] = coatIds(api, ['Grey coat']);
+    expect(requestsOf(api).every((entry) => !(entry.itemIds ?? []).includes(coat!))).toBe(true);
+    expect(key(api.tryonControl.results.at(-1)!.itemIds)).toBe(key([clothes.shirt.id, clothes.trousers.id, clothes.boots.id]));
+    expect(api.tryonControl.deletes).toEqual([]);
+  });
+
+  test('a picture made before with exactly this coat is shown and nothing is made', async ({ page }) => {
+    const { api } = await start(page, { sets: withCoats(['Grey coat']), beforeSignIn: (existing, items) => {
+      const coat = existing.items.find((item) => item.title === 'Grey coat')!;
+      existing.tryonControl.results.push({ id: randomUUID(), owner: owners.a, outfitId: null, image: existing.fixture, completedAtMs: Date.now() - 3_600_000,
+        itemIds: [items.shirt.id, items.trousers.id, items.boots.id, String(coat.id)] });
+    } });
+    await picturesShown(page, 1);
+    await quiet(page, 3_000);
+    expect(requestsOf(api)).toEqual([]);
+    expect(api.tryonControl.deletes).toEqual([]);
   });
 });

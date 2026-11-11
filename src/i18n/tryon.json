@@ -59,6 +59,8 @@
   "tryon.slot.accessory": {"en":"Accessory","fi":"Asuste","sv":"Accessoar"},
   "tryon.slotLine": {"en":"{slot}: {name}","fi":"{slot}: {name}","sv":"{slot}: {name}"},
   "tryon.notIncluded": {"en":"Not included: {names}","fi":"Ei mukana: {names}","sv":"Inte med: {names}"},
+  "tryon.optional": {"en":"Optional","fi":"Valinnainen","sv":"Valfritt"},
+  "tryon.optionalLine": {"en":"Optional: {names}","fi":"Valinnainen: {names}","sv":"Valfritt: {names}"},
   "tryon.choosePhoto": {"en":"Choose a photo of yourself","fi":"Valitse kuva itsestäsi","sv":"Välj en bild på dig själv"},
   "tryon.photoTip": {"en":"Use a full-length photo, standing and facing the camera. You can leave your face out of the frame.","fi":"Käytä kokovartalokuvaa, jossa seisot kasvot kameraan päin. Kasvojen ei tarvitse näkyä kuvassa.","sv":"Använd en helkroppsbild där du står vänd mot kameran. Ansiktet behöver inte vara med i bilden."},
   "tryon.changePhoto": {"en":"Choose another photo","fi":"Valitse toinen kuva","sv":"Välj en annan bild"},

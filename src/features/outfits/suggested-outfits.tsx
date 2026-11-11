@@ -3,9 +3,10 @@ import { Icon } from '../../app/icon';
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import { loadComponents } from '../../data/outfits';
-import { plannedKey } from '../../domain/outfitgen-pictures';
+import { findPicture, pictureKeysOf } from '../../domain/outfitgen-pictures';
 import { outfitGenLimits, type Suggestion } from '../../domain/outfitgen-app';
 import type { OutfitComponent } from '../../domain/outfits';
+import { isTryOnOptional } from '../../domain/tryon';
 import { locales, pluralText, type Language, type MessageKey, type Translate } from '../../i18n';
 import '../../i18n/outfitgen';
 import '../../i18n/tryon';
@@ -181,10 +182,10 @@ function Card({ suggestion, components, images, t, queue, pics, busy, online, on
   suggestion: Suggestion; components: ReadonlyMap<string, OutfitComponent>; images: PrivateImages; t: Translate;
   queue: PictureQueue | null; pics: PictureState | null; busy: boolean; online: boolean; onKeep: () => void; onRemove: () => void;
 }) {
-  const key = plannedKey(ideaSelection(suggestion.itemIds, components).steps);
-  const picture = key !== null ? pics?.pictures?.get(key) : undefined;
+  const keys = pictureKeysOf(ideaSelection(suggestion.itemIds, components));
+  const picture = findPicture(pics?.pictures, keys);
   const making = pics?.making?.id === suggestion.id ? pics.making : null;
-  const queued = key !== null && pics?.waiting.has(suggestion.id) === true;
+  const queued = keys.key !== null && pics?.waiting.has(suggestion.id) === true;
   return <li className="suggested-card">
     {picture && queue ? <LazyPicture key={picture.id} queue={queue} id={picture.id} title={suggestion.title} online={online} t={t} />
       : making ? <div className="tryon-frame suggested-wait">
@@ -203,7 +204,8 @@ function Card({ suggestion, components, images, t, queue, pics, busy, online, on
           <Thumb component={component} images={images} t={t} />
           <span className="suggested-garment-text">
             <span>{itemName(components, id, t)}</span>
-            {component?.category && <span className="muted">{t(slotKey(component.category))}</span>}
+            {component?.category && <span className="muted">{isTryOnOptional(component.category)
+              ? [t(slotKey(component.category)), t('tryon.optional')].join(' · ') : t(slotKey(component.category))}</span>}
           </span>
         </li>;
       })}

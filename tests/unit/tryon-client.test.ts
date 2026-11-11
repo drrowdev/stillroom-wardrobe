@@ -172,17 +172,22 @@ const chain = (over: Partial<Extract<ChainStatus, { kind: 'chain' }>>): ChainSta
   steps: plan, activeAttempt: false, resultId: null, expiresAtMs: 0, ...over });
 
 describe('the try-on run (rev4 §2.3-§3.2)', () => {
-  it('selects an idea\'s garments in the idea\'s order and lists the extra layers it leaves out', () => {
+  it('selects an idea\'s garments in the idea\'s order, keeps the coats as optional pieces and lists the extra layers it leaves out', () => {
     const piece = (id: string, category: OutfitComponent['category'], extra: Partial<OutfitComponent> = {}): [string, OutfitComponent] =>
       [id, { id, state: 'current', title: id, category, colour: null, lifecycle: 'active', thumbPath: `${id}.jpg`, altText: '', ...extra }];
     const components = new Map([piece('polo', 'top'), piece('grey', 'bottom'), piece('jacket', 'outerwear'), piece('shoes', 'footwear'),
-      piece('gone', 'top', { state: 'trashed' }), piece('plain', 'top', { thumbPath: null }), piece('coat', 'outerwear')]);
+      piece('gone', 'top', { state: 'trashed' }), piece('plain', 'top', { thumbPath: null }), piece('coat', 'outerwear'), piece('cardigan', 'layer'),
+      piece('cardigan2', 'layer')]);
     expect(ideaSelection(['polo', 'grey', 'jacket', 'shoes', 'coat'], components)).toEqual({
-      steps: [{ slot: 'top', itemId: 'polo' }, { slot: 'bottom', itemId: 'grey' }, { slot: 'outerwear', itemId: 'jacket' },
-        { slot: 'footwear', itemId: 'shoes' }],
-      notIncluded: ['coat'],
+      steps: [{ slot: 'top', itemId: 'polo' }, { slot: 'bottom', itemId: 'grey' }, { slot: 'footwear', itemId: 'shoes' }],
+      notIncluded: [], optional: ['jacket', 'coat'], legacyItemIds: ['polo', 'grey', 'shoes', 'jacket'],
+    });
+    expect(ideaSelection(['polo', 'cardigan', 'cardigan2', 'jacket'], components)).toEqual({
+      steps: [{ slot: 'top', itemId: 'polo' }, { slot: 'layer', itemId: 'cardigan' }],
+      notIncluded: ['cardigan2'], optional: ['jacket'], legacyItemIds: ['polo', 'cardigan', 'jacket'],
     });
     expect(ideaSelection(['gone', 'plain', 'unknown'], components).steps).toEqual([]);
+    expect(ideaSelection(['jacket'], components)).toEqual({ steps: [], notIncluded: [], optional: ['jacket'], legacyItemIds: ['jacket'] });
   });
   it('starts an idea chain by naming its garments, not an outfit, and only on the first step', async () => {
     const h = new Harness();
@@ -759,8 +764,8 @@ describe('the try-on client transport', () => {
     expect(reply).toMatchObject({ kind: 'intermediate', sha256: hash });
     const form = fetcher.mock.calls[0]![1]!.body as FormData;
     expect([...form.keys()].sort()).toEqual(['chainId', 'manifestId', 'outfitId', 'person', 'requestId', 'step']);
-    // The request names the v4 manifest; a v3 request would be refused by the Edge function as CONFIG_CHANGED.
-    expect(form.get('manifestId')).toBe('azure-global-image25-sunburst-tryon-v4');
+    // The request names the v5 manifest; a v4 request would be refused by the Edge function as CONFIG_CHANGED.
+    expect(form.get('manifestId')).toBe('azure-global-image25-sunburst-tryon-v5');
     expect(fetcher.mock.calls[0]![0]).toBe(`${config.url}/functions/v1/try-on`);
     fetcher.mockResolvedValueOnce(new Response(jpegBody(200), { headers: { 'content-type': 'image/jpeg' } }));
     await expect(client.step(stepInput(2), new AbortController().signal)).resolves.toEqual({ kind: 'code', code: 'OUTPUT_REJECTED' });
@@ -830,7 +835,7 @@ describe('the try-on client transport', () => {
     expect(store.get().read.kind).toBe('failed');
     expect(tryOnViewOf(store, store.get())).toMatchObject({ turnOn: false });
     expect(tryOnReady(parseTryOnStatus(statusRaw({}, { manifestId: 'azure-global-image25-sunburst-tryon-v1' })))).toBe(false);
-    // TRYON-PROMPT1/2: a database still on the v2 or v3 manifest is not accepted, even with the same notice and existing consent 3.
+    // TRYON-PROMPT1 to 3: a database still on the v2, v3 or v4 manifest is not accepted, even with the same notice and existing consent 3.
     const v2 = parseTryOnStatus(statusRaw({}, { manifestId: 'azure-global-image25-sunburst-tryon-v2' }));
     expect(v2?.consent).toMatchObject({ enabled: true, noticeRevision: 3 });
     expect(tryOnReady(v2)).toBe(false);
@@ -839,7 +844,10 @@ describe('the try-on client transport', () => {
     expect(tryOnReady(v3)).toBe(false);
     const v4 = parseTryOnStatus(statusRaw({}, { manifestId: 'azure-global-image25-sunburst-tryon-v4' }));
     expect(v4?.consent).toMatchObject({ enabled: true, noticeRevision: 3 });
-    expect(tryOnReady(v4)).toBe(true);
+    expect(tryOnReady(v4)).toBe(false);
+    const v5 = parseTryOnStatus(statusRaw({}, { manifestId: 'azure-global-image25-sunburst-tryon-v5' }));
+    expect(v5?.consent).toMatchObject({ enabled: true, noticeRevision: 3 });
+    expect(tryOnReady(v5)).toBe(true);
     expect(tryOnReady(parseTryOnStatus(statusRaw({}, { noticeRevision: TRYON_NOTICE_REVISION - 1 })))).toBe(false);
     // After the deploys, a later read (a reloaded app) parses and Try on is offered again.
     fetcher.mockResolvedValueOnce(Response.json(statusRaw()));

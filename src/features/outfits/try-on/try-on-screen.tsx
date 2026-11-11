@@ -205,6 +205,7 @@ function Prepare({ store, selection, components, online, t, create, go, forcePic
       {selection.steps.map(step => <li key={step.itemId}>{t('tryon.slotLine', { slot: t(slotKey(step.slot)), name: itemName(components, step.itemId, t) })}</li>)}
     </ul>
     {selection.notIncluded.length > 0 && <p className="muted">{t('tryon.notIncluded', { names: selection.notIncluded.map(item => itemName(components, item, t)).join(', ') })}</p>}
+    {selection.optional.length > 0 && <p className="muted">{t('tryon.optionalLine', { names: selection.optional.map(item => itemName(components, item, t)).join(', ') })}</p>}
   </>;
   if (count === 0) return <p className="notice" role="status">{t('tryon.noGarments')}</p>;
   if (!go) return <div className="stack">

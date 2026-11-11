@@ -34,15 +34,49 @@ export function plannedKey(steps: readonly { itemId: string }[]): string | null 
 }
 
 /**
- * K2: whether a saved result belongs to a saved outfit: its own result, or an idea picture (no outfit) of exactly the outfit's
- * planned garment set (`sameSet`, from plannedKey; null when the outfit has no plan).
+ * Where a picture of a plan is found (TRYON-PROMPT3). A picture made from manifest v5 on has exactly the drawn garments, so `key` is the
+ * drawn set. A picture made before v5 also drew the outfit's first coat: `legacyKey` is that exact set (the drawn garments plus that
+ * coat), so imagery of one coat never stands for another, and a plan without a coat has none.
  */
-export function belongsToOutfit(result: Pick<PictureResult, 'outfitId' | 'itemIds'>, outfitId: string, sameSet: string | null): boolean {
-  return result.outfitId === outfitId || (sameSet !== null && result.outfitId === null && pictureKey(result.itemIds) === sameSet);
+export type PictureKeys = { key: string | null; legacyKey: string | null };
+export function pictureKeysOf(selection: { steps: readonly { itemId: string }[]; legacyItemIds: readonly string[] | null }): PictureKeys {
+  const legacy = selection.legacyItemIds;
+  const legacyKey = legacy !== null && legacy.length >= PICTURE_LIMITS.minSteps && legacy.length <= TRYON_MAX_STEPS ? pictureKey(legacy) : null;
+  return { key: plannedKey(selection.steps), legacyKey };
+}
+const keysList = (keys: PictureKeys | string | null): string[] =>
+  keys === null ? [] : typeof keys === 'string' ? keys.split('|').filter((entry) => entry !== '')
+    : [keys.key, keys.legacyKey].filter((entry): entry is string => entry !== null);
+/**
+ * The keys of a plan as one string (a drawn-set key, then the pre-v5 key, joined by "|"), or null when it has none: a stable value for
+ * props and effect dependencies. belongsToOutfit and findPicture take it as they take PictureKeys.
+ */
+export function sameSetOf(selection: Parameters<typeof pictureKeysOf>[0]): string | null {
+  const keys = keysList(pictureKeysOf(selection));
+  return keys.length > 0 ? keys.join('|') : null;
+}
+/** Whether a picture exists under either key. */
+export const hasPicture = (have: ReadonlyMap<string, unknown>, keys: PictureKeys | string | null): boolean => keysList(keys).some((key) => have.has(key));
+/** The newest picture under either key, or undefined. */
+export function findPicture<R extends { completedAtMs: number }>(index: ReadonlyMap<string, R> | null | undefined, keys: PictureKeys | string | null): R | undefined {
+  let newest: R | undefined;
+  for (const key of keysList(keys)) {
+    const found = index?.get(key);
+    if (found && (newest === undefined || found.completedAtMs > newest.completedAtMs)) newest = found;
+  }
+  return newest;
+}
+
+/**
+ * K2: whether a saved result belongs to a saved outfit: its own result, or an idea picture (no outfit) of exactly the outfit's
+ * planned garment set (`sameSet`, from plannedKey or pictureKeysOf; null when the outfit has no plan).
+ */
+export function belongsToOutfit(result: Pick<PictureResult, 'outfitId' | 'itemIds'>, outfitId: string, sameSet: PictureKeys | string | null): boolean {
+  return result.outfitId === outfitId || (result.outfitId === null && keysList(sameSet).includes(pictureKey(result.itemIds)));
 }
 
 /** The newest saved result that belongs to the outfit (see belongsToOutfit), or null. */
-export function newestOutfitPicture<R extends PictureResult>(results: readonly R[], outfitId: string, sameSet: string | null): R | null {
+export function newestOutfitPicture<R extends PictureResult>(results: readonly R[], outfitId: string, sameSet: PictureKeys | string | null): R | null {
   let newest: R | null = null;
   for (const result of results) {
     if (belongsToOutfit(result, outfitId, sameSet) && (newest === null || result.completedAtMs > newest.completedAtMs)) newest = result;
@@ -92,13 +126,14 @@ export function pictureBlock(input: PictureInputs): PictureBlock | null {
   return null;
 }
 
-export type PictureCandidate = { id: string; key: string | null };
+export type PictureCandidate = { id: string; key: string | null; legacyKey?: string | null };
 export type TargetState = {
   have: ReadonlyMap<string, unknown>; attempts: ReadonlyMap<string, number>; skipped: ReadonlySet<string>; excluded: ReadonlySet<string>;
 };
 /** The suggestions the queue would make a picture for, in list order, fewest attempts first (a retry comes after the others). */
 export function pictureTargets<T extends PictureCandidate>(list: readonly T[], state: TargetState): T[] {
-  const eligible = list.filter((entry) => entry.key !== null && !state.have.has(entry.key) && !state.skipped.has(entry.id)
+  const eligible = list.filter((entry) => entry.key !== null && !hasPicture(state.have, { key: entry.key, legacyKey: entry.legacyKey ?? null })
+    && !state.skipped.has(entry.id)
     && !state.excluded.has(entry.id) && (state.attempts.get(entry.id) ?? 0) < PICTURE_LIMITS.maxAttempts);
   const seen = new Set<string>();
   // Two suggestions with the same planned set share one picture.

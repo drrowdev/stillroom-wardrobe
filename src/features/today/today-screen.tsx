@@ -322,13 +322,13 @@ function UndoPair({ t, online, locked, pending, failed, unresolved, onUndo, onRe
   </div>;
 }
 
-function Pieces({ ids, byId, images, t }: { ids: readonly string[]; byId: ReadonlyMap<string, WardrobeItem>; images: PrivateImages; t: Translate }) {
+function Pieces({ ids, byId, images, t, optionalMark = false }: { ids: readonly string[]; byId: ReadonlyMap<string, WardrobeItem>; images: PrivateImages; t: Translate; optionalMark?: boolean }) {
   return <ul className="today-pieces">
     {ids.map(id => {
       const item = byId.get(id);
       if (!item) return null;
       const component = pickerComponent(item);
-      return <li key={id} className="outfit-component"><OutfitThumb component={component} images={images} t={t} /><ComponentText component={component} t={t} /></li>;
+      return <li key={id} className="outfit-component"><OutfitThumb component={component} images={images} t={t} /><ComponentText component={component} t={t} optionalMark={optionalMark} /></li>;
     })}
   </ul>;
 }
@@ -403,7 +403,7 @@ function Idea({ suggestion, number, total, byId, images, t, list, online, vote, 
   const wearDisabled = !online || pairing || wearBlocked || locked;
   return <article ref={card} data-idea={suggestion.key} className="today-card today-featured" aria-labelledby={titleOf(suggestion.key)}>
     {heading}
-    <Pieces ids={suggestion.itemIds} byId={byId} images={images} t={t} />
+    <Pieces ids={suggestion.itemIds} byId={byId} images={images} t={t} optionalMark />
     {suggestion.reasons.length > 0 && <ul className="today-reasons">{suggestion.reasons.map(reason => <li key={reason.key}><Icon name="check" />{t(reasonKeys[reason.key])}</li>)}</ul>}
     {notes(suggestion).map(key => <p key={key} className="today-missing">{t(key)}</p>)}
     {!suggestion.weatherNeeds && suggestion.missingSlots.length > 0 && <p className="today-missing">{t('today.missing', { categories: list(suggestion.missingSlots) })}</p>}

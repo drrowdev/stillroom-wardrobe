@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
-import { TRYON_PARAMETERS, TRYON_PROMPTS, TRYON_SETTINGS } from '../../src/domain/tryon';
+import { TRYON_PARAMETERS } from '../../src/domain/tryon';
+import { TRYON_V4_PROMPTS, TRYON_V4_SETTINGS } from '../fixtures/tryon-v4-frozen';
 
 // TRYON-PROMPT2 source pins: the v4 manifest changes only the layer and outerwear wording and is installed inert (the claim admits v3 and
 // v4); the owner's guarded switch moves the accounts. The CI preservation job proves the migration and the switch against the real schema;
@@ -81,7 +82,7 @@ describe('TRYON-PROMPT2 migration', () => {
 
   it('pins the v4 manifest row: new prompt and settings hashes, the unchanged parameter hash and the v3 envelope', async () => {
     const sql = await read(MAIN);
-    for (const hash of [sha(JSON.stringify(TRYON_PROMPTS)), sha(JSON.stringify(TRYON_PARAMETERS)), sha(JSON.stringify(TRYON_SETTINGS))]) {
+    for (const hash of [sha(JSON.stringify(TRYON_V4_PROMPTS)), sha(JSON.stringify(TRYON_PARAMETERS)), sha(JSON.stringify(TRYON_V4_SETTINGS))]) {
       expect(sql).toContain(`'${hash}'`);
     }
     expect(sql).toContain(`${V4},'gpt-image-2.5-sunburst',4,`);

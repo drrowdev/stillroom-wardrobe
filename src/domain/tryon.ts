@@ -4,15 +4,17 @@
 
 // Manifest v2 (TRYON-LIMITS1) added the layer, outerwear and accessory prompts, six chained garments and results kept until the owner
 // deletes them. Manifest v3 (TRYON-PROMPT1) changes only the layer and outerwear wording so a coat or jacket with a front opening is
-// shown open. Manifest v4 (TRYON-PROMPT2) rewords those two again so a pullover is never given a zip or an opening. Manifests v1 to
-// v3 stay installed unchanged; their frozen prompts and settings are pinned in tests/fixtures/tryon-v{1,2,3}-frozen.ts.
-export const TRYON_MANIFEST = 'azure-global-image25-sunburst-tryon-v4';
+// shown open. Manifest v4 (TRYON-PROMPT2) rewords those two again so a pullover is never given a zip or an opening. Manifest v5
+// (TRYON-PROMPT3) adds a hem-length sentence to the top, one-piece and layer prompts and stops drawing outerwear (a coat or jacket stays in
+// the outfit as an optional piece). Manifests v1 to v4 stay installed unchanged; their frozen prompts and settings are pinned in
+// tests/fixtures/tryon-v{1,2,3,4}-frozen.ts.
+export const TRYON_MANIFEST = 'azure-global-image25-sunburst-tryon-v5';
 export const TRYON_MODEL = 'gpt-image-2.5-sunburst';
 export const TRYON_DEPLOYMENT = 'eval-image25-sunburst-20260908';
 // The same immutable provider identity as photo enhancement: both features share its capacity and switch (ADR28).
 export const TRYON_DEPLOYMENT_KEY = 'stillroom-ai-eval/eval-image25-sunburst-20260908/2026-09-08';
 export const TRYON_ENDPOINT = 'https://stillroom-ai-eval.openai.azure.com/openai/v1/images/edits';
-export const TRYON_PROMPT_VERSION = 4;
+export const TRYON_PROMPT_VERSION = 5;
 // Revision 3 is the notice that says a saved picture stays until the owner deletes it (TRYON-LIMITS1); revision 2 stated the one
 // reusable reference photo (TRYON-PHOTO1) and revision 1 was never kept. The deployed Edge function checks the configured
 // revision for equality with this constant, so the Edge function must be redeployed together with the migration that moves the
@@ -61,9 +63,16 @@ const OPEN_RULES = 'Copy the garment\'s construction from image 2; never invent 
   + 'top or other clothing, or reveal clothing hidden by another closed layer. '
   + `${PERSON_KEEP}Preserve the garment's colour, pattern, logos, length, cut and design; when worn open, change only the fastening `
   + 'and drape.';
+// TRYON-PROMPT3: the image model sees a flat or cropped garment photo and guessed where the hem falls, so shirts and jackets came out
+// hiked up at the belt line. Fixed words, only added to the top, one-piece and layer prompts; the layer also keeps what is worn underneath
+// at its own length. Outerwear is no longer drawn (it stays an optional piece of the outfit), so its prompt is the v4 text, unused.
+const LENGTH_RULE = 'Show the garment at the full length it has in image 2, with its hem falling where it would on a person of this '
+  + 'build; do not shorten, crop, tuck in or hike it up.';
+const UNDERNEATH_RULE = 'Keep the full length of the clothing underneath; its hem stays visible below this garment if it is longer.';
+const REPLACING_LONG = `${REPLACING} ${LENGTH_RULE}`;
 const TRYON_SLOT_ACTIONS: Readonly<Record<TryOnSlot, string>> = Object.freeze({
-  top: REPLACING, bottom: REPLACING, one_piece: REPLACING, footwear: REPLACING,
-  layer: `Show the same person wearing this garment over their existing clothing. ${OPEN_RULES}`,
+  top: REPLACING_LONG, bottom: REPLACING, one_piece: REPLACING_LONG, footwear: REPLACING,
+  layer: `Show the same person wearing this garment over their existing clothing. ${OPEN_RULES} ${LENGTH_RULE} ${UNDERNEATH_RULE}`,
   outerwear: `Show the same person wearing this garment as the outermost layer over their existing clothing. ${OPEN_RULES}`,
   accessory: 'Show the same person wearing or carrying this item in the natural place for it, adding it without removing or '
     + 'changing any clothing. Keep the person\'s face, hair, skin, body shape, pose, clothing and background unchanged. '
@@ -125,7 +134,16 @@ export type TryOnCandidate = {
   readyImage: boolean;
 };
 export type TryOnStep = { slot: TryOnSlot; itemId: string };
-export type TryOnSelection = { steps: TryOnStep[]; notIncluded: string[] };
+/**
+ * `optional` are the outerwear pieces of the outfit: they stay in it but are never drawn (TRYON-PROMPT3). `legacyItemIds` is the garment
+ * set a manifest before v5 would have drawn (the steps plus the first outerwear piece), or null without outerwear; only an exact match of
+ * that set finds a picture made before v5, so a picture of one coat never stands for another.
+ */
+export type TryOnSelection = { steps: TryOnStep[]; notIncluded: string[]; optional: string[]; legacyItemIds: string[] | null };
+
+/** Categories that belong to an outfit but are never drawn in a picture. */
+export const TRYON_OPTIONAL_CATEGORIES: readonly string[] = ['outerwear'];
+export const isTryOnOptional = (category: string | null | undefined): boolean => category != null && TRYON_OPTIONAL_CATEGORIES.includes(category);
 
 const eligible = (item: TryOnCandidate) => item.lifecycle === 'active' && !item.deleted && item.readyImage;
 const first = (items: readonly TryOnCandidate[], category: Category) =>
@@ -133,12 +151,13 @@ const first = (items: readonly TryOnCandidate[], category: Category) =>
 
 /**
  * Deterministic garment chain for a saved outfit, in the outfit's saved order, one garment per slot: a one-piece replaces the
- * top and bottom steps; otherwise top then bottom; then layer, outerwear, footwear and one accessory. At most six steps.
- * A second layer, outerwear piece or accessory is listed as not included; archived, sold, donated, deleted or photo-less
- * items are skipped. The SQL copy is private.tryon_select_steps / tryon_select_idea_steps.
+ * top and bottom steps; otherwise top then bottom; then layer, footwear and one accessory. At most six steps. Outerwear is not a step
+ * from manifest v5 on: it is listed as optional. A second layer or accessory is listed as not included; archived, sold, donated,
+ * deleted or photo-less items are skipped. The SQL copy is private.tryon_select_steps / tryon_select_idea_steps, whose v5 result
+ * private.tryon_drawn_steps trims in the same way.
  */
-export const TRYON_STEP_ORDER = ['top', 'bottom', 'layer', 'outerwear', 'footwear', 'accessory'] as const;
-export const TRYON_ONE_PIECE_STEP_ORDER = ['one_piece', 'layer', 'outerwear', 'footwear', 'accessory'] as const;
+export const TRYON_STEP_ORDER = ['top', 'bottom', 'layer', 'footwear', 'accessory'] as const;
+export const TRYON_ONE_PIECE_STEP_ORDER = ['one_piece', 'layer', 'footwear', 'accessory'] as const;
 export function selectTryOnSteps(items: readonly TryOnCandidate[]): TryOnSelection {
   const order: readonly TryOnSlot[] = first(items, 'one_piece') ? TRYON_ONE_PIECE_STEP_ORDER : TRYON_STEP_ORDER;
   const steps = order.flatMap((slot) => {
@@ -146,7 +165,9 @@ export function selectTryOnSteps(items: readonly TryOnCandidate[]): TryOnSelecti
     return item ? [{ slot, itemId: item.itemId }] : [];
   }).slice(0, TRYON_MAX_STEPS);
   const picked = new Set(steps.map((step) => step.itemId));
-  const notIncluded = items.filter((item) => ['layer', 'outerwear', 'accessory'].includes(item.category) && eligible(item)
+  const notIncluded = items.filter((item) => ['layer', 'accessory'].includes(item.category) && eligible(item)
     && !picked.has(item.itemId)).map((item) => item.itemId);
-  return { steps, notIncluded };
+  const optional = items.filter((item) => item.category === 'outerwear' && eligible(item)).map((item) => item.itemId);
+  const legacyItemIds = optional.length > 0 ? [...steps.map((step) => step.itemId), optional[0]!] : null;
+  return { steps, notIncluded, optional, legacyItemIds };
 }

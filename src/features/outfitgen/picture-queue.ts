@@ -9,18 +9,18 @@
 import type { OwnerScope } from '../../auth/session';
 import type { AppClient } from '../../data/client';
 import type { PublicConfig } from '../../data/config';
-import { loadComponents } from '../../data/outfits';
+import { loadComponents, loadOutfits, loadTrashedOutfits } from '../../data/outfits';
 import { tryOnReady, supportedTryOnPolicy, type TryOnResult } from '../../data/tryon';
 import { AI_GUARD_RESUMED_EVENT } from '../../domain/ai-guard';
 import type { TryOnStep } from '../../domain/tryon';
 import type { OutfitComponent } from '../../domain/outfits';
 import type { Suggestion } from '../../domain/outfitgen-app';
 import {
-  addStepSample, classifyFailure, estimateMinutesLeft, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureTargets, plannedKey, removableResults,
-  reserveBlock, reservedGate, slowStepMs,
-  type PictureBlock, type PictureResult, type ReservedMemory,
+  addStepSample, classifyFailure, estimateMinutesLeft, hasPicture, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKeysOf, pictureTargets,
+  removableResults, reserveBlock, reservedGate, slowStepMs,
+  type PictureBlock, type PictureKeys, type PictureResult, type ReservedMemory,
 } from '../../domain/outfitgen-pictures';
-import { TryOnRun, browserEnvironment, ideaSelection, type RunEnvironment, type RunGate, type RunPhase } from '../outfits/use-try-on';
+import { TryOnRun, browserEnvironment, ideaSelection, tryOnSelection, type RunEnvironment, type RunGate, type RunPhase } from '../outfits/use-try-on';
 import { loadPersonPhoto, readPersonPhoto } from '../settings/tryon-photo';
 import { readTryOnStatus, tryOnStoreFor, type TryOnStore } from '../settings/tryon-store';
 import { outfitGenStoreFor, readList, readStatus, viewOf, type OutfitGenStore } from './outfitgen-store';
@@ -212,21 +212,47 @@ export class PictureQueue {
       if (!await this.chainEnded(open)) return false;
       this.openChains.delete(suggestion.id);
     }
-    const resolved = await this.keyOf(suggestion);
+    const resolved = await this.keysOf(suggestion);
     if (resolved === 'unresolved') return false;
-    // A plan too short for a picture never had one made: there is nothing to delete.
-    if (resolved === null) return true;
-    const key = resolved;
+    // A plan that never had a picture (too short to get one) has nothing to delete.
+    if (resolved.key === null && resolved.legacyKey === null) return true;
     const fresh = await this.tryOn.api.results().catch(() => null);
     if (this.disposed) return true;
     if (fresh === null || fresh === 'missing') return false;
+    const doomed = new Set<string>();
+    // A picture made before v5 names this suggestion's own coat, so it is this suggestion's alone.
+    if (resolved.legacyKey !== null) for (const id of removableResults(fresh, resolved.legacyKey, suggestion.createdAtMs)) doomed.add(id);
+    // A picture of the drawn garments (no coat) is shared by every outfit that differs from this one only by its coat, and by a plain
+    // one. It goes only when no waiting suggestion and no saved outfit has the same drawn set; when that cannot be established it stays,
+    // for the owner to delete under Today's try-ons.
+    if (resolved.key !== null) {
+      const own = removableResults(fresh, resolved.key, suggestion.createdAtMs);
+      if (own.length > 0) {
+        const shared = await this.drawnSetShared(suggestion, resolved.key);
+        if (shared === 'unknown') return false;
+        if (!shared) for (const id of own) doomed.add(id);
+      }
+    }
     let ok = true;
-    for (const id of removableResults(fresh, key, suggestion.createdAtMs)) {
+    for (const id of doomed) {
       const outcome = await this.tryOn.api.deleteResult(id).catch(() => null);
       if (this.disposed) return true;
       if (outcome === null) ok = false;
     }
     return ok;
+  }
+  /** Whether another waiting suggestion or a saved outfit (trashed ones included) plans exactly this drawn set; `unknown` if that cannot be read. */
+  private async drawnSetShared(suggestion: Suggestion, key: string): Promise<boolean | 'unknown'> {
+    const others = this.outfit.get().list.suggestions.filter((entry) => entry.id !== suggestion.id && this.intents.get(entry.id) !== 'remove'
+      && !this.deleting.has(entry.id) && !this.pending.has(entry.id));
+    if (!await this.ensureComponents(others)) return 'unknown';
+    if (others.some((entry) => pictureKeysOf(ideaSelection(entry.itemIds, this.components)).key === key)) return true;
+    try {
+      const records = [...await loadOutfits(this.client, this.scope, this.scope.signal), ...await loadTrashedOutfits(this.client, this.scope, this.scope.signal)];
+      const wanted = [...new Set(records.flatMap((record) => record.links.map((link) => link.itemId)))].filter((id) => !this.components.has(id));
+      if (wanted.length > 0) for (const [id, component] of await loadComponents(this.client, this.scope, wanted, this.scope.signal)) this.components.set(id, component);
+      return records.some((record) => pictureKeysOf(tryOnSelection(record, this.components)).key === key);
+    } catch { return 'unknown'; }
   }
   /**
    * Whether the chain is over: it shows a terminal state, or a cancel is confirmed (the cancel is sent again here, so a failed one is retried).
@@ -436,11 +462,10 @@ export class PictureQueue {
       return true;
     } catch { return false; }
   }
-  /** The planned set's key, 
-ull for a plan too short to get a picture, or 'unresolved' when the garments could not be read. */
-  private async keyOf(suggestion: Suggestion): Promise<string | null | 'unresolved'> {
+  /** The plan's keys (the drawn set, and the exact pre-v5 set), or 'unresolved' when the garments could not be read. */
+  private async keysOf(suggestion: Suggestion): Promise<PictureKeys | 'unresolved'> {
     if (!await this.ensureComponents([suggestion])) return 'unresolved';
-    return plannedKey(ideaSelection(suggestion.itemIds, this.components).steps);
+    return pictureKeysOf(ideaSelection(suggestion.itemIds, this.components));
   }
 
   private async underLock(): Promise<'ran' | 'idle'> {
@@ -472,8 +497,9 @@ ull for a plan too short to get a picture, or 'unresolved' when the garments cou
     const list = o.get().list.suggestions;
     if (!await this.ensureComponents(list)) return this.idle('unreadable', PICTURE_LIMITS.pollMs);
     const candidates = list.map((entry) => {
-      const steps = ideaSelection(entry.itemIds, this.components).steps;
-      return { id: entry.id, key: plannedKey(steps), steps };
+      const selection = ideaSelection(entry.itemIds, this.components);
+      const keys = pictureKeysOf(selection);
+      return { id: entry.id, key: keys.key, legacyKey: keys.legacyKey, steps: selection.steps };
     });
     const have = pictureIndex(ready);
     const excluded = new Set([...this.intents.keys(), ...this.deleting, ...this.pending.keys()]);
@@ -483,10 +509,11 @@ ull for a plan too short to get a picture, or 'unresolved' when the garments cou
       this.finished = 0;
       this.queued.clear();
       // Outfits that have no picture and will not get one on their own (skipped, failed twice, or a plan too short for a picture) are said,
-      // not left unexplained. A too-short plan counts by suggestion; suggestions sharing a planned set share one picture.
+      // not left unexplained. A too-short plan counts by suggestion; suggestions sharing a planned set share one picture. A picture made
+      // before v5 for the same garments and the same coat counts as the picture.
       const open = candidates.filter((entry) => !excluded.has(entry.id));
-      const missing = open.filter((entry) => entry.key === null).length
-        + new Set(open.filter((entry) => entry.key !== null && !have.has(entry.key)).map((entry) => entry.key)).size;
+      const missing = open.filter((entry) => entry.key === null && !hasPicture(have, entry.legacyKey)).length
+        + new Set(open.filter((entry) => entry.key !== null && !hasPicture(have, entry)).map((entry) => entry.key)).size;
       return this.idle(missing > 0 ? 'missing' : null, null, { done, total: done, missing });
     }
     const target = targets[0]!;
