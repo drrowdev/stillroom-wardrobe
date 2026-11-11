@@ -66,6 +66,7 @@ describe('I15 suggestion data', () => {
   it('highlights Today in the navigation, also while an idea is being tried on', () => {
     expect(navFamilyFor('today')).toBe('today');
     expect(navFamilyFor('today-try-on')).toBe('today');
+    expect(navFamilyFor('stylist-try-on')).toBe('today');
   });
 });
 

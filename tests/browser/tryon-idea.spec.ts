@@ -339,6 +339,116 @@ test.describe('try on an unsaved Today idea', () => {
   }
 });
 
+// TRYON-STYLIST1: the same Try on on the Stylist's idea cards, against the mocked stylist and try-on backends.
+test.describe('try on an unsaved Stylist idea', () => {
+  const stylistTryOn = (page: Page) => page.locator('.stylist-ideas .today-card .today-tryon');
+  const message = (page: Page) => page.locator('#stylist-message');
+  async function startStylist(page: Page, options: Start = {}) {
+    const started = await start(page, { ...options, preload: api => {
+      Object.assign(api.seedSavedItem('a', 'Wool coat').item as Row, { category: 'outerwear', seasons: ['spring', 'summer', 'autumn', 'winter'], formality: 1 });
+    } });
+    const { api } = started;
+    const mine = (title: string) => (api.items as Row[]).find(row => row.title === title)!.id as string;
+    const ids = { top: mine('Olive overshirt'), trousers: mine('Navy trousers'), shoes: mine('White trainers'), coat: mine('Wool coat') };
+    api.stylistControl.setup[owners.a] = { configured: true, activated: true };
+    api.stylistControl.consent[owners.a] = 1;
+    api.stylistControl.replies.push({ status: 200, body: { code: 'OK', reply: 'Two ideas.', outfits: [
+      { itemIds: [ids.top, ids.trousers, ids.shoes], note: 'Simple.' },
+      { itemIds: [ids.top, ids.trousers, ids.shoes, ids.coat], note: '' }] } });
+    await page.evaluate(() => { location.hash = '#/stylist'; });
+    await expect(page.locator('#stylist-title')).toBeVisible();
+    await message(page).fill('Dinner on Friday');
+    await page.getByRole('button', { name: text('stylist.send', options.language ?? 'en'), exact: true }).click();
+    await expect(page.locator('.stylist-ideas .today-card')).toHaveCount(2);
+    return { ...started, ids };
+  }
+
+  test('opens a try-on of that idea\'s garments only, keeps the coat optional, and Back returns to the conversation', async ({ page }) => {
+    const { api, ids } = await startStylist(page);
+    await expect(stylistTryOn(page)).toHaveCount(2);
+    await expect(stylistTryOn(page).first()).toHaveText(text('tryon.ideaOpen'));
+    const idea = page.locator('.stylist-ideas .today-card').nth(1);
+    await expect(idea.locator('.outfit-component-state')).toHaveText(text('tryon.optional'));
+    await message(page).fill('Something warmer');
+    await idea.locator('.today-tryon').click();
+    await expect(page).toHaveURL(/#\/stylist\/try-on$/);
+    await expect(page.locator('#tryon-title')).toBeFocused();
+    await expect(page.locator('.tryon-garments li')).toHaveCount(3);
+    await expect(page.locator('.tryon-page')).toContainText(text('tryon.optionalLine', 'en', { names: 'Wool coat' }));
+    expect(api.tryonControl.requests).toHaveLength(0);
+    await preparePhoto(page);
+    await expect(page.locator('.tryon-result img')).toBeVisible({ timeout: 20_000 });
+    const requests = api.tryonControl.requests;
+    expect(requests.map(entry => entry.step)).toEqual([1, 2, 3]);
+    expect(requests[0]!.itemIds).toEqual([ids.top, ids.trousers, ids.shoes]);
+    expect(requests.map(entry => entry.outfitId)).toEqual([null, null, null]);
+    noWrites(api);
+    await page.locator('#tryon-done').click();
+    await expect(page).toHaveURL(/#\/stylist$/);
+    await expect(page.locator('#stylist-title')).toBeFocused();
+    await expect(page.locator('.stylist-ideas .today-card')).toHaveCount(2);
+    await expect(page.locator('.stylist-assistant .stylist-text').first()).toHaveText('Two ideas.');
+    await expect(message(page)).toHaveValue('Something warmer');
+    noWrites(api);
+  });
+
+  test('Back sends nothing, and a reload on the try-on route returns to a fresh Stylist', async ({ page }) => {
+    engineOnly();
+    const { api } = await startStylist(page);
+    await stylistTryOn(page).first().click();
+    await expect(page).toHaveURL(/#\/stylist\/try-on$/);
+    await page.getByRole('button', { name: text('outfits.back'), exact: true }).click();
+    await expect(page).toHaveURL(/#\/stylist$/);
+    await expect(page.locator('.stylist-ideas .today-card')).toHaveCount(2);
+    await stylistTryOn(page).first().click();
+    await page.reload();
+    await expect(page).toHaveURL(/#\/stylist$/);
+    await expect(page.locator('#stylist-title')).toBeVisible();
+    await expect(page.locator('.stylist-turn')).toHaveCount(0);
+    expect(api.tryonControl.requests).toHaveLength(0);
+    noWrites(api);
+  });
+
+  for (const [name, options] of [['not activated', { setup: null, consent: false }], ['not consented', { consent: false }],
+    ['paused', { setup: { providerAvailable: false } }], ['missing on this backend', { missing: true }]] as const) {
+    test(`no Try on button when ${name}`, async ({ page }) => {
+      engineOnly();
+      const { api } = await startStylist(page, options as Start);
+      if (!('missing' in options)) await expect.poll(() => api.tryonControl.statusReads).toBeGreaterThan(0);
+      await expect(page.locator('.stylist-ideas .today-card').first().getByRole('button', { name: text('today.save'), exact: true })).toBeEnabled();
+      await expect(stylistTryOn(page)).toHaveCount(0);
+      expect(api.tryonControl.requests).toHaveLength(0);
+    });
+  }
+
+  test('is disabled while offline, and for an idea that cannot be used now', async ({ page, context }) => {
+    engineOnly();
+    const { api, clothes } = await startStylist(page);
+    await expect(stylistTryOn(page).first()).toBeEnabled();
+    await context.setOffline(true);
+    await page.evaluate(() => dispatchEvent(new Event('offline')));
+    await expect(stylistTryOn(page).first()).toBeDisabled();
+    await context.setOffline(false);
+    await page.evaluate(() => dispatchEvent(new Event('online')));
+    await expect(stylistTryOn(page).first()).toBeEnabled();
+    (clothes.shoes as Row).availability = 'laundry';
+    await page.evaluate(() => { location.hash = '#/today'; });
+    await expect(page.locator('#today-title')).toBeVisible();
+    await page.evaluate(() => { location.hash = '#/stylist'; });
+    await expect(page.locator('.stylist-ideas .today-card').first()).toContainText(text('stylist.itemUnavailable'));
+    await expect(stylistTryOn(page).first()).toBeDisabled();
+    expect(api.tryonControl.requests).toHaveLength(0);
+  });
+
+  for (const language of ['fi', 'sv'] as const) {
+    test(`${language}: the button uses the translated feature name`, async ({ page }) => {
+      engineOnly();
+      await startStylist(page, { language });
+      await expect(stylistTryOn(page).first()).toHaveText(text('tryon.ideaOpen', language));
+    });
+  }
+});
+
 // TRYON-IDEA1 visual evidence for Today: two bounded viewport captures (never full page), written by their selected project
 // only; every project keeps the functional and axe assertions. Synthetic garments and picture, ignored buffers.
 test.describe('bounded TRYON-IDEA1 Today visual evidence', () => {
