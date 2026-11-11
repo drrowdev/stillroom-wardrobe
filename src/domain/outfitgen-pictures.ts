@@ -27,7 +27,7 @@ export type PictureResult = Readonly<{ id: string; outfitId: string | null; item
 /** The key of a set of garments, whatever their order. */
 export const pictureKey = (ids: readonly string[]): string => [...ids].sort().join(',');
 
-/** The key of the planned steps, or null when the plan is too short to show the outfit. */
+/** The key of the planned steps, or null when the plan is too short for an AUTOMATIC picture (eligibility, not identity: see pictureKeysOf). */
 export function plannedKey(steps: readonly { itemId: string }[]): string | null {
   if (steps.length < PICTURE_LIMITS.minSteps || steps.length > TRYON_MAX_STEPS) return null;
   return pictureKey(steps.map((step) => step.itemId));
@@ -35,14 +35,25 @@ export function plannedKey(steps: readonly { itemId: string }[]): string | null 
 
 /**
  * Where a picture of a plan is found (TRYON-PROMPT3). A picture made from manifest v5 on has exactly the drawn garments, so `key` is the
- * drawn set. A picture made before v5 also drew the outfit's first coat: `legacyKey` is that exact set (the drawn garments plus that
- * coat), so imagery of one coat never stands for another, and a plan without a coat has none.
+ * drawn set, for any non-empty plan: a manually made one-garment picture (a dress with a coat, say) is found too, and belongs to the
+ * outfit when it is saved. A picture made before v5 also drew the outfit's first coat: `legacyKey` is that exact set (the drawn garments
+ * plus that coat), so imagery of one coat never stands for another, and a plan without a coat has none.
  */
 export type PictureKeys = { key: string | null; legacyKey: string | null };
-export function pictureKeysOf(selection: { steps: readonly { itemId: string }[]; legacyItemIds: readonly string[] | null }): PictureKeys {
+type PlanLike = { steps: readonly { itemId: string }[]; legacyItemIds: readonly string[] | null };
+const within = (count: number, least: number) => count >= least && count <= TRYON_MAX_STEPS;
+export function pictureKeysOf(selection: PlanLike): PictureKeys {
   const legacy = selection.legacyItemIds;
-  const legacyKey = legacy !== null && legacy.length >= PICTURE_LIMITS.minSteps && legacy.length <= TRYON_MAX_STEPS ? pictureKey(legacy) : null;
-  return { key: plannedKey(selection.steps), legacyKey };
+  return { key: within(selection.steps.length, 1) ? pictureKey(selection.steps.map((step) => step.itemId)) : null,
+    legacyKey: legacy !== null && within(legacy.length, 1) ? pictureKey(legacy) : null };
+}
+/**
+ * The keys the automatic queue and Remove work with: only a plan of at least the two-step minimum gets an automatic picture, and only a
+ * picture of such a set is ever deleted by Remove (a one-garment picture was made by hand, and a manual picture is not Remove's to take).
+ */
+export function automaticKeysOf(selection: PlanLike): PictureKeys {
+  const legacy = selection.legacyItemIds;
+  return { key: plannedKey(selection.steps), legacyKey: legacy !== null && within(legacy.length, PICTURE_LIMITS.minSteps) ? pictureKey(legacy) : null };
 }
 const keysList = (keys: PictureKeys | string | null): string[] =>
   keys === null ? [] : typeof keys === 'string' ? keys.split('|').filter((entry) => entry !== '')
@@ -51,7 +62,7 @@ const keysList = (keys: PictureKeys | string | null): string[] =>
  * The keys of a plan as one string (a drawn-set key, then the pre-v5 key, joined by "|"), or null when it has none: a stable value for
  * props and effect dependencies. belongsToOutfit and findPicture take it as they take PictureKeys.
  */
-export function sameSetOf(selection: Parameters<typeof pictureKeysOf>[0]): string | null {
+export function sameSetOf(selection: PlanLike): string | null {
   const keys = keysList(pictureKeysOf(selection));
   return keys.length > 0 ? keys.join('|') : null;
 }

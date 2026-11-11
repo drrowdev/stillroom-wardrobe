@@ -16,7 +16,8 @@ import type { TryOnStep } from '../../domain/tryon';
 import type { OutfitComponent } from '../../domain/outfits';
 import type { Suggestion } from '../../domain/outfitgen-app';
 import {
-  addStepSample, classifyFailure, estimateMinutesLeft, hasPicture, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKeysOf, pictureTargets,
+  addStepSample, automaticKeysOf, classifyFailure, estimateMinutesLeft, hasPicture, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKeysOf,
+  pictureTargets,
   removableResults, reserveBlock, reservedGate, slowStepMs,
   type PictureBlock, type PictureKeys, type PictureResult, type ReservedMemory,
 } from '../../domain/outfitgen-pictures';
@@ -241,10 +242,13 @@ export class PictureQueue {
     }
     return ok;
   }
-  /** Whether another waiting suggestion or a saved outfit (trashed ones included) plans exactly this drawn set; `unknown` if that cannot be read. */
+  /**
+   * Whether another suggestion still in the waiting list, or a saved outfit (trashed ones included), plans exactly this drawn set; `unknown` if
+   * that cannot be read. Every other suggestion counts, a Remove in flight, failed or unsettled included: until its own removal succeeds it
+   * still needs the picture, and if it does succeed its own cleanup runs afterwards and finds nothing left to share it.
+   */
   private async drawnSetShared(suggestion: Suggestion, key: string): Promise<boolean | 'unknown'> {
-    const others = this.outfit.get().list.suggestions.filter((entry) => entry.id !== suggestion.id && this.intents.get(entry.id) !== 'remove'
-      && !this.deleting.has(entry.id) && !this.pending.has(entry.id));
+    const others = this.outfit.get().list.suggestions.filter((entry) => entry.id !== suggestion.id);
     if (!await this.ensureComponents(others)) return 'unknown';
     if (others.some((entry) => pictureKeysOf(ideaSelection(entry.itemIds, this.components)).key === key)) return true;
     try {
@@ -462,10 +466,10 @@ export class PictureQueue {
       return true;
     } catch { return false; }
   }
-  /** The plan's keys (the drawn set, and the exact pre-v5 set), or 'unresolved' when the garments could not be read. */
+  /** The plan's automatic keys (the drawn set, and the exact pre-v5 set), or 'unresolved' when the garments could not be read. */
   private async keysOf(suggestion: Suggestion): Promise<PictureKeys | 'unresolved'> {
     if (!await this.ensureComponents([suggestion])) return 'unresolved';
-    return pictureKeysOf(ideaSelection(suggestion.itemIds, this.components));
+    return automaticKeysOf(ideaSelection(suggestion.itemIds, this.components));
   }
 
   private async underLock(): Promise<'ran' | 'idle'> {
@@ -498,8 +502,8 @@ export class PictureQueue {
     if (!await this.ensureComponents(list)) return this.idle('unreadable', PICTURE_LIMITS.pollMs);
     const candidates = list.map((entry) => {
       const selection = ideaSelection(entry.itemIds, this.components);
-      const keys = pictureKeysOf(selection);
-      return { id: entry.id, key: keys.key, legacyKey: keys.legacyKey, steps: selection.steps };
+      const keys = automaticKeysOf(selection);
+      return { id: entry.id, key: keys.key, legacyKey: keys.legacyKey, identity: pictureKeysOf(selection), steps: selection.steps };
     });
     const have = pictureIndex(ready);
     const excluded = new Set([...this.intents.keys(), ...this.deleting, ...this.pending.keys()]);
@@ -512,7 +516,7 @@ export class PictureQueue {
       // not left unexplained. A too-short plan counts by suggestion; suggestions sharing a planned set share one picture. A picture made
       // before v5 for the same garments and the same coat counts as the picture.
       const open = candidates.filter((entry) => !excluded.has(entry.id));
-      const missing = open.filter((entry) => entry.key === null && !hasPicture(have, entry.legacyKey)).length
+      const missing = open.filter((entry) => entry.key === null && !hasPicture(have, entry.identity)).length
         + new Set(open.filter((entry) => entry.key !== null && !hasPicture(have, entry)).map((entry) => entry.key)).size;
       return this.idle(missing > 0 ? 'missing' : null, null, { done, total: done, missing });
     }

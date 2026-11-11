@@ -130,6 +130,15 @@ describe('TRYON-PROMPT3 migration', () => {
     expect(sql.trimEnd().endsWith('end;\n$$;\n\ncommit;')).toBe(true);
   });
 
+  it('registers the helper in the isolation audit catalog as a private internal function (the audit rejects any unregistered private function)', async () => {
+    // @ts-expect-error Executable CLI JavaScript has no TypeScript declaration.
+    const catalog = await import('../../scripts/isolation-catalog.mjs');
+    const created = [...(await read(MAIN)).matchAll(/^create function private\.([a-z_0-9]+)\(([^)]*)\)/gm)].map((match) => `${match[1]}(${match[2]!.split(',')
+      .map((argument) => argument.trim().split(/\s+/)[1]).join(', ')})`);
+    expect(created).toEqual(['tryon_drawn_steps(text, jsonb)']);
+    for (const signature of created) expect(catalog.PRIVATE_INTERNAL as string[], signature).toContain(signature);
+  });
+
   it('leaves the guarded switch algorithm to the v4 pins: the placeholders and the single write are unchanged', async () => {
     const sql = await readFile(new URL('../../docs/tryon-manifest-switch.sql', import.meta.url), 'utf8');
     expect(sql).toContain("v_from constant text := '<from>';");

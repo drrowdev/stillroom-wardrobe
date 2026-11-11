@@ -893,6 +893,52 @@ test.describe('TRYON-PROMPT3 outfits with coats', () => {
     await expect(page.locator('.outfit-composition li').filter({ hasText: 'Green coat' })).toContainText(text('tryon.optional'));
   });
 
+  test('Remove of one outfit while the other outfit\'s Remove is still in flight and then fails (BUSY): the shared picture stays and nothing is made again', async ({ page }) => {
+    const { api } = await start(page, { sets: withCoats(['Grey coat', 'Green coat']) });
+    await picturesShown(page, 2);
+    expect(api.tryonControl.results).toHaveLength(1);
+    const holdA = gate(), held = gate();
+    // Both Remove requests are held; the first is answered once both are in flight, the second later and refused as busy.
+    api.outfitgenControl.removeHolds.push(holdA.hold, held.hold);
+    api.outfitgenControl.decisionCodes.push('OK', 'BUSY');
+    await cards(page).first().getByRole('button', { name: text('outfitgen.removeLabel', 'en', { title: 'Look Grey coat' }), exact: true }).click();
+    await section(page).getByRole('button', { name: text('outfitgen.removeLabel', 'en', { title: 'Look Green coat' }), exact: true }).click();
+    await expect.poll(() => api.outfitgenControl.removeHolds.length).toBe(0);
+    holdA.release();
+    await expect(cards(page)).toHaveCount(1);
+    await quiet(page, 2_500);
+    expect(api.tryonControl.deletes).toEqual([]);
+    held.release();
+    await expect.poll(() => api.outfitgenControl.decisionCodes.length).toBe(0);
+    await quiet(page, 3_000);
+    expect(api.tryonControl.deletes).toEqual([]);
+    expect(api.tryonControl.results).toHaveLength(1);
+    expect(chains(api)).toHaveLength(1);
+    await expect(cards(page).first().locator('.suggested-picture img')).toBeVisible();
+  });
+
+  test('both outfits removed together: the shared picture is cleaned up once the last one is gone, and nothing is made', async ({ page }) => {
+    const { api } = await start(page, { sets: withCoats(['Grey coat', 'Green coat']) });
+    await picturesShown(page, 2);
+    const picture = api.tryonControl.results[0]!;
+    const holdA = gate(), held = gate();
+    api.outfitgenControl.removeHolds.push(holdA.hold, held.hold);
+    await cards(page).first().getByRole('button', { name: text('outfitgen.removeLabel', 'en', { title: 'Look Grey coat' }), exact: true }).click();
+    await section(page).getByRole('button', { name: text('outfitgen.removeLabel', 'en', { title: 'Look Green coat' }), exact: true }).click();
+    await expect.poll(() => api.outfitgenControl.removeHolds.length).toBe(0);
+    holdA.release();
+    await expect(cards(page)).toHaveCount(1);
+    await quiet(page, 2_000);
+    // The other outfit is still listed, so the picture it needs stays for now.
+    expect(api.tryonControl.deletes).toEqual([]);
+    held.release();
+    await expect(cards(page)).toHaveCount(0);
+    await expect.poll(() => api.tryonControl.deletes, { timeout: 30_000 }).toEqual([picture.id]);
+    await quiet(page, 2_000);
+    expect(api.tryonControl.results).toHaveLength(0);
+    expect(chains(api)).toHaveLength(1);
+  });
+
   test('Remove deletes the picture when no other outfit has the same garments', async ({ page }) => {
     const { api } = await start(page, { sets: withCoats(['Grey coat']) });
     await picturesShown(page, 1);

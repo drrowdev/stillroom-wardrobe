@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addStepSample, belongsToOutfit, classifyFailure, estimateMinutesLeft, findPicture, newestOutfitPicture, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKey,
+  addStepSample, automaticKeysOf, belongsToOutfit, classifyFailure, estimateMinutesLeft, findPicture, newestOutfitPicture, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKey,
   pictureKeysOf, pictureTargets, plannedKey, removableResults, reserveBlock, reservedGate, sameSetOf, slowStepMs, type PictureInputs, type PictureResult,
 } from '../../src/domain/outfitgen-pictures';
 import { selectTryOnSteps, type TryOnCandidate } from '../../src/domain/tryon';
@@ -46,13 +46,34 @@ describe('pictures made before outfits stopped drawing coats (TRYON-PROMPT3)', (
   function item(id: number, category: TryOnCandidate['category']): TryOnCandidate {
     return { itemId: ID(id), category, lifecycle: 'active', deleted: false, readyImage: true };
   }
-  it('keys the drawn garments, and the exact earlier set of that coat, and nothing for an outfit without a coat', () => {
+  it('keys the drawn garments for any non-empty plan, the exact earlier set of that coat, and nothing for an outfit without a coat', () => {
     expect(pictureKeysOf(outfit(3))).toEqual({ key: pictureKey([ID(1), ID(2)]), legacyKey: pictureKey([ID(1), ID(2), ID(3)]) });
     expect(pictureKeysOf(selectTryOnSteps([item(1, 'top'), item(2, 'bottom')]))).toEqual({ key: pictureKey([ID(1), ID(2)]), legacyKey: null });
-    // A top and a coat: one drawn garment is too few for an automatic picture, but an earlier two-step picture still belongs to it.
-    expect(pictureKeysOf(selectTryOnSteps([item(1, 'top'), item(3, 'outerwear')]))).toEqual({ key: null, legacyKey: pictureKey([ID(1), ID(3)]) });
+    // A top and a coat: one drawn garment is too few for an AUTOMATIC picture, but its identity is still the drawn set, and an earlier
+    // two-step picture of that coat still belongs to it.
+    expect(pictureKeysOf(selectTryOnSteps([item(1, 'top'), item(3, 'outerwear')]))).toEqual({ key: pictureKey([ID(1)]), legacyKey: pictureKey([ID(1), ID(3)]) });
     expect(sameSetOf(outfit(3))).toBe(`${pictureKey([ID(1), ID(2)])}|${pictureKey([ID(1), ID(2), ID(3)])}`);
-    expect(sameSetOf(selectTryOnSteps([item(3, 'outerwear')]))).toBeNull();
+    expect(sameSetOf(selectTryOnSteps([item(3, 'outerwear')]))).toBe(pictureKey([ID(3)]));
+    expect(sameSetOf(selectTryOnSteps([]))).toBeNull();
+  });
+  it('keeps the two-step minimum for automatic pictures and for what Remove may delete, apart from the identity', () => {
+    expect(automaticKeysOf(outfit(3))).toEqual({ key: pictureKey([ID(1), ID(2)]), legacyKey: pictureKey([ID(1), ID(2), ID(3)]) });
+    expect(automaticKeysOf(selectTryOnSteps([item(1, 'top'), item(3, 'outerwear')]))).toEqual({ key: null, legacyKey: pictureKey([ID(1), ID(3)]) });
+    expect(automaticKeysOf(selectTryOnSteps([item(5, 'one_piece'), item(3, 'outerwear')]))).toEqual({ key: null, legacyKey: pictureKey([ID(5), ID(3)]) });
+    expect(automaticKeysOf(selectTryOnSteps([item(3, 'outerwear')]))).toEqual({ key: null, legacyKey: null });
+  });
+  it('associates a manually made one-garment picture (a dress and a coat) with the saved outfit, and never with another garment set', () => {
+    const dressCoat = selectTryOnSteps([item(5, 'one_piece'), item(3, 'outerwear')]);
+    expect(dressCoat.steps).toHaveLength(1);
+    expect(pictureKeysOf(dressCoat).key).toBe(pictureKey([ID(5)]));
+    const manual = result(1, [5], 300);
+    const other = result(2, [6], 400);
+    const same = sameSetOf(dressCoat);
+    expect(belongsToOutfit(manual, ID(90), same)).toBe(true);
+    expect(newestOutfitPicture([other, manual], ID(90), same)).toBe(manual);
+    expect(findPicture(pictureIndex([manual, other]), pictureKeysOf(dressCoat))).toBe(manual);
+    // Nothing is made for it automatically.
+    expect(pictureTargets([{ id: 'a', ...automaticKeysOf(dressCoat) }], { have: new Map(), attempts: new Map(), skipped: new Set(), excluded: new Set() })).toEqual([]);
   });
   it('finds a picture made without a coat for either coat, and a picture made with a coat only for that same coat', () => {
     const drawn = result(1, [1, 2], 300);
