@@ -150,6 +150,7 @@ const baseTable = [
   '   `20261109090000` | ` `              | `2026-11-09 09:00:00` ',
   '   `20261109100000` | ` `              | `2026-11-09 10:00:00` ',
   '   `20261109110000` | ` `              | `2026-11-09 11:00:00` ',
+  '   `20261111090000` | ` `              | `2026-11-11 09:00:00` ',
   '',
   '',
 ].join('\n');
@@ -206,12 +207,14 @@ const targetTable = [
   '   `20261109090000` | `20261109090000` | `2026-11-09 09:00:00` ',
   '   `20261109100000` | `20261109100000` | `2026-11-09 10:00:00` ',
   '   `20261109110000` | `20261109110000` | `2026-11-09 11:00:00` ',
+  '   `20261111090000` | `20261111090000` | `2026-11-11 09:00:00` ',
   '',
   '',
 ].join('\n');
 const pendingRow = (table: string, version: string) => table.replace(`\`${version}\` | \`${version}\``, `\`${version}\` | \` \`             `);
 // Historical stages remain pending for later migrations; target includes the new lifecycle.
-const tryon4PriorTable = pendingRow(targetTable, '20261109110000');
+const tryon5PriorTable = pendingRow(targetTable, '20261111090000');
+const tryon4PriorTable = pendingRow(tryon5PriorTable, '20261109110000');
 const judgePriorTable = pendingRow(tryon4PriorTable, '20261109100000');
 const capPriorTable = pendingRow(judgePriorTable, '20261109090000');
 const claimPriorTable = pendingRow(capPriorTable, '20261108100000');
@@ -461,7 +464,7 @@ describe('CI-only preservation guards', () => {
     // Each feature only appends: the frozen history stays in order and the newest migrations close the list.
     expect(versions).toEqual([...versions].sort());
     expect(versions.slice(0, 2)).toEqual(['20260905000000', '20260906000000']);
-    expect(versions.slice(-11)).toEqual(['20261101200000', '20261102090000', '20261106090000', '20261106090100', '20261107090000', '20261107100000', '20261107100100', '20261108100000', '20261109090000', '20261109100000', '20261109110000']);
+    expect(versions.slice(-12)).toEqual(['20261101200000', '20261102090000', '20261106090000', '20261106090100', '20261107090000', '20261107100000', '20261107100100', '20261108100000', '20261109090000', '20261109100000', '20261109110000', '20261111090000']);
     expect(() => validateInventory(inventory())).not.toThrow();
     await expect(assertMigrationInventory()).resolves.toBeUndefined();
     for (const index of inventory().keys()) for (const [key, value] of [
@@ -520,16 +523,18 @@ describe('CI-only preservation guards', () => {
     expect(assertHistory(limitsPriorTable, 'limits-prior')).toEqual(at(37));
     expect(assertHistory(tryonV3PriorTable, 'tryon-v3-prior')).toEqual(at(38));
     expect(assertHistory(outfitgenPriorTable, 'outfitgen-prior')).toEqual(at(39));
-    expect(assertHistory(claimPriorTable, 'claim-prior')).toEqual(at(versions.length - 4));
+    expect(assertHistory(claimPriorTable, 'claim-prior')).toEqual(at(versions.length - 5));
     expect(assertHistory(claimPriorTable, 'claim-prior').applied).toHaveLength(44);
-    expect(assertHistory(capPriorTable, 'cap-prior')).toEqual(at(versions.length - 3));
+    expect(assertHistory(capPriorTable, 'cap-prior')).toEqual(at(versions.length - 4));
     expect(assertHistory(capPriorTable, 'cap-prior').applied).toHaveLength(45);
-    expect(assertHistory(judgePriorTable, 'judge-prior')).toEqual(at(versions.length - 2));
+    expect(assertHistory(judgePriorTable, 'judge-prior')).toEqual(at(versions.length - 3));
     expect(assertHistory(judgePriorTable, 'judge-prior').applied).toHaveLength(46);
-    expect(assertHistory(tryon4PriorTable, 'tryon4-prior')).toEqual(at(versions.length - 1));
+    expect(assertHistory(tryon4PriorTable, 'tryon4-prior')).toEqual(at(versions.length - 2));
     expect(assertHistory(tryon4PriorTable, 'tryon4-prior').applied).toHaveLength(47);
-    expect(versions).toHaveLength(48);
-    for (const [table, stage] of [[tryon4PriorTable, 'target'], [targetTable, 'tryon4-prior'], [judgePriorTable, 'tryon4-prior'], [tryon4PriorTable, 'judge-prior'],
+    expect(assertHistory(tryon5PriorTable, 'tryon5-prior')).toEqual(at(versions.length - 1));
+    expect(assertHistory(tryon5PriorTable, 'tryon5-prior').applied).toHaveLength(48);
+    expect(versions).toHaveLength(49);
+    for (const [table, stage] of [[tryon5PriorTable, 'target'], [targetTable, 'tryon5-prior'], [tryon4PriorTable, 'tryon5-prior'], [tryon5PriorTable, 'tryon4-prior'], [tryon4PriorTable, 'target'], [targetTable, 'tryon4-prior'], [judgePriorTable, 'tryon4-prior'], [tryon4PriorTable, 'judge-prior'],
       [judgePriorTable, 'target'], [targetTable, 'judge-prior'], [capPriorTable, 'judge-prior'], [judgePriorTable, 'cap-prior'],
       [capPriorTable, 'target'], [targetTable, 'cap-prior'], [claimPriorTable, 'cap-prior'], [capPriorTable, 'claim-prior'],
       [claimPriorTable, 'target'], [targetTable, 'claim-prior'], [outfitgenPriorTable, 'claim-prior'],
@@ -1786,7 +1791,7 @@ describe('import safety and frozen integration boundary', () => {
     expect(main.indexOf('await verifyCiStorageGuard();')).toBeGreaterThan(main.indexOf("await migrateToAzureTarget(run, 'base')"));
     expect(main.indexOf("await history('azure-target');")).toBeGreaterThan(main.indexOf('await verifyCiStorageGuard();'));
     expect(main.indexOf('ITEM_LIFECYCLE_CATALOG_SQL')).toBeGreaterThan(main.indexOf("await history('azure-target');"));
-    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(22);
+    expect(main.match(/await verifyCiStorageGuard\(\);/g)).toHaveLength(23);
     const prior = main.slice(main.indexOf("stage = 'AZ1-prior-main-reset'"));
     expect(source).toContain("const PRIOR_MAIN_VERSION = '20260913120000';");
     expect(source).toContain('MIGRATIONS.findIndex((entry) => entry.version === PRIOR_MAIN_VERSION)');
@@ -1858,8 +1863,10 @@ describe('COL1 strict preservation pass and twelve-only probes (source order, no
                         "await history('judge-prior'); await verifyCiStorageGuard();", 'await outfitgenCapCompare(', 'await outfitgenCapProbes(',
                         'await outfitgenJudgeCheckpoint(', "await migrateToStage(run, 'judge-prior', 'tryon4-prior')",
                         "await history('tryon4-prior'); await verifyCiStorageGuard();", 'await outfitgenJudgeCompare(', 'await outfitgenJudgeProbes(',
-                        'await tryonPrompt2Checkpoint(', "await migrateToStage(run, 'tryon4-prior', 'target')",
-                        "await history('target'); await verifyCiStorageGuard();", 'await tryonPrompt2Compare(', 'await tryonPrompt2Probes(', 'await outfitgenQuality2Probes(',
+                        'await tryonPrompt2Checkpoint(', "await migrateToStage(run, 'tryon4-prior', 'tryon5-prior')",
+                        "await history('tryon5-prior'); await verifyCiStorageGuard();", 'await tryonPrompt2Compare(', 'await tryonPrompt2Probes(',
+                        'await tryonPrompt3Checkpoint(', "await migrateToStage(run, 'tryon5-prior', 'target')",
+                        "await history('target'); await verifyCiStorageGuard();", 'await tryonPrompt3Compare(', 'await tryonPrompt3Probes(', 'await outfitgenQuality2Probes(',
                         'await colourFinalizer.stop()',
       "'--version', COLOUR_VERSION", "await history('colours'); await verifyCiStorageGuard();", 'provision-test-users.mjs',
       "await colourProbes(twelveEnv, privilegedLocalSql, 'colours')", 'await twelveFinalizer.stop()']) {

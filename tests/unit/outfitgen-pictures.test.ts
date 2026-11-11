@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
-  addStepSample, classifyFailure, estimateMinutesLeft, newestOutfitPicture, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKey, pictureTargets, plannedKey,
-  removableResults, reserveBlock, reservedGate, slowStepMs, type PictureInputs, type PictureResult,
+  addStepSample, automaticKeysOf, belongsToOutfit, classifyFailure, estimateMinutesLeft, findPicture, newestOutfitPicture, noReserved, PICTURE_LIMITS, pictureBlock, pictureIndex, pictureKey,
+  pictureKeysOf, pictureTargets, plannedKey, removableResults, reserveBlock, reservedGate, sameSetOf, slowStepMs, type PictureInputs, type PictureResult,
 } from '../../src/domain/outfitgen-pictures';
+import { selectTryOnSteps, type TryOnCandidate } from '../../src/domain/tryon';
 import { parseSuggestionList } from '../../src/domain/outfitgen-app';
 
 const ID = (n: number) => `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -36,6 +37,79 @@ describe('finding a picture by its planned garments (OUTFITGEN2)', () => {
     expect(newestOutfitPicture([idea, differentSet], ID(90), null)).toBeNull();
     expect(newestOutfitPicture([other, differentSet], ID(90), set)).toBeNull();
     expect(newestOutfitPicture([], ID(90), set)).toBeNull();
+  });
+});
+
+describe('pictures made before outfits stopped drawing coats (TRYON-PROMPT3)', () => {
+  // Items: 1 top, 2 bottom, 3 coat A, 4 coat B. A manifest before v5 drew the first coat as a step; v5 draws only the top and the bottom.
+  const outfit = (coat: number) => selectTryOnSteps([item(1, 'top'), item(2, 'bottom'), item(coat, 'outerwear')]);
+  function item(id: number, category: TryOnCandidate['category']): TryOnCandidate {
+    return { itemId: ID(id), category, lifecycle: 'active', deleted: false, readyImage: true };
+  }
+  it('keys the drawn garments for any non-empty plan, the exact earlier set of that coat, and nothing for an outfit without a coat', () => {
+    expect(pictureKeysOf(outfit(3))).toEqual({ key: pictureKey([ID(1), ID(2)]), legacyKey: pictureKey([ID(1), ID(2), ID(3)]) });
+    expect(pictureKeysOf(selectTryOnSteps([item(1, 'top'), item(2, 'bottom')]))).toEqual({ key: pictureKey([ID(1), ID(2)]), legacyKey: null });
+    // A top and a coat: one drawn garment is too few for an AUTOMATIC picture, but its identity is still the drawn set, and an earlier
+    // two-step picture of that coat still belongs to it.
+    expect(pictureKeysOf(selectTryOnSteps([item(1, 'top'), item(3, 'outerwear')]))).toEqual({ key: pictureKey([ID(1)]), legacyKey: pictureKey([ID(1), ID(3)]) });
+    expect(sameSetOf(outfit(3))).toBe(`${pictureKey([ID(1), ID(2)])}|${pictureKey([ID(1), ID(2), ID(3)])}`);
+    expect(sameSetOf(selectTryOnSteps([item(3, 'outerwear')]))).toBe(pictureKey([ID(3)]));
+    expect(sameSetOf(selectTryOnSteps([]))).toBeNull();
+  });
+  it('keeps the two-step minimum for automatic pictures and for what Remove may delete, apart from the identity', () => {
+    expect(automaticKeysOf(outfit(3))).toEqual({ key: pictureKey([ID(1), ID(2)]), legacyKey: pictureKey([ID(1), ID(2), ID(3)]) });
+    expect(automaticKeysOf(selectTryOnSteps([item(1, 'top'), item(3, 'outerwear')]))).toEqual({ key: null, legacyKey: pictureKey([ID(1), ID(3)]) });
+    expect(automaticKeysOf(selectTryOnSteps([item(5, 'one_piece'), item(3, 'outerwear')]))).toEqual({ key: null, legacyKey: pictureKey([ID(5), ID(3)]) });
+    expect(automaticKeysOf(selectTryOnSteps([item(3, 'outerwear')]))).toEqual({ key: null, legacyKey: null });
+  });
+  it('associates a manually made one-garment picture (a dress and a coat) with the saved outfit, and never with another garment set', () => {
+    const dressCoat = selectTryOnSteps([item(5, 'one_piece'), item(3, 'outerwear')]);
+    expect(dressCoat.steps).toHaveLength(1);
+    expect(pictureKeysOf(dressCoat).key).toBe(pictureKey([ID(5)]));
+    const manual = result(1, [5], 300);
+    const other = result(2, [6], 400);
+    const same = sameSetOf(dressCoat);
+    expect(belongsToOutfit(manual, ID(90), same)).toBe(true);
+    expect(newestOutfitPicture([other, manual], ID(90), same)).toBe(manual);
+    expect(findPicture(pictureIndex([manual, other]), pictureKeysOf(dressCoat))).toBe(manual);
+    // Nothing is made for it automatically.
+    expect(pictureTargets([{ id: 'a', ...automaticKeysOf(dressCoat) }], { have: new Map(), attempts: new Map(), skipped: new Set(), excluded: new Set() })).toEqual([]);
+  });
+  it('finds a picture made without a coat for either coat, and a picture made with a coat only for that same coat', () => {
+    const drawn = result(1, [1, 2], 300);
+    const withCoatA = result(2, [1, 2, 3], 200);
+    const withCoatB = result(3, [1, 2, 4], 250);
+    const index = pictureIndex([drawn, withCoatA, withCoatB]);
+    expect(findPicture(index, pictureKeysOf(outfit(3)))).toBe(drawn);
+    expect(findPicture(index, pictureKeysOf(outfit(4)))).toBe(drawn);
+    // Without the newer coat-less picture, each coat finds only its own earlier picture.
+    const legacyOnly = pictureIndex([withCoatA, withCoatB]);
+    expect(findPicture(legacyOnly, pictureKeysOf(outfit(3)))).toBe(withCoatA);
+    expect(findPicture(legacyOnly, pictureKeysOf(outfit(4)))).toBe(withCoatB);
+    expect(findPicture(legacyOnly, pictureKeysOf(outfit(5)))).toBeUndefined();
+    expect(findPicture(null, pictureKeysOf(outfit(3)))).toBeUndefined();
+  });
+  it('does not make a new picture for a suggestion whose earlier picture shows the same coat, and makes one for another coat', () => {
+    const have = pictureIndex([result(2, [1, 2, 3], 200)]);
+    const candidate = (id: string, coat: number) => ({ id, ...pictureKeysOf(outfit(coat)) });
+    const targets = pictureTargets([candidate('a', 3), candidate('b', 4)], { have, attempts: new Map(), skipped: new Set(), excluded: new Set() });
+    expect(targets.map((entry) => entry.id)).toEqual(['b']);
+  });
+  it('lists a saved outfit\'s pictures: its own, a coat-less idea picture and the earlier picture of that exact coat, never another coat\'s', () => {
+    const same = sameSetOf(outfit(3));
+    const drawn = result(1, [1, 2], 300), coatA = result(2, [1, 2, 3], 200), coatB = result(3, [1, 2, 4], 400);
+    expect([drawn, coatA, coatB].filter((entry) => belongsToOutfit(entry, ID(90), same)).map((entry) => entry.id)).toEqual([ID(1), ID(2)]);
+    expect(newestOutfitPicture([coatA, coatB], ID(90), same)).toBe(coatA);
+    expect(newestOutfitPicture([coatB], ID(90), same)).toBeNull();
+    expect(belongsToOutfit(result(4, [1, 2, 4], 100, ID(90)), ID(90), same)).toBe(true);
+  });
+  it('keeps a shared coat-less picture out of Remove\'s reach unless the caller has shown it is not shared (the queue decides; this only selects)', () => {
+    const drawnKey = pictureKey([ID(1), ID(2)]);
+    const created = 100;
+    const results = [result(1, [1, 2], 200), result(2, [1, 2, 3], 200), result(3, [1, 2, 4], 200)];
+    // The earlier picture of exactly this coat is this suggestion's alone; the coat-less one is selected only under its own key.
+    expect(removableResults(results, pictureKey([ID(1), ID(2), ID(3)]), created)).toEqual([ID(2)]);
+    expect(removableResults(results, drawnKey, created)).toEqual([ID(1)]);
   });
 });
 

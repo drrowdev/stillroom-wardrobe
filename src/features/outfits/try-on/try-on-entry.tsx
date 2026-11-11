@@ -3,6 +3,7 @@ import type { OwnerScope } from '../../../auth/session';
 import type { AppClient } from '../../../data/client';
 import { tryOnReady } from '../../../data/tryon';
 import type { OutfitComponent, OutfitRecord } from '../../../domain/outfits';
+import { findPicture } from '../../../domain/outfitgen-pictures';
 import type { Translate } from '../../../i18n';
 import '../../../i18n/tryon';
 import { pictureQueueFor } from '../../outfitgen/picture-queue';
@@ -40,7 +41,7 @@ export function SavedTryOns({ client, scope, outfitId, online, t, sameSet }: {
   const status = useTryOnStatus(store);
   // OUTFITGEN2 (K2): a picture the queue is still making for this outfit's set appears here once it is finished.
   const pics = usePictureQueue(sameSet ? pictureQueueFor(client, scope) : null);
-  const stamp = sameSet ? pics?.pictures?.get(sameSet)?.id ?? '' : '';
+  const stamp = sameSet ? findPicture(pics?.pictures, sameSet)?.id ?? '' : '';
   const { state, retry } = useOutfitTryOns(store?.api ?? null, outfitId, outfitId === null ? online : status !== null && status.results > 0, sameSet ?? null, stamp);
   const [removed, setRemoved] = useState<ReadonlySet<string>>(new Set());
   const [open, setOpen] = useState(false);

@@ -2,6 +2,7 @@ import '../../styles/outfit-flow.css';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../../app/icon';
 import { componentLabel, componentMeta, occasionLabel, type OutfitComponent } from '../../domain/outfits';
+import { isTryOnOptional } from '../../domain/tryon';
 import { itemCount, pluralText, type Language, type Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
 import { usePrivateImage } from '../../images/use-private-image';
@@ -29,13 +30,14 @@ function metaText(component: OutfitComponent, t: Translate): string | null {
   const meta = componentMeta(component.category, component.colour);
   return meta.colour ? t('outfits.meta', { category: t(meta.category), colour: t(meta.colour) }) : t(meta.category);
 }
-export function ComponentText({ component, t }: { component: OutfitComponent; t: Translate }) {
+export function ComponentText({ component, t, optionalMark = false }: { component: OutfitComponent; t: Translate; optionalMark?: boolean }) {
   const label = componentLabel(component);
   const meta = metaText(component, t);
   if (component.state === 'missing') return <span className="outfit-component-text"><span className="outfit-component-state">{t('outfits.unavailableItem')}</span></span>;
   return <span className="outfit-component-text">
     <span className="outfit-component-name">{component.title}</span>
     {meta && <span className="outfit-component-meta">{meta}</span>}
+    {optionalMark && isTryOnOptional(component.category) && <span className="outfit-component-state">{t('tryon.optional')}</span>}
     {label && <span className="outfit-component-state">{t(label)}</span>}
   </span>;
 }

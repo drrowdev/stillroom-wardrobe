@@ -90,6 +90,24 @@ test.describe('OUTFITS-PICTURES saved-outfit cards', () => {
     expect(api.tryonControl.requests).toHaveLength(0);
   });
 
+  test('a one-garment picture made by hand (a dress with a coat) belongs to the saved outfit, on its card and in its details (TRYON-PROMPT3)', async ({ page }) => {
+    const { seen } = await open(page, (api, clothes) => {
+      seedOutfit(api, [clothes.dress.id, clothes.coat.id], 'Evening');
+      seedOutfit(api, [clothes.top.id, clothes.coat.id], 'Errand');
+      // The picture of an unsaved idea of the dress alone, made before the outfit was saved; another garment's picture belongs to no card.
+      result(api, null, [clothes.dress.id], 1_000_000);
+      result(api, null, [clothes.shoes.id], 100);
+    });
+    await expect(picture(page, 'Evening')).toHaveCount(1);
+    await expect(collage(page, 'Evening')).toHaveCount(0);
+    await expect(picture(page, 'Errand')).toHaveCount(0);
+    expect(seen.pictures).toHaveLength(1);
+    await card(page, 'Evening').getByRole('link', { name: /Evening/ }).click();
+    await expect(page.locator('#outfit-detail-title')).toHaveText('Evening');
+    await expect(page.locator('.tryon-saved-list img')).toHaveCount(1);
+    await expect(page.locator('.outfit-composition li').filter({ hasText: 'Grey coat' })).toContainText('Optional');
+  });
+
   test('uses only the read calls: no step, chain or claim request, and the results list once', async ({ page }) => {
     const { api, seen } = await open(page, (api, clothes) => {
       const full = [clothes.top.id, clothes.trousers.id, clothes.shoes.id];

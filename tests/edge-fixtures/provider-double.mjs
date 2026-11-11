@@ -190,10 +190,10 @@ export function enhanceResponse(mode) {
 // step's slot and image[] = [person, garment]. The person's pixels select the mode; the output is one fixed photo.
 /** sha256 of each slot's fixed try-on prompt (src/domain/tryon.ts TRYON_PROMPTS). */
 export const TRYON_PROMPT_SHA256 = Object.freeze({
-  one_piece: '165e9af0fc725de675db7c6a276c16a59b6ed0c5e34f68780f7fbb3210136784',
-  top: '54dcbf9096530fd423eb1190845b3723adeb40aa762f3d673bae62bf840f46a2',
+  one_piece: 'e7a4457a043aaf93f7af2f6e84a7b5233db74ac0f0f0c87fbe08911e967fb844',
+  top: '58dabbd69ea5110937d975819419367262d1bf76416cce59e7f2cb0d9965dd6d',
   bottom: 'e81cc7a7e85f3307d5d3826657bf04d587be932dddbce3e7afc60eda8a4c1a22',
-  layer: 'c93e0d0c8403df05cfca653b44b8398ca1c1f9ec36361aeff9fe1d4d87092797',
+  layer: '7b0f491a506da640a62fc8417c16594b4af1fab043605c7ed3f2b77316b1de72',
   outerwear: 'c133e2040c4004abf274ebbbcf75608b0e7436f7813a46aa199f8b162f76ab33',
   footwear: '4e2439bf92f0c3c4b3eff6e0520e7cfc020e14dd69c12c3cdab5a58393c68ff3',
   accessory: 'ddf6d8ea3e349725a00060abcaacd1f2f50a22f55293f76e344f442f406b93da',

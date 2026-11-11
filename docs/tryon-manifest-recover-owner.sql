@@ -1,4 +1,4 @@
--- TRYON-PROMPT2: PER-OWNER guarded recovery of the try-on manifest (docs/cloud-development.md). It needs its own owner authorisation and is used
+-- TRYON-PROMPT2/3: PER-OWNER guarded recovery of the try-on manifest (docs/cloud-development.md). It needs its own owner authorisation and is used
 -- only after a read-back of private.ai_controls.tryon_manifest_id shows a MIXED state (some accounts on one try-on manifest and some on another),
 -- for example after a configuration write ran during the cutover. docs/tryon-manifest-switch.sql refuses in that state by design. Run it with the
 -- three placeholders replaced: <owner> (the account's user id), <from> (the manifest that account is on now) and <to> (the manifest it should be

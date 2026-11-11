@@ -735,6 +735,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
     runs: [] as { owner: string; body: unknown }[],
     replies: [] as OutfitGenReply[],
     decisionCodes: [] as string[],
+    // A Remove request waits for the matching hold (null: no wait), in the order the requests arrive.
+    removeHolds: [] as (Promise<void> | null)[],
     undoCodes: [] as string[],
     unassessed: 0, autoUnassessed: 0, autoCallsLeft: 3, live: false, cooldownUntilMs: null as number | null,
     statusReads: 0, listReads: 0,
@@ -1098,6 +1100,8 @@ export async function mockBackend(page: Page, options: MockOptions = {}) {
         await json({ code: 'OK', outfitId: body.p_outfit_id }); return;
       }
       if (name === 'outfitgen_remove') {
+        const hold = outfitgenControl.removeHolds.shift();
+        if (hold) await hold;
         const code = outfitgenControl.decisionCodes.shift() ?? 'OK';
         if (code !== 'OK') { await json({ code }); return; }
         target.state = 'removed';
