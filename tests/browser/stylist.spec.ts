@@ -223,6 +223,16 @@ test.describe('ST1b stylist', () => {
     expect(JSON.stringify(api.stylistControl.chats[1]!.body)).not.toMatch(/White shirt|Navy trousers/);
   });
 
+  test('resolves each turn\'s aliases against that turn\'s own map only', async ({ page }) => {
+    const { api, clothes } = await start(page, { setup: {}, consent: true });
+    api.stylistControl.replies.push({ status: 200, body: { code: 'OK', reply: 'Take i1.', refs: { i1: clothes.shirt.id }, outfits: [] } });
+    api.stylistControl.replies.push({ status: 200, body: { code: 'OK', reply: 'Take i1 and i2.', refs: { i1: clothes.boots.id }, outfits: [] } });
+    await ask(page, 'First');
+    await expect(page.locator('.stylist-assistant > .stylist-text')).toHaveText(['Take White shirt.']);
+    await ask(page, 'Second');
+    await expect(page.locator('.stylist-assistant > .stylist-text')).toHaveText(['Take White shirt.', 'Take Black boots and one of your garments.']);
+  });
+
   test('rechecks ideas when returning and on each reply (M6)', async ({ page }) => {
     const { api, clothes } = await start(page, { setup: {}, consent: true });
     api.stylistControl.replies.push(reply(clothes));
