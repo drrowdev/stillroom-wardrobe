@@ -7,8 +7,12 @@ import { weatherContext, type WeatherConfig } from '../../domain/weather';
 import type { WardrobeItem } from '../../domain/wardrobe';
 import type { Translate } from '../../i18n';
 import type { PrivateImages } from '../../images/private-images';
+import { tryOnReady } from '../../data/tryon';
 import { ComponentText, OutfitThumb } from '../outfits/outfits-screen';
+import type { TryOnIdeaSeed } from '../outfits/try-on/try-on-screen';
+import { ideaSelection, useTryOnStatus } from '../outfits/use-try-on';
 import { pickerComponent } from '../outfits/use-outfits';
+import { tryOnStoreFor } from '../settings/tryon-store';
 import { defaultSeason } from '../today/use-suggestions';
 import { useWeather, type WeatherStore } from '../today/use-weather';
 import type { StylistEntry, StylistStore } from './stylist-store';
@@ -39,13 +43,14 @@ function useWardrobe(store: StylistStore, replies: number): Wardrobe & { retry: 
 type Props = {
   store: StylistStore; images: PrivateImages; online: boolean; t: Translate; timeZone: string;
   weather: WeatherConfig; weatherStore: WeatherStore;
-  onSave: (itemIds: string[], occasion: Occasion) => void; onAddItem: () => void; onSettings: () => void;
+  onSave: (itemIds: string[], occasion: Occasion) => void; onTryOn: (idea: TryOnIdeaSeed) => void; onAddItem: () => void; onSettings: () => void;
 };
-export function StylistScreen({ store, images, online, t, timeZone, weather, weatherStore, onSave, onAddItem, onSettings }: Props) {
+export function StylistScreen({ store, images, online, t, timeZone, weather, weatherStore, onSave, onTryOn, onAddItem, onSettings }: Props) {
   useStylistStatus(store);
   const state = useStylist(store);
   const view = viewOf(state);
   const status = statusOf(state);
+  const tryOnStatus = useTryOnStatus(tryOnStoreFor(store.client, store.scope));
   const forecast = useWeather(weatherStore, weather, online);
   // Weather that is turned off is not sent, even if an override is still set for Today.
   const weatherOn = weather.status === 'on';
@@ -81,7 +86,8 @@ export function StylistScreen({ store, images, online, t, timeZone, weather, wea
         {(view.kind === 'off' || view.kind === 'renew') && <button type="button" className="text-button" onClick={onSettings}>{t('aiC.turnOn')}</button>}
       </div>}
     {state.turns.length > 0 || pending ? <ol className="stylist-turns" aria-label={t('stylist.conversation')}>
-      {state.turns.map((turn) => <Turn key={turn.id} turn={turn} wardrobe={wardrobe} ownerId={ownerId} images={images} t={t} onSave={onSave} />)}
+      {state.turns.map((turn) => <Turn key={turn.id} turn={turn} wardrobe={wardrobe} ownerId={ownerId} images={images} t={t} online={online}
+        tryOn={tryOnReady(tryOnStatus)} onSave={onSave} onTryOn={onTryOn} />)}
       {pending && <li className="stylist-turn stylist-user" aria-busy="true"><span className="sr-only">{t('stylist.you')}</span><p className="stylist-text">{state.pending}</p></li>}
     </ol> : null}
     {wardrobe.failed && state.turns.length > 0 && <div className="notice notice-error" role="alert"><span>{t('stylist.wardrobeFailed')}</span>
@@ -117,9 +123,16 @@ export function StylistScreen({ store, images, online, t, timeZone, weather, wea
   </section>;
 }
 
-type TurnProps = { turn: StylistEntry; wardrobe: Wardrobe; ownerId: string; images: PrivateImages; t: Translate;
-  onSave: (itemIds: string[], occasion: Occasion) => void };
-function Turn({ turn, wardrobe, ownerId, images, t, onSave }: TurnProps) {
+type TurnProps = { turn: StylistEntry; wardrobe: Wardrobe; ownerId: string; images: PrivateImages; t: Translate; online: boolean; tryOn: boolean;
+  onSave: (itemIds: string[], occasion: Occasion) => void; onTryOn: (idea: TryOnIdeaSeed) => void };
+function Turn({ turn, wardrobe, ownerId, images, t, online, tryOn, onSave, onTryOn }: TurnProps) {
+  // The idea's garments for a try-on, as the same components the outfit screens use. Nothing is saved or sent from here.
+  const seedFor = (idea: StylistIdea): TryOnIdeaSeed | null => {
+    if (!tryOn || !wardrobe.items) return null;
+    const items = wardrobe.items;
+    const components = new Map(idea.itemIds.flatMap((id) => { const item = items.get(id); return item ? [[id, pickerComponent(item)] as const] : []; }));
+    return ideaSelection(idea.itemIds, components).steps.length ? { itemIds: idea.itemIds, components } : null;
+  };
   return <li className={`stylist-turn stylist-${turn.role}`}>
     <span className="sr-only">{t(turn.role === 'user' ? 'stylist.you' : 'stylist.me')}</span>
     <p className="stylist-text">{turn.text}</p>
@@ -127,6 +140,12 @@ function Turn({ turn, wardrobe, ownerId, images, t, onSave }: TurnProps) {
       {turn.outfits.map((idea, index) => <Idea key={index} id={`stylist-idea-${turn.id}-${index}`} idea={idea} number={index + 1}
         wardrobe={wardrobe} images={images} t={t}
         check={wardrobe.items ? checkIdea(idea.itemIds, wardrobe.items, ownerId, turn.weather) : null}
+        onTryOn={seedFor(idea) ? () => {
+          // Checked again at the moment of opening, like Save.
+          const seed = seedFor(idea);
+          if (seed && wardrobe.items && !wardrobe.loading && !wardrobe.failed && checkIdea(idea.itemIds, wardrobe.items, ownerId, turn.weather) === 'ok') onTryOn(seed);
+        } : null}
+        online={online}
         onSave={() => {
           // Checked again against the latest load at the moment of saving; the editor's own checks still apply.
           if (wardrobe.items && !wardrobe.loading && !wardrobe.failed && checkIdea(idea.itemIds, wardrobe.items, ownerId, turn.weather) === 'ok') {
@@ -137,10 +156,11 @@ function Turn({ turn, wardrobe, ownerId, images, t, onSave }: TurnProps) {
   </li>;
 }
 
-type IdeaProps = { id: string; idea: StylistIdea; number: number; wardrobe: Wardrobe; images: PrivateImages; t: Translate;
-  check: IdeaCheck | null; onSave: () => void };
-function Idea({ id, idea, number, wardrobe, images, t, check, onSave }: IdeaProps) {
+type IdeaProps = { id: string; idea: StylistIdea; number: number; wardrobe: Wardrobe; images: PrivateImages; t: Translate; online: boolean;
+  check: IdeaCheck | null; onSave: () => void; onTryOn: (() => void) | null };
+function Idea({ id, idea, number, wardrobe, images, t, online, check, onSave, onTryOn }: IdeaProps) {
   const items = wardrobe.items;
+  const ready = check === 'ok' && !wardrobe.loading && !wardrobe.failed;
   return <article className="today-card" aria-labelledby={id}>
     <h2 id={id} className="stylist-idea-title">{t('today.idea', { number })}</h2>
     {items && <ul className="today-pieces">
@@ -148,14 +168,15 @@ function Idea({ id, idea, number, wardrobe, images, t, check, onSave }: IdeaProp
         const item = items.get(itemId);
         if (!item) return null;
         const component = pickerComponent(item);
-        return <li key={itemId} className="outfit-component"><OutfitThumb component={component} images={images} t={t} decorative /><ComponentText component={component} t={t} /></li>;
+        return <li key={itemId} className="outfit-component"><OutfitThumb component={component} images={images} t={t} decorative /><ComponentText component={component} t={t} optionalMark /></li>;
       })}
     </ul>}
     {idea.note && <p className="stylist-text">{idea.note}</p>}
     {check === 'gone' && <p className="today-missing">{t('stylist.itemGone')}</p>}
     {check === 'unavailable' && <p className="today-missing">{t('stylist.itemUnavailable')}</p>}
     <div className="today-actions">
-      <button type="button" className="button button-primary" disabled={check !== 'ok' || wardrobe.loading || wardrobe.failed} onClick={onSave}>{t('today.save')}</button>
+      <button type="button" className="button button-primary" disabled={!ready} onClick={onSave}>{t('today.save')}</button>
+      {onTryOn && <button type="button" className="text-button today-tryon" disabled={!online || !ready} onClick={onTryOn}>{t('tryon.ideaOpen')}</button>}
     </div>
   </article>;
 }

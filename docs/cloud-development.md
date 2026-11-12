@@ -2790,6 +2790,11 @@ deployed or consented, and no provider is called.
   configured owners, that consent and the saved photo bytes survive the move and the rollback. The Edge runtime stage with the new prompt hashes in the provider double is CI-only as well. Not verified here: how the image model
   renders the new prompt, which only the trial shows.
 
+## TRYON-STYLIST1 Try on for Stylist ideas (app only; no schema, Edge, manifest, consent or notice change) - 11 November 2026
+
+Owner report of 11 November 2026: "Why is there no try-on button here? I dont want to save the outfits before I can see them on myself" (the Stylist's idea cards).
+Each Stylist idea card now has the same Try on (Show on me) as Today's ideas. It appears only when try-on is ready (the same status check as Today) and the idea has at least one drawable garment, and it is enabled online while the idea is usable and the wardrobe is loaded (the Save rules). It opens the same idea try-on screen on the new route `#/stylist/try-on` with the idea's garments; nothing is saved. Back and Done return to the Stylist with the conversation, the ideas and the unsent draft as they were (they live in the app's owner-scoped store); a reload or pasted link on the route returns to the Stylist, which is empty after a reload as always. Coats in an idea carry the Optional marker and are never drawn (TRYON-PROMPT3). Verified by `tests/browser/tryon-idea.spec.ts` and the navigation-family unit test; the look of the button on the cards needs the coordinator's visual review.
+
 ## TRYON-PROMPT3 garments keep their length, and coats are optional pieces that are never drawn - 11 November 2026
 
 Owner report of 11 November 2026: "Some of the pictures look a bit weird because the clothes are too short, like this shirt and jacket" (a long-sleeve shirt with its hem at the belt line; a short bomber over a shirt whose hem ends at the jacket hem).

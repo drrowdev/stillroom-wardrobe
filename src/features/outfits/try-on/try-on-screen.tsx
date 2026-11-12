@@ -69,10 +69,10 @@ export function TryOnScreen(props: Props) {
   </section>;
 }
 
-/** An unsaved Today idea: its garments are kept in memory by the app for this route only and nothing is saved. */
+/** An unsaved Today or Stylist idea: its garments are kept in memory by the app for this route only and nothing is saved. */
 export type TryOnIdeaSeed = { itemIds: readonly string[]; components: ReadonlyMap<string, OutfitComponent> };
 
-/** Route `#/today/try-on`: Show on me starts one try-on chain at once; it names the garments, not an outfit. */
+/** Routes `#/today/try-on` and `#/stylist/try-on`: Show on me starts one try-on chain at once; it names the garments, not an outfit. */
 export function IdeaTryOnScreen(props: Common & { idea: TryOnIdeaSeed | null }) {
   const { client, scope, idea, t, onBack } = props;
   const store = tryOnStoreFor(client, scope);
