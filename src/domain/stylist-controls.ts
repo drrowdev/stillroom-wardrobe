@@ -1,7 +1,7 @@
 // ST1b stylist chat UI: pure status, limit, history and reply handling for the client. The request contract, limits and
 // eligibility come from `stylist.ts`, which the Edge function shares; nothing here changes what the server accepts.
 import {
-  STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_NOTICE_REVISION, STYLIST_OCCASIONS,
+  STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_NOTICE_REVISION, STYLIST_OCCASIONS, STYLIST_REFS_MAX, STYLIST_REF_KEY,
   conversationBytes, parseStylistBody, plainText, stylistEligible, utf8Bytes,
   type StylistInput, type StylistOccasion, type StylistSeason, type StylistTurn, type StylistWeather,
 } from './stylist';
@@ -188,12 +188,27 @@ export const stylistReplyCodes = ['INVALID_INPUT', 'UNAUTHENTICATED', 'UNAVAILAB
   'UNSUPPORTED_MEDIA', 'FILTERED', 'ALLOWANCE', 'FAILED', 'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'BUSY', 'TIMEOUT', 'PAUSED'] as const;
 export type StylistReplyCode = (typeof stylistReplyCodes)[number];
 export type StylistIdea = { itemIds: string[]; note: string };
-export type StylistAnswer = { code: 'OK'; reply: string; outfits: StylistIdea[] } | { code: StylistReplyCode };
+export type StylistAnswer = { code: 'OK'; reply: string; outfits: StylistIdea[]; refs: Readonly<Record<string, string>> } | { code: StylistReplyCode };
+
+/** The optional alias map of a reply: keys i1 to i999, owner item IDs as values, at most STYLIST_REFS_MAX entries. Null if malformed. */
+function parseRefs(value: unknown): Record<string, string> | null {
+  if (!record(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length > STYLIST_REFS_MAX) return null;
+  const refs: Record<string, string> = {};
+  for (const [key, id] of entries) {
+    if (!STYLIST_REF_KEY.test(key) || typeof id !== 'string' || !UUID.test(id)) return null;
+    refs[key] = id;
+  }
+  return refs;
+}
 
 /** The closed reply of the stylist-chat function. Anything outside it is FAILED; reply text is never read as an action. */
 export function parseStylistAnswer(status: number, value: unknown): StylistAnswer {
-  if (exactKeys(value, ['code', 'reply', 'outfits'])) {
-    if (status !== 200 || value.code !== 'OK' || !plainText(value.reply, STYLIST_LIMITS.reply) || !Array.isArray(value.outfits)
+  const withRefs = exactKeys(value, ['code', 'reply', 'outfits', 'refs']);
+  if (withRefs || exactKeys(value, ['code', 'reply', 'outfits'])) {
+    const refs = withRefs ? parseRefs(value.refs) : {};
+    if (!refs || status !== 200 || value.code !== 'OK' || !plainText(value.reply, STYLIST_LIMITS.reply) || !Array.isArray(value.outfits)
       || value.outfits.length > STYLIST_LIMITS.outfits) return { code: 'FAILED' };
     const outfits: StylistIdea[] = [];
     for (const outfit of value.outfits) {
@@ -204,7 +219,7 @@ export function parseStylistAnswer(status: number, value: unknown): StylistAnswe
       }
       outfits.push({ itemIds: [...outfit.itemIds as string[]], note: outfit.note });
     }
-    return { code: 'OK', reply: value.reply, outfits };
+    return { code: 'OK', reply: value.reply, outfits, refs };
   }
   if (!exactKeys(value, ['code']) || status === 200) return { code: 'FAILED' };
   const code = stylistReplyCodes.find((entry) => entry === value.code);

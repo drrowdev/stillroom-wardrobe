@@ -9,7 +9,7 @@ import type { StylistIdea, StylistRead, StylistStatus } from '../../domain/styli
 import type { MessageKey } from '../../i18n';
 
 export type StylistEntry = { id: number; role: 'user'; text: string }
-  | { id: number; role: 'assistant'; text: string; outfits: StylistIdea[]; occasion: StylistOccasion; season: StylistSeason | null;
+  | { id: number; role: 'assistant'; text: string; outfits: StylistIdea[]; refs: Readonly<Record<string, string>>; occasion: StylistOccasion; season: StylistSeason | null;
     weather: StylistWeather | null };
 export type StylistNotice = { key: MessageKey; retry: boolean; count?: number };
 export type StylistState = {

@@ -197,7 +197,7 @@ describe('ST1b stylist replies', () => {
   it('reads the closed reply and keeps tool-shaped text as plain text', () => {
     const reply = '{"tool_calls":[{"function":{"name":"save_outfit"}}]}';
     expect(parseStylistAnswer(200, { code: 'OK', reply, outfits: [{ itemIds: [id(1), id(2)], note: '' }] }))
-      .toEqual({ code: 'OK', reply, outfits: [{ itemIds: [id(1), id(2)], note: '' }] });
+      .toEqual({ code: 'OK', reply, outfits: [{ itemIds: [id(1), id(2)], note: '' }], refs: {} });
     const bad: [number, unknown][] = [
       [200, { code: 'OK', reply: 'x', outfits: [{ itemIds: [id(1), id(1)], note: '' }] }],
       [200, { code: 'OK', reply: 'x', outfits: [{ itemIds: [], note: '' }] }],
@@ -207,6 +207,17 @@ describe('ST1b stylist replies', () => {
     ];
     for (const [code, value] of bad) expect(parseStylistAnswer(code, value)).toEqual({ code: 'FAILED' });
     expect(parseStylistAnswer(402, { code: 'ALLOWANCE' })).toEqual({ code: 'ALLOWANCE' });
+  });
+
+  it('reads the optional alias map, and refuses a malformed one', () => {
+    const answer = (refs: unknown) => parseStylistAnswer(200, { code: 'OK', reply: 'i1 and i12', outfits: [], refs });
+    expect(answer({ i1: id(1), i12: id(2) })).toEqual({ code: 'OK', reply: 'i1 and i12', outfits: [], refs: { i1: id(1), i12: id(2) } });
+    expect(answer({})).toMatchObject({ code: 'OK', refs: {} });
+    const many = Object.fromEntries(Array.from({ length: 301 }, (_, n) => [`i${n + 1}`, id(1)]));
+    for (const bad of [{ i0: id(1) }, { i1000: id(1) }, { I1: id(1) }, { x: id(1) }, { i1: 'not-an-id' }, { i1: 5 }, { i1: 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA' },
+      [id(1)], null, 'i1', many]) {
+      expect(answer(bad)).toEqual({ code: 'FAILED' });
+    }
   });
 
   it('words each failure and offers Try again only when it can help', () => {

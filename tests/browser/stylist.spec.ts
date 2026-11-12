@@ -208,6 +208,21 @@ test.describe('ST1b stylist', () => {
     await expect(page.locator('.stylist-turn')).toHaveCount(0);
   });
 
+  test('shows garment names instead of refs in the reply and notes, and keeps the raw text for history', async ({ page }) => {
+    const { api, clothes } = await start(page, { setup: {}, consent: true });
+    const raw = 'i1 and I2 go together, but i9 is unknown and hi1 or i1d stay as written.';
+    api.stylistControl.replies.push({ status: 200, body: { code: 'OK', reply: raw, refs: { i1: clothes.shirt.id, i2: clothes.trousers.id },
+      outfits: [{ itemIds: [clothes.shirt.id, clothes.trousers.id], note: 'Swap i2 for i3 if it rains.' }] } });
+    await ask(page, 'Smart casual');
+    const shown = 'White shirt and Navy trousers go together, but one of your garments is unknown and hi1 or i1d stay as written.';
+    await expect(page.locator('.stylist-assistant > .stylist-text').first()).toHaveText(shown);
+    await expect(ideas(page).nth(0).locator('.stylist-text')).toHaveText('Swap Navy trousers for one of your garments if it rains.');
+    await ask(page, 'Something warmer');
+    await expect(page.locator('.stylist-assistant')).toHaveCount(2);
+    expect((api.stylistControl.chats[1]!.body as Row).history).toMatchObject([{ role: 'user' }, { role: 'assistant', text: raw }]);
+    expect(JSON.stringify(api.stylistControl.chats[1]!.body)).not.toMatch(/White shirt|Navy trousers/);
+  });
+
   test('rechecks ideas when returning and on each reply (M6)', async ({ page }) => {
     const { api, clothes } = await start(page, { setup: {}, consent: true });
     api.stylistControl.replies.push(reply(clothes));

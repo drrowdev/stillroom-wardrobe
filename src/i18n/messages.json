@@ -617,6 +617,7 @@
   "stylist.empty": {"en":"Add a few clothes to your wardrobe first.","fi":"Lisää ensin muutama vaate vaatekaappiin.","sv":"Lägg först till några plagg i garderoben."},
   "stylist.itemGone": {"en":"Some clothes in this idea are no longer in your wardrobe.","fi":"Osa tämän ehdotuksen vaatteista ei ole enää vaatekaapissasi.","sv":"Några plagg i det här förslaget finns inte längre i din garderob."},
   "stylist.itemUnavailable": {"en":"Some clothes in this idea can't be used right now.","fi":"Osaa tämän ehdotuksen vaatteista ei voi käyttää juuri nyt.","sv":"Några plagg i det här förslaget kan inte användas just nu."},
+  "stylist.thisPiece": {"en":"one of your garments","fi":"yksi vaatteistasi","sv":"ett av dina plagg"},
   "stylist.wardrobeFailed": {"en":"Couldn't check your clothes.","fi":"Vaatteitasi ei voitu tarkistaa.","sv":"Det gick inte att kontrollera dina plagg."},
   "stylist.unresolved": {"en":"Couldn't confirm the change. Try again to check.","fi":"Muutosta ei voitu vahvistaa. Yritä uudelleen.","sv":"Ändringen kunde inte bekräftas. Försök igen."},
   "stylistC.settings": {"en":"Stylist","fi":"Stylisti","sv":"Stylist"},

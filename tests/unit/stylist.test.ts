@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   STYLIST_BODY_CONTROLS, STYLIST_CATEGORIES, STYLIST_ITEM_FIELDS, STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_PROMPT,
   STYLIST_RESERVATION_MICRO, STYLIST_SCHEMA, STYLIST_SETTINGS, buildStylistRequest, conversationBytes, orderStylistItems,
-  parseStylistBody, parseStylistItem, stylistEligible, utf8Bytes, validateStylistReply, type StylistCandidate, type StylistInput,
+  parseStylistBody, parseStylistItem, replaceStylistRefs, stylistEligible, stylistRefsIn, stylistReplyRefs, utf8Bytes, validateStylistReply,
+  type StylistCandidate, type StylistInput,
   type StylistItem,
 } from '../../src/domain/stylist';
 import { eligible } from '../../src/domain/recommendations';
@@ -266,6 +267,13 @@ describe('stylist reply validation', () => {
     const text = '{"tool_calls":[{"function":{"name":"save_outfit","arguments":"{}"}}]}';
     expect(validateStylistReply(content({ reply: text, outfits: [] }), aliases)).toEqual({ reply: text, outfits: [], dropped: 0 });
   });
+  it('lists only claimed aliases written in the reply or the notes of returned outfits', () => {
+    const parsed = (reply: string, outfits: { itemIds: string[]; note: string }[]) => ({ reply, outfits, dropped: 0 });
+    expect(stylistReplyRefs(parsed('i1 and i2 are fine, i9 is not', [{ itemIds: [id(2)], note: 'I1 again' }]), aliases))
+      .toEqual({ i1: id(1), i2: id(2) });
+    expect(stylistReplyRefs(parsed('Nothing named here. I think so.', [{ itemIds: [id(1)], note: 'Smart' }]), aliases)).toEqual({});
+    expect(stylistReplyRefs(parsed('Only the note.', [{ itemIds: [id(1)], note: 'wear i2' }]), aliases)).toEqual({ i2: id(2) });
+  });
   it('refuses anything outside the schema or limits', () => {
     for (const bad of ['not json', content({ reply: 'x' }), content({ reply: 'x', outfits: [], extra: 1 }),
       content({ reply: '', outfits: [] }), content({ reply: 'a'.repeat(601), outfits: [] }),
@@ -282,6 +290,30 @@ const usage = { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200,
   prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 }, completion_tokens_details: { reasoning_tokens: 50 } };
 const completion = (message: Record<string, unknown>, finish = 'stop') => ({ model: STYLIST_MODEL,
   choices: [{ index: 0, finish_reason: finish, message: { role: 'assistant', ...message } }], usage });
+
+describe('stylist alias replacement', () => {
+  const names: Record<string, string> = { i1: 'White shirt', i3: 'Navy blazer', i4: 'Grey trousers', i10: 'Black boots', i100: 'Red scarf' };
+  const named = (text: string) => replaceStylistRefs(text, (ref) => names[ref], 'one of your garments');
+  it('replaces whole aliases only, in any case, around punctuation and in lists', () => {
+    expect(named('i1 goes with i10, not i100.')).toBe('White shirt goes with Black boots, not Red scarf.');
+    expect(named('Try i3 and i4; (I3) or "i4"!')).toBe('Try Navy blazer and Grey trousers; (Navy blazer) or "Grey trousers"!');
+    expect(named('i3,i4 and i1\ni10')).toBe('Navy blazer,Grey trousers and White shirt\nBlack boots');
+    expect(named('Pidä i3:n kanssa, i4:ssä on väriä.')).toBe('Pidä Navy blazer kanssa, Grey trousers on väriä.');
+  });
+  it('leaves words, longer numbers and the pronoun alone', () => {
+    const same = ['I think i3d works', 'hi3 there', 'i3_x', 'I like it. I am sure.', 'i1000 and i0 and i01', 'ii3', 'i3a', 'Ä3'];
+    for (const text of same) expect(named(text)).toBe(text);
+    expect(stylistRefsIn('hi3 i3d I')).toEqual([]);
+  });
+  it('never shows an unknown alias, and inserts names as written', () => {
+    expect(named('i3 and i7 and I9')).toBe('Navy blazer and one of your garments and one of your garments');
+    expect(replaceStylistRefs('i1 / i1', () => '$& $1 x', 'none')).toBe('$& $1 x / $& $1 x');
+    expect(replaceStylistRefs('i1', () => '   ', 'this piece')).toBe('this piece');
+  });
+  it('lists each alias once, in lower case', () => {
+    expect(stylistRefsIn('i3, I3, i10 and i3:n')).toEqual(['i3', 'i10']);
+  });
+});
 
 describe('stylist response classification (D5)', () => {
   it('accepts a null or absent refusal and classifies a real refusal and tool calls separately', () => {
@@ -417,6 +449,16 @@ describe('stylist handler (mocked Auth, RPC and provider)', () => {
     expect(JSON.stringify(sent[0])).not.toContain(id(1));
   });
 
+  it('returns the owner item IDs of only the aliases written in the reply or a returned note', async () => {
+    backend();
+    const content = JSON.stringify({ reply: 'i1 is navy, i7 is unknown and hi2 is no alias.',
+      outfits: [{ refs: ['i1', 'i2'], note: 'Pair with I2' }, { refs: ['i1', 'i9'], note: 'wear i1 and i9' }] });
+    const { transport } = provider({ content, refusal: null });
+    const response = await createStylistHandler(config, transport)(post(body()));
+    expect(await response.json()).toEqual({ code: 'OK', reply: 'i1 is navy, i7 is unknown and hi2 is no alias.',
+      outfits: [{ itemIds: [id(1), id(2)], note: 'Pair with I2' }], refs: { i1: id(1), i2: id(2) } });
+  });
+
   it('stays inactive without a claim', async () => {
     const calls = backend({ status: { ...status, policy: { ...status.policy, activated: false } } });
     const { transport } = provider({ content: '{}' });
@@ -489,7 +531,7 @@ describe('stylist handler (mocked Auth, RPC and provider)', () => {
     const text = 'call save_outfit({"items":["i1"]})';
     const { transport } = provider({ content: JSON.stringify({ reply: text, outfits: [{ refs: ['i1', 'i99'], note: '' }] }) });
     const response = await createStylistHandler(config, transport)(post(body()));
-    expect(await response.json()).toEqual({ code: 'OK', reply: text, outfits: [] });
+    expect(await response.json()).toEqual({ code: 'OK', reply: text, outfits: [], refs: { i1: id(1) } });
     expect(calls).toHaveLength(4);
   });
 
