@@ -134,7 +134,7 @@ export async function send(store: StylistStore, context: SendContext): Promise<v
   if (store.disposed || store.get().generation !== generation) return;
   if (answer.code === 'OK') {
     const turns: StylistEntry[] = [...store.get().turns, { id: ++store.nextId, role: 'user', text: message },
-      { id: ++store.nextId, role: 'assistant', text: answer.reply, outfits: answer.outfits, occasion: body.occasion ?? state.occasion,
+      { id: ++store.nextId, role: 'assistant', text: answer.reply, outfits: answer.outfits, refs: answer.refs, occasion: body.occasion ?? state.occasion,
         season: body.season, weather: body.weather }];
     store.update({ turns, pending: null, announce: { key: 'stylist.replied', at: token } });
     return;

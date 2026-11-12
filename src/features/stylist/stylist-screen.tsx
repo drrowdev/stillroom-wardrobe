@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '../../app/icon';
 import { loadWardrobe } from '../../data/items';
 import { occasionKeys, occasions, type Occasion } from '../../domain/outfits';
+import { replaceStylistRefs } from '../../domain/stylist';
 import { checkIdea, isStylistOccasion, stylistLimits, stylistWeather, type IdeaCheck, type StylistIdea } from '../../domain/stylist-controls';
 import { weatherContext, type WeatherConfig } from '../../domain/weather';
 import type { WardrobeItem } from '../../domain/wardrobe';
@@ -133,11 +134,17 @@ function Turn({ turn, wardrobe, ownerId, images, t, online, tryOn, onSave, onTry
     const components = new Map(idea.itemIds.flatMap((id) => { const item = items.get(id); return item ? [[id, pickerComponent(item)] as const] : []; }));
     return ideaSelection(idea.itemIds, components).steps.length ? { itemIds: idea.itemIds, components } : null;
   };
+  // The model writes garments as refs (i3). Only this device knows their names, so they are filled in here, and an alias
+  // that cannot be named is never shown as written.
+  const named = (text: string) => turn.role !== 'assistant' ? text : replaceStylistRefs(text, (ref) => {
+    const id = turn.refs[ref];
+    return id ? wardrobe.items?.get(id)?.title : null;
+  }, t('stylist.thisPiece'));
   return <li className={`stylist-turn stylist-${turn.role}`}>
     <span className="sr-only">{t(turn.role === 'user' ? 'stylist.you' : 'stylist.me')}</span>
-    <p className="stylist-text">{turn.text}</p>
+    <p className="stylist-text">{named(turn.text)}</p>
     {turn.role === 'assistant' && turn.outfits.length > 0 && <div className="today-ideas stylist-ideas">
-      {turn.outfits.map((idea, index) => <Idea key={index} id={`stylist-idea-${turn.id}-${index}`} idea={idea} number={index + 1}
+      {turn.outfits.map((idea, index) => <Idea key={index} id={`stylist-idea-${turn.id}-${index}`} idea={idea} note={named(idea.note)} number={index + 1}
         wardrobe={wardrobe} images={images} t={t}
         check={wardrobe.items ? checkIdea(idea.itemIds, wardrobe.items, ownerId, turn.weather) : null}
         onTryOn={seedFor(idea) ? () => {
@@ -156,9 +163,9 @@ function Turn({ turn, wardrobe, ownerId, images, t, online, tryOn, onSave, onTry
   </li>;
 }
 
-type IdeaProps = { id: string; idea: StylistIdea; number: number; wardrobe: Wardrobe; images: PrivateImages; t: Translate; online: boolean;
+type IdeaProps = { id: string; idea: StylistIdea; note: string; number: number; wardrobe: Wardrobe; images: PrivateImages; t: Translate; online: boolean;
   check: IdeaCheck | null; onSave: () => void; onTryOn: (() => void) | null };
-function Idea({ id, idea, number, wardrobe, images, t, online, check, onSave, onTryOn }: IdeaProps) {
+function Idea({ id, idea, note, number, wardrobe, images, t, online, check, onSave, onTryOn }: IdeaProps) {
   const items = wardrobe.items;
   const ready = check === 'ok' && !wardrobe.loading && !wardrobe.failed;
   return <article className="today-card" aria-labelledby={id}>
@@ -171,7 +178,7 @@ function Idea({ id, idea, number, wardrobe, images, t, online, check, onSave, on
         return <li key={itemId} className="outfit-component"><OutfitThumb component={component} images={images} t={t} decorative /><ComponentText component={component} t={t} optionalMark /></li>;
       })}
     </ul>}
-    {idea.note && <p className="stylist-text">{idea.note}</p>}
+    {note && <p className="stylist-text">{note}</p>}
     {check === 'gone' && <p className="today-missing">{t('stylist.itemGone')}</p>}
     {check === 'unavailable' && <p className="today-missing">{t('stylist.itemUnavailable')}</p>}
     <div className="today-actions">

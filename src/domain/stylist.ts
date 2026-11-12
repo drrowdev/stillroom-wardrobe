@@ -142,6 +142,26 @@ export function plainText(value: unknown, limit: number, allowEmpty = false): va
     && !/\p{Cs}/u.test(value) && ![...value].some((ch) => { const c = ch.codePointAt(0) ?? 0; return (c <= 0x1f && c !== 0x0a) || (c >= 0x7f && c <= 0x9f); });
 }
 
+/** The most alias entries a reply may carry; the text limits keep the real number well below this. */
+export const STYLIST_REFS_MAX = 300;
+export const STYLIST_REF_KEY = /^i[1-9][0-9]{0,2}$/;
+// An alias is i or I plus 1 to 999, standing alone: not inside a word ("hi3", "i3d") and not a longer number (i1 never
+// matches in i10). A Finnish case ending after a colon ("i3:n") belongs to the alias. No lookbehind (older Safari).
+const STYLIST_REF_TOKEN = /(^|[^\p{L}\p{N}_])[iI]([1-9][0-9]{0,2})(?::\p{L}+)?(?![\p{L}\p{N}_])/gu;
+
+/** The distinct aliases written in `text`, normalised to the lower-case form used in requests. */
+export function stylistRefsIn(text: string): string[] {
+  return [...new Set([...text.matchAll(STYLIST_REF_TOKEN)].map((match) => `i${match[2]}`))];
+}
+
+/**
+ * `text` with every alias replaced by `resolve(alias)`, or by `fallback` when that gives nothing, so no alias is ever
+ * left in shown text. Single pass; the replacement is inserted as written.
+ */
+export function replaceStylistRefs(text: string, resolve: (ref: string) => string | null | undefined, fallback: string): string {
+  return text.replace(STYLIST_REF_TOKEN, (_whole, before: string, digits: string) => `${before}${resolve(`i${digits}`)?.trim() || fallback}`);
+}
+
 /** Parses the closed request body; null means INVALID_INPUT. Owner fields and unknown keys are refused. */
 export function parseStylistBody(value: unknown): StylistInput | null {
   if (!exactKeys(value, ['requestId', 'message', 'history', 'occasion', 'season', 'weather'])) return null;
@@ -394,4 +414,17 @@ export function validateStylistReply(content: unknown, aliases: ReadonlyMap<stri
     outfits.push({ itemIds: refs.map((ref) => aliases.get(ref)!), note: outfit.note });
   }
   return { reply: value.reply, outfits, dropped };
+}
+
+/**
+ * The aliases the person will see in this reply's text or in the notes of the outfits returned, mapped to the owner's
+ * item IDs. Only aliases claimed in this request are included, so nothing else about the wardrobe is revealed.
+ */
+export function stylistReplyRefs(parsed: StylistReply, aliases: ReadonlyMap<string, string>): Record<string, string> {
+  const refs: Record<string, string> = {};
+  for (const ref of stylistRefsIn([parsed.reply, ...parsed.outfits.map((outfit) => outfit.note)].join('\n'))) {
+    const id = aliases.get(ref);
+    if (id !== undefined && Object.keys(refs).length < STYLIST_REFS_MAX) refs[ref] = id;
+  }
+  return refs;
 }

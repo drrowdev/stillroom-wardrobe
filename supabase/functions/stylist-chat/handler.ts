@@ -1,7 +1,7 @@
 import {
   STYLIST_LIMITS, STYLIST_MANIFEST, STYLIST_MODEL, STYLIST_NOTICE_REVISION, STYLIST_RESERVATION_MICRO,
   buildStylistRequest, claimedCandidate, conversationBytes, parseStylistBody, parseStylistItem, stylistEligible,
-  validateStylistReply, type StylistItem,
+  validateStylistReply, stylistReplyRefs, type StylistItem,
 } from '../../../src/domain/stylist.ts';
 import { azureConfigured, type AzureConfig, type AzureTransport } from '../analyze-clothing/azure-openai.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
@@ -142,7 +142,8 @@ export function createStylistHandler(config: StylistConfig, azureTransport: Azur
       const code = outcome.code === 'OK' && !parsedReply ? 'FAILED' : outcome.code;
       const finished = await finish(code, outcome.usage);
       if (finished !== 'OK' || code !== 'OK' || !parsedReply) return error(finished === 'OK' ? code : finished);
-      return reply({ code: 'OK', reply: parsedReply.reply, outfits: parsedReply.outfits }, 200);
+      const refs = stylistReplyRefs(parsedReply, built.aliases);
+      return reply({ code: 'OK', reply: parsedReply.reply, outfits: parsedReply.outfits, ...Object.keys(refs).length > 0 ? { refs } : {} }, 200);
     } catch (failure) {
       return error(signal.aborted || failure instanceof DOMException && ['TimeoutError', 'AbortError'].includes(failure.name)
         ? 'TIMEOUT' : failure instanceof ProtocolError ? failure.code : 'FAILED');

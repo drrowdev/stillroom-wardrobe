@@ -76,7 +76,7 @@ describe('ST1b stylist client', () => {
     vi.stubGlobal('fetch', fetcher);
     const body = { requestId: '11111111-1111-4111-8111-111111111111', message: 'hi', history: [], occasion: null, season: null, weather: null };
     fetcher.mockResolvedValueOnce(Response.json({ code: 'OK', reply: 'Try these', outfits: [] }));
-    await expect(stylist.chat(body)).resolves.toEqual({ code: 'OK', reply: 'Try these', outfits: [] });
+    await expect(stylist.chat(body)).resolves.toEqual({ code: 'OK', reply: 'Try these', outfits: [], refs: {} });
     expect(fetcher.mock.calls[0]![0]).toBe(`${config.url}/functions/v1/stylist-chat`);
     expect(JSON.parse(String(fetcher.mock.calls[0]![1]?.body))).toEqual(body);
     fetcher.mockResolvedValueOnce(Response.json({ code: 'ALLOWANCE' }, { status: 429 }));
@@ -192,12 +192,12 @@ describe('ST1b stylist ordering (M3)', () => {
     h.store.update({ draft: 'Second question' });
     const next = send(h.store, { online: true, season: 'autumn', weather: null });
     expect(h.store.inflight).not.toBeNull();
-    h.chats[0]!.reply.resolve({ code: 'OK', reply: 'Old reply', outfits: [] });
+    h.chats[0]!.reply.resolve({ code: 'OK', reply: 'Old reply', outfits: [], refs: {} });
     await old;
     // The old request's cleanup must not clear the newer request.
     expect(h.store.inflight).not.toBeNull();
     expect(h.store.get()).toMatchObject({ turns: [], pending: 'Second question' });
-    h.chats[1]!.reply.resolve({ code: 'OK', reply: 'New reply', outfits: [] });
+    h.chats[1]!.reply.resolve({ code: 'OK', reply: 'New reply', outfits: [], refs: {} });
     await next;
     expect(h.store.get().turns.map((turn) => turn.text)).toEqual(['Second question', 'New reply']);
     expect(h.store.inflight).toBeNull();
@@ -212,7 +212,7 @@ describe('ST1b stylist ordering (M3)', () => {
     const pending = send(h.store, { online: true, season: null, weather: null });
     h.abort.abort();
     expect(h.chats[0]!.signal?.aborted).toBe(true);
-    h.chats[0]!.reply.resolve({ code: 'OK', reply: 'Late', outfits: [] });
+    h.chats[0]!.reply.resolve({ code: 'OK', reply: 'Late', outfits: [], refs: {} });
     await pending;
     expect(h.store.get().turns).toEqual([]);
     await expect(readStatus(h.store, 'active')).resolves.toBeNull();
@@ -326,7 +326,7 @@ describe('ST1b stylist ordering (M3)', () => {
     await first;
     h.store.update({ draft: 'Question' });
     const sent = send(h.store, { online: true, season: null, weather: null });
-    h.chats[0]!.reply.resolve({ code: 'OK', reply: 'Reply', outfits: [] });
+    h.chats[0]!.reply.resolve({ code: 'OK', reply: 'Reply', outfits: [], refs: {} });
     await sent;
     h.store.update({ draft: 'Unsent words', occasion: 'business' });
     const later = readStatus(h.store, 'active');
