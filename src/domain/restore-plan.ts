@@ -82,13 +82,17 @@ const aiObserved: readonly string[] = ['category', 'garment_type', 'subcategory'
   'brand', 'size_label', 'upper_coverage', 'lower_coverage'];
 const empty = (value: unknown) => value === null || value === undefined || value === '' || Array.isArray(value) && value.length === 0;
 // Kinds are kept, revisions start again at 1. A non-empty value without a kind becomes unknown, and an AI kind is kept only
-// on a non-empty field the analyzer can fill; otherwise it becomes unknown. Empty fields carry no kind.
+// on a non-empty field the analyzer can fill; otherwise it becomes unknown. Empty fields carry no kind, except a garment type the
+// owner cleared on purpose (empty with kind user): that assertion is what keeps the backfill from choosing a type for it.
 export function restoredKinds(row: Row): Partial<Record<ProvenanceField, ProvenanceKind>> {
   const source = isObject(row.field_provenance) ? row.field_provenance : {};
   const kinds: Partial<Record<ProvenanceField, ProvenanceKind>> = {};
   for (const field of provenanceFields) {
-    if (empty(row[field])) continue;
     const entry = source[field];
+    if (empty(row[field])) {
+      if (field === 'garment_type' && isObject(entry) && entry.kind === 'user') kinds[field] = 'user';
+      continue;
+    }
     let kind: ProvenanceKind = isObject(entry) && provenanceKinds.some(value => value === entry.kind) ? entry.kind as ProvenanceKind : 'unknown';
     if (kind === 'ai_estimated' && !aiEstimated.includes(field) || kind === 'ai_observed' && !aiObserved.includes(field)) kind = 'unknown';
     kinds[field] = kind;

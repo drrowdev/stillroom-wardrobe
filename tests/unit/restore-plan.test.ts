@@ -71,7 +71,13 @@ describe('restored provenance kinds', () => {
       .toMatchObject({ garment_type: 'ai_observed' });
     expect(restoredKinds({ category: 'layer', garment_type: 'vest', field_provenance: {} })).toMatchObject({ garment_type: 'unknown' });
     expect(restoredKinds({ category: 'layer', garment_type: null, field_provenance: { garment_type: { kind: 'user', revision: 3 } } }))
+      .toMatchObject({ garment_type: 'user' });
+    // Only an owner clear survives: an empty type with any other kind, or no entry, carries none; other empty fields never do.
+    expect(restoredKinds({ category: 'layer', garment_type: null, field_provenance: { garment_type: { kind: 'unknown', revision: 3 } } }))
       .not.toHaveProperty('garment_type');
+    expect(restoredKinds({ category: 'layer', garment_type: null, field_provenance: {} })).not.toHaveProperty('garment_type');
+    expect(restoredKinds({ category: 'layer', garment_type: null, subcategory: null, field_provenance: { subcategory: { kind: 'user', revision: 2 } } }))
+      .not.toHaveProperty('subcategory');
   });
 });
 

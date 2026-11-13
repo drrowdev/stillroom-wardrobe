@@ -468,6 +468,24 @@ async function backfillProbes(p, snapshot, ha, patch) {
   equal([keptCleared.garment_type, keptCleared.field_provenance.garment_type.kind], [null, 'user']);
   equal((await row(ids.typed)).garment_type, 'shirt');
 
+  mark('backfill-restored-clear');
+  // A restore keeps the owner's explicit clear: an empty type with the user assertion is accepted by the checked restore and is then
+  // exactly as protected as a clear made in the app (never proposed, never written even from a forged list).
+  const restoredClear = ha.track();
+  Object.assign(restoredClear.p_item, { category: 'top', title: 'Synthetic restored polo shirt', garment_type: null });
+  restoredClear.p_item.field_provenance = { title: proofOf('user'), category: proofOf('user'), garment_type: proofOf('user') };
+  const restoredClearRow = await ha.call('reserve_restored_item_save', restoredClear);
+  need(restoredClearRow.ok && restoredClearRow.data.length === 1);
+  await ha.upload(restoredClear);
+  await ha.finalize(restoredClear, restoredClearRow.data[0]);
+  const keptRestored = await row(restoredClear.p_item.id);
+  equal([keptRestored.garment_type, keptRestored.field_provenance.garment_type], [null, proofOf('user')]);
+  const restoredReport = await dry(a);
+  need(!restoredReport.proposals.some((entry) => entry.id === keptRestored.id));
+  need(!restoredReport.unmatched.some((entry) => entry.id === keptRestored.id));
+  await apply(a, [{ id: keptRestored.id, version: keptRestored.version, type: 'polo' }]);
+  equal(await row(keptRestored.id), keptRestored);
+
   mark('backfill-replay');
   await apply(a, proposals);
   for (const [id, version] of Object.entries(setVersions)) equal((await row(id)).version, version);

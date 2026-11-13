@@ -383,7 +383,7 @@ describe('privileged controller', () => {
   it('accepts only the closed operations for the fixed owners', () => {
     expect(controller.validOperation({ type: 'op', id: 1, op: 'freeze', owner: 'A' })).toBe(true);
     expect(controller.validOperation({ type: 'op', id: 2, op: 'count' })).toBe(true);
-    for (const op of ['budget-low', 'budget-restore']) {
+    for (const op of ['budget-low', 'budget-restore', 'analysis-v4', 'analysis-v2']) {
       expect(controller.validOperation({ type: 'op', id: 2, op, owner: 'B' })).toBe(true);
       expect(controller.validOperation({ type: 'op', id: 2, op })).toBe(false);
       expect(controller.validOperation({ type: 'op', id: 2, op, owner: 'C' })).toBe(false);
@@ -466,6 +466,20 @@ describe('privileged controller', () => {
   });
   it('names a delegated line for every I17 delegation', () => {
     for (const key of Object.keys(EDGE_DELEGATIONS)) expect(delegatedLine(key)).toMatch(new RegExp(`^DELEGATED: .+ -> test:edge EDGE-RUNTIME ${key}$`));
+  });
+});
+
+describe('fixture runtime mounts', () => {
+  it('mounts every src/ file that the functions the fixture serves import, so the function can boot', async () => {
+    const real = await deploy.analyzeDeployArtifacts(root);
+    const source = await read('scripts/edge-fixture.mjs');
+    const mounted = [...source.matchAll(/mount\('(src\/[^']+)', '\/work\/\1'\)/g)].map((match) => match[1]!);
+    const served = ['analyze-clothing', 'stylist-chat', 'enhance-photo', 'try-on'];
+    const needed = new Set<string>();
+    for (const name of served) for (const file of real.graph[name] ?? []) if (file.startsWith('src/')) needed.add(file);
+    expect(needed.has('src/domain/garment-types.ts')).toBe(true);
+    const covered = (file: string) => mounted.some((entry) => entry === file || (!entry.endsWith('.ts') && file.startsWith(`${entry}/`)));
+    expect([...needed].filter((file) => !covered(file)).sort()).toEqual([]);
   });
 });
 
