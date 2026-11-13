@@ -8,6 +8,7 @@ import {
   type FieldProvenance, type GarmentLength, type Pattern, type SleeveLength,
 } from './attribute-provenance';
 import { colours, styleTagLimit } from './preferences';
+import { garmentTypes, isGarmentTypeFor, type GarmentType } from './garment-types';
 
 export const seasons = ['spring', 'summer', 'autumn', 'winter'] as const;
 export const availability = ['ready', 'laundry', 'repair', 'lent'] as const;
@@ -15,7 +16,7 @@ export const lifecycle = ['active', 'archived', 'donated', 'sold'] as const;
 export const garmentFields = [...provenanceFields, 'currency', 'favourite', 'availability', 'lifecycle', 'exclude_suggestions', 'wear_more'] as const;
 export type GarmentField = typeof garmentFields[number];
 export type GarmentValues = {
-  title: string; category: Category; subcategory: string | null; colours: string[];
+  title: string; category: Category; garment_type: GarmentType | null; subcategory: string | null; colours: string[];
   pattern: Pattern | null; sleeve_length: SleeveLength | null; garment_length: GarmentLength | null;
   brand: string | null; size_label: string | null; material: string | null; seasons: string[];
   formality: number | null; warmth: number | null; min_temp: number | null; max_temp: number | null;
@@ -37,7 +38,7 @@ export const integerRanges = {
   rain_rating: [0, 2], upper_coverage: [0, 2], lower_coverage: [0, 2],
 } as const;
 export const collectionLimits = { colours: 3, seasons: 4, style_tags: 8, tags: 12 } as const;
-export const enumFields = { category: categories, pattern: patterns, sleeve_length: sleeveLengths, garment_length: garmentLengths, availability, lifecycle } as const;
+export const enumFields = { category: categories, garment_type: garmentTypes, pattern: patterns, sleeve_length: sleeveLengths, garment_length: garmentLengths, availability, lifecycle } as const;
 export const booleanFields = ['windproof', 'favourite', 'exclude_suggestions', 'wear_more'] as const;
 
 export function sameValue(left: unknown, right: unknown): boolean {
@@ -56,7 +57,7 @@ export function freezeValues<T>(value: T): T {
 }
 export function initialRawFields(currency: string): RawFields {
   return {
-    title: '', category: '', subcategory: '', colours: [], pattern: '', sleeve_length: '', garment_length: '',
+    title: '', category: '', garment_type: '', subcategory: '', colours: [], pattern: '', sleeve_length: '', garment_length: '',
     brand: '', size_label: '', material: '', seasons: [], formality: '', warmth: '', min_temp: '', max_temp: '',
     rain_rating: '', windproof: '', upper_coverage: '', lower_coverage: '', style_tags: [], tags: [],
     purchase_date: '', purchase_price: '', notes: '', currency, favourite: 'false', availability: 'ready',
@@ -76,10 +77,15 @@ export function newGarmentDraft(currency: string, language: Language, baseline?:
   return { raw, intent: {}, priceLanguage: baseline ? 'en' : language };
 }
 export function editGarmentField<K extends GarmentField>(draft: GarmentDraft, key: K, value: RawFields[K], language: Language): GarmentDraft {
-  return {
+  const next: GarmentDraft = {
     raw: { ...draft.raw, [key]: Array.isArray(value) ? [...value] : value }, intent: { ...draft.intent, [key]: true },
     priceLanguage: key === 'purchase_price' ? language : draft.priceLanguage,
   };
+  // A type that the new category does not have is cleared, as an explicit edit of the type.
+  if (key === 'category' && next.raw.garment_type !== '' && !isGarmentTypeFor(next.raw.category, next.raw.garment_type)) {
+    next.raw.garment_type = ''; next.intent.garment_type = true;
+  }
+  return next;
 }
 function allowed(value: unknown, codes: readonly string[]): boolean {
   return typeof value === 'string' && codes.includes(value);
@@ -128,7 +134,7 @@ export function validateGarmentDraft(draft: GarmentDraft, baseline?: GarmentValu
       if (raw !== '' && (!/^-?\d+$/.test(raw) || !Number.isInteger(Number(raw)) || Number(raw) < min || Number(raw) > max)) errors[key] = true;
       values[key] = raw === '' ? null : Number(raw);
     } else if (key in enumFields) {
-      const optional = key === 'pattern' || key === 'sleeve_length' || key === 'garment_length';
+      const optional = key === 'pattern' || key === 'sleeve_length' || key === 'garment_length' || key === 'garment_type';
       if (!(optional && raw === '') && !allowed(raw, enumFields[key as keyof typeof enumFields])) errors[key] = true;
       values[key] = optional && raw === '' ? null : raw;
     } else if (key === 'purchase_price') {
@@ -144,6 +150,8 @@ export function validateGarmentDraft(draft: GarmentDraft, baseline?: GarmentValu
       values[key] = raw === '' ? null : raw === 'true';
     }
   }
+  if (values.garment_type !== null && values.garment_type !== undefined && !errors.garment_type && !errors.category
+    && !isGarmentTypeFor(values.category, values.garment_type)) errors.garment_type = true;
   if (typeof values.min_temp === 'number' && typeof values.max_temp === 'number' && values.min_temp > values.max_temp) {
     errors.min_temp = true; errors.max_temp = true;
   }

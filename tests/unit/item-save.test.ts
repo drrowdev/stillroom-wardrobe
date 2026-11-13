@@ -16,13 +16,15 @@ const sql = await readFile(new URL('../../supabase/migrations/20260910070000_che
 describe('checked manual Save source contract (not database execution)', () => {
   it('uses the same thirty manual fields and only explicit user assertions', () => {
     const value = intent();
-    expect(Object.keys(value.p_item).sort()).toEqual([...garmentFields, 'id', 'field_provenance'].sort());
-    expect(manualFields).toEqual(provenanceFields);
+    // The integration fixture is the pre-garment-type client: the server accepts a Save without garment_type (it is optional).
+    const modern = garmentFields.filter((field) => field !== 'garment_type');
+    expect(Object.keys(value.p_item).sort()).toEqual([...modern, 'id', 'field_provenance'].sort());
+    expect(manualFields).toEqual(provenanceFields.filter((field) => field !== 'garment_type'));
     expect(value.p_item.field_provenance).toEqual({ title: { kind: 'user', revision: 1 }, category: { kind: 'user', revision: 1 } });
     expect(value.p_image.alt_text).toBe('');
     expect(intent().p_item.id).not.toBe(value.p_item.id);
     expect(intent().p_image.id).not.toBe(value.p_image.id);
-    for (const field of garmentFields) expect(sql).toContain(`'${field}'`);
+    for (const field of garmentFields.filter((key) => key !== 'garment_type')) expect(sql).toContain(`'${field}'`);
   });
   it('keeps the A1 marker to exactly three non-null UUIDs and owner-local keys', () => {
     const marker = sql.match(/create table private\.item_save_used_ids \(([\s\S]*?)\n\);/)?.[1];
@@ -293,7 +295,7 @@ describe('connected checked manual Save (actual SDK, synthetic HTTP)', () => {
         main_sha256: api.attempt.photo.mainSha256, thumb_sha256: api.attempt.photo.thumbSha256,
         width: 2, height: 3, alt_text: '' },
     });
-    expect(Object.keys(api.attempt.payload)).toHaveLength(31);
+    expect(Object.keys(api.attempt.payload)).toHaveLength(32);
     expect(api.calls[3]!.body).toEqual({ p_item_id: api.attempt.itemId, p_image_id: api.attempt.imageId, p_fingerprint: api.row.fingerprint });
     expect(stages).toEqual(['capture.reserving', 'capture.uploading', 'capture.finishing']);
     expect(api.row.item).toMatchObject({ purchase_price: 0.1, warmth: null,

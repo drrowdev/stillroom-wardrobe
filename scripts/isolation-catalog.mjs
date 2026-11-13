@@ -204,7 +204,7 @@ export const PRIVATE_INTERNAL = Object.freeze([
   'tryon_expire_accounting(uuid, timestamp with time zone, integer)',
   'tryon_end_chain(uuid, uuid, text, text, timestamp with time zone)',
   'tryon_expire_owner(uuid, timestamp with time zone, integer)', 'tryon_purge_overdue(timestamp with time zone)',
-  'tryon_select_steps(uuid, uuid)', 'tryon_select_idea_steps(uuid, uuid[])', 'tryon_results_contract()', 'tryon_drawn_steps(text, jsonb)',
+  'tryon_select_steps(uuid, uuid)', 'tryon_select_idea_steps(uuid, uuid[])', 'tryon_results_contract()', 'tryon_drawn_steps(text, jsonb)', 'garment_type_allowed(text, text)',
   'tryon_close_attempt(uuid, uuid, text, timestamp with time zone)',
   'tryon_replay(private.ai_usage_evidence, private.ai_usage)',
   'tryon_person_photo_admit(bytea)', 'tryon_person_photo_guard()',

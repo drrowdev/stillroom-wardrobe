@@ -29,8 +29,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 export const CURRENT_PERIOD_SQL = "to_char(v_now at time zone 'UTC','YYYY-MM')";
 
 export const SWITCH_PROFILES = Object.freeze({
-  v2: Object.freeze({ manifest: 'azure-eu-terra-devtest-v2', maxRequestMicro: 4097351 }),
-  v3: Object.freeze({ manifest: 'azure-eu-terra-devtest-v3', maxRequestMicro: 1 }),
+  v2: Object.freeze({ manifest: 'azure-eu-terra-devtest-v2', maxRequestMicro: 4097351, promptVersion: 2 }),
+  v3: Object.freeze({ manifest: 'azure-eu-terra-devtest-v3', maxRequestMicro: 1, promptVersion: 2 }),
+  // CAPS1a: the garment type analysis (prompt version 3). The switch moves between v3 and v4 with switchManifestSql below.
+  v4: Object.freeze({ manifest: 'azure-eu-terra-devtest-v4', maxRequestMicro: 1, promptVersion: 3 }),
 });
 
 export function switchControlsSql(ownerId, direction) {
@@ -38,6 +40,21 @@ export function switchControlsSql(ownerId, direction) {
   if (direction !== 'forward' && direction !== 'rollback') throw new Error('Invalid direction.');
   const from = direction === 'forward' ? SWITCH_PROFILES.v2 : SWITCH_PROFILES.v3;
   const to = direction === 'forward' ? SWITCH_PROFILES.v3 : SWITCH_PROFILES.v2;
+  return build(ownerId, from, to, false);
+}
+
+// CAPS1a: the same guarded transaction between two named profiles, "from" and "to", each one of v2, v3 and v4. It additionally
+// requires the target manifest to be installed with that prompt version, and it writes the prompt version with the manifest and
+// the amount, because v3 and v4 differ in it. The direction pair v3 -> v4 is the rollout and v4 -> v3 the rollback; moving to or
+// from v2 stays with switchControlsSql. Activation, consent, notice, allowance, limits and the spending guard's pause are never written.
+export function switchManifestSql(ownerId, fromKey, toKey) {
+  if (typeof ownerId !== 'string' || !UUID.test(ownerId)) throw new Error('Invalid owner id.');
+  const known = ['v3', 'v4'];
+  if (!known.includes(fromKey) || !known.includes(toKey) || fromKey === toKey) throw new Error('Invalid switch.');
+  return build(ownerId, SWITCH_PROFILES[fromKey], SWITCH_PROFILES[toKey], true);
+}
+
+function build(ownerId, from, to, explicit) {
   return `begin;
 do $switch$
 declare p public.profiles; c private.ai_controls; v_now timestamptz;
@@ -46,10 +63,13 @@ begin
   if not found then raise exception 'BLOCKED: no profile'; end if;
   select * into c from private.ai_controls where owner_id=p.owner_id for update;
   if not found or c.execution_manifest_id is distinct from '${from.manifest}' or c.max_request_micro<>${from.maxRequestMicro}
-    or c.prompt_version<>2 or c.notice_revision<>2 or c.model_id<>'gpt-5.6-terra-2026-07-09' then
+    or c.prompt_version<>${from.promptVersion} or c.notice_revision<>2 or c.model_id<>'gpt-5.6-terra-2026-07-09' then
     raise exception 'BLOCKED: the controls are not the expected current row';
   end if;
-  v_now := clock_timestamp();
+${explicit ? `  if not exists(select 1 from private.ai_execution_manifests where id='${to.manifest}' and prompt_version=${to.promptVersion}) then
+    raise exception 'BLOCKED: the target manifest is not installed';
+  end if;
+` : ''}  v_now := clock_timestamp();
   if exists(select 1 from private.ai_item_save_attempts a join private.item_save_attempts s
       on s.owner_id=a.owner_id and s.item_id=a.item_id
     where a.owner_id=p.owner_id and a.manifest_id is not null and s.state='reserved')
@@ -69,7 +89,8 @@ begin
         and e.manifest_id='${SWITCH_PROFILES.v2.manifest}' and e.anomaly and e.normalized_usage is null))) then
     raise exception 'BLOCKED: reserved or held charge exists (an expired dispatched request keeps its held charge; only a closed Azure v2 anomaly hold of an earlier month, with no request, is ignored)';
   end if;
-  update private.ai_controls set execution_manifest_id='${to.manifest}',max_request_micro=${to.maxRequestMicro},
+  update private.ai_controls set execution_manifest_id='${to.manifest}',max_request_micro=${to.maxRequestMicro},${explicit ? `prompt_version=${to.promptVersion},
+    ` : ''}
     updated_at=clock_timestamp() where owner_id=p.owner_id;
 end
 $switch$;

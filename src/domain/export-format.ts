@@ -36,7 +36,7 @@ export const rawColumns = {
   items: ['id', 'owner_id', 'title', 'category', 'subcategory', 'colours', 'brand', 'size_label', 'material', 'seasons', 'formality',
     'warmth', 'min_temp', 'max_temp', 'rain_rating', 'windproof', 'upper_coverage', 'lower_coverage', 'style_tags', 'tags',
     'purchase_date', 'purchase_price', 'currency', 'notes', 'favourite', 'availability', 'lifecycle', 'exclude_suggestions',
-    'wear_more', 'deleted_at', 'created_at', 'updated_at', 'version', 'pattern', 'sleeve_length', 'garment_length', 'field_provenance'],
+    'wear_more', 'deleted_at', 'created_at', 'updated_at', 'version', 'pattern', 'sleeve_length', 'garment_length', 'garment_type', 'field_provenance'],
   item_images: ['id', 'owner_id', 'item_id', 'state', 'retired_at', 'main_path', 'thumb_path', 'main_bytes', 'thumb_bytes',
     'main_sha256', 'thumb_sha256', 'width', 'height', 'alt_text', 'created_at', 'description_version'],
   outfits: ['id', 'owner_id', 'title', 'occasion', 'notes', 'favourite', 'deleted_at', 'created_at', 'updated_at', 'version'],
@@ -312,8 +312,12 @@ export function assertMetadata(value: unknown): asserts value is SavedMetadata {
     if (!Array.isArray(rows)) return fail();
     const keys = new Set<string>();
     let previous = '';
+    // Backups written before garment types have no garment_type column on any item; the metadata (and so its digest) is left exactly as
+    // it was written and the type reads as not set. A backup is either all with the column or all without it.
+    const legacyItems = table === 'items' && rows.length > 0 && rows.every(row => isObject(row) && !Object.hasOwn(row, 'garment_type'));
+    const columns = legacyItems ? savedColumnsFor(version, table).filter(column => column !== 'garment_type') : savedColumnsFor(version, table);
     for (const row of rows) {
-      if (!isObject(row) || !sameKeys(row, savedColumnsFor(version, table)) || row.owner_id !== owner) fail();
+      if (!isObject(row) || !sameKeys(row, columns) || row.owner_id !== owner) fail();
       const key = rowKey(table, row as Row);
       if (keys.has(key) || key < previous) fail();
       keys.add(key); previous = key;

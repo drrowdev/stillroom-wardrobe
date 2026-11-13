@@ -92,8 +92,9 @@ describe('public configuration', () => {
   describe('I29a saved field provenance', () => {
     const migration = readFileSync(new URL('../../supabase/migrations/20260906000000_item_field_provenance.sql', import.meta.url), 'utf8');
     it('keeps the exact bounded field and finite code contracts aligned with SQL', () => {
-      expect(migration.replace(/\s+/g, '')).toContain(`fieldsconstanttext[]:=array['${provenanceFields.join("','")}'];`);
-      expect(new Set(provenanceFields).size).toBe(24);
+      // The 20260906 migration is historical and keeps its 24 fields; the garment_type migration adds the 25th.
+      expect(migration.replace(/\s+/g, '')).toContain(`fieldsconstanttext[]:=array['${provenanceFields.filter((field) => field !== 'garment_type').join("','")}'];`);
+      expect(new Set(provenanceFields).size).toBe(25);
       for (const [field, codes] of [['pattern', patterns], ['sleeve_length', sleeveLengths], ['garment_length', garmentLengths]] as const) {
         expect(migration).toContain(`check (${field} in (${codes.map((code) => `'${code}'`).join(',')}))`);
       }

@@ -187,7 +187,7 @@ async function completeFieldIsolation(c,own,other,foreign){
   const step=code=>{stage=`${base} [${code}]`;};
   step('read-before');
   const fields={
-    title:'Fictional reviewed overshirt',category:'layer',subcategory:'Shirt',colours:['green','blue'],
+    title:'Fictional reviewed overshirt',category:'layer',garment_type:'overshirt',subcategory:'Shirt',colours:['green','blue'],
     pattern:'striped',sleeve_length:'long',garment_length:'regular',brand:'Fictional brand',size_label:'M',
     material:'Owner supplied',seasons:['autumn'],formality:0,warmth:0,min_temp:-5,max_temp:20,rain_rating:0,
     windproof:false,upper_coverage:2,lower_coverage:0,style_tags:['calm'],tags:['fictional'],
@@ -225,7 +225,7 @@ async function completeFieldIsolation(c,own,other,foreign){
       result=await patch(actor,victim,{...fields,field_provenance:assertions(victim)});
       assert.ok(!result.ok||Array.isArray(result.data)&&result.data.length===0);
     }
-    const cleared={...fields,subcategory:null,colours:[],seasons:[],pattern:null,sleeve_length:null,garment_length:null,
+    const cleared={...fields,garment_type:null,subcategory:null,colours:[],seasons:[],pattern:null,sleeve_length:null,garment_length:null,
       brand:null,size_label:null,material:null,formality:null,warmth:null,min_temp:null,max_temp:null,rain_rating:null,
       windproof:null,upper_coverage:null,lower_coverage:null,style_tags:[],tags:[],purchase_date:null,purchase_price:null,notes:''};
     step('own-clears');

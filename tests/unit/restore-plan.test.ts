@@ -66,15 +66,22 @@ describe('restored provenance kinds', () => {
     expect(kinds).not.toHaveProperty('size_label');
     expect(kinds).not.toHaveProperty('seasons');
   });
+  it('keeps an AI-observed garment type, and marks an unlabelled one unknown', () => {
+    expect(restoredKinds({ category: 'layer', garment_type: 'vest', field_provenance: { garment_type: { kind: 'ai_observed', revision: 2 } } }))
+      .toMatchObject({ garment_type: 'ai_observed' });
+    expect(restoredKinds({ category: 'layer', garment_type: 'vest', field_provenance: {} })).toMatchObject({ garment_type: 'unknown' });
+    expect(restoredKinds({ category: 'layer', garment_type: null, field_provenance: { garment_type: { kind: 'user', revision: 3 } } }))
+      .not.toHaveProperty('garment_type');
+  });
 });
 
 describe('version 1 manifests', () => {
   const image = { id: '44444444-4444-4444-8444-444444444444', owner_id: owner, item_id: '55555555-5555-4555-8555-555555555555', state: 'ready' };
   it('fills later columns with their defaults', () => {
     const raw = normalizeV1Manifest({ export_id: exportId, owner_id: owner, created_at: '2026-01-02T00:00:00Z',
-      tables: { item_images: [image] } }, exportId);
+      tables: { item_images: [image], items: [{ id: image.item_id, owner_id: owner }] } }, exportId);
     expect(raw.tables.item_images[0]).toMatchObject({ ...image, description_version: 1 });
-    expect(raw.tables.items).toEqual([]);
+    expect(raw.tables.items[0]).toMatchObject({ garment_type: null, pattern: null, field_provenance: {} });
   });
   it('refuses unknown tables and columns, other owners, drafts and a different backup', async () => {
     const base = { export_id: exportId, owner_id: owner, created_at: '2026-01-02T00:00:00Z' };

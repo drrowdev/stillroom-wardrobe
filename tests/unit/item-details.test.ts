@@ -61,7 +61,7 @@ describe('simplified form over the full saved row (UX L1a)', () => {
   };
   it('partitions shown fields and leaves every other column unrendered', () => {
     const shown = new Set<string>([...visibleFields, ...moreFields]);
-    expect(visibleFields).toEqual(['title', 'category', 'colours', 'seasons']);
+    expect(visibleFields).toEqual(['title', 'category', 'garment_type', 'colours', 'seasons']);
     expect(garmentFields.filter((field) => !shown.has(field)).sort()).toEqual([
       'availability', 'currency', 'exclude_suggestions', 'garment_length', 'lifecycle', 'lower_coverage', 'max_temp',
       'min_temp', 'rain_rating', 'sleeve_length', 'style_tags', 'upper_coverage', 'wear_more', 'windproof']);

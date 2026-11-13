@@ -9,7 +9,7 @@ import {
 } from './garment-fields';
 
 export const itemFactColumns = [
-  'subcategory', 'colours', 'pattern', 'sleeve_length', 'garment_length', 'brand', 'size_label',
+  'garment_type', 'subcategory', 'colours', 'pattern', 'sleeve_length', 'garment_length', 'brand', 'size_label',
   'material', 'seasons', 'formality', 'warmth', 'min_temp', 'max_temp', 'rain_rating', 'windproof',
   'upper_coverage', 'lower_coverage', 'style_tags', 'tags', 'purchase_date', 'purchase_price',
   'currency', 'notes', 'favourite', 'availability', 'lifecycle', 'wear_more', 'exclude_suggestions',
@@ -85,7 +85,7 @@ export function defaultDescription(title: string, colours: readonly string[], la
   const text = named ? name : translate(language, 'item.photoDescription', { name, colour: colourWord(colour, 'neuter', language) });
   return [...text].slice(0, 240).join('').trim();
 }
-export const visibleFields = ['title', 'category', 'colours', 'seasons'] as const;
+export const visibleFields = ['title', 'category', 'garment_type', 'colours', 'seasons'] as const;
 export const moreFields = [
   'subcategory', 'pattern', 'brand', 'size_label', 'material', 'formality', 'warmth',
   'purchase_price', 'purchase_date', 'notes', 'tags', 'favourite',

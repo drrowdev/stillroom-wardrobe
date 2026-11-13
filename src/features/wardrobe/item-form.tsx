@@ -8,11 +8,12 @@ import {
 import { addTag, moreFields, occasionOptions, tagBudgetFull, tagLength, visibleFields, warmthOptions } from '../../domain/item-details';
 import { locales, type Language, type MessageKey, type Translate } from '../../i18n';
 import type { AiDerivation } from '../../domain/ai-draft';
+import { garmentTypesFor } from '../../domain/garment-types';
 
 // Only visibleFields and moreFields are shown. Every other column stays in the draft untouched, so a save never changes it.
 const labels: Partial<Record<GarmentField, MessageKey>> = {
-  title: 'item.title', category: 'item.category', colours: 'item.colours', seasons: 'item.seasons',
-  subcategory: 'item.type', pattern: 'item.pattern', brand: 'item.brand', size_label: 'item.size',
+  title: 'item.title', category: 'item.category', garment_type: 'item.garmentType', colours: 'item.colours', seasons: 'item.seasons',
+  subcategory: 'item.styleDetails', pattern: 'item.pattern', brand: 'item.brand', size_label: 'item.size',
   material: 'item.material', formality: 'item.formality', warmth: 'item.warmth', purchase_price: 'item.price',
   purchase_date: 'item.purchaseDate', notes: 'item.notes', tags: 'item.tags', style_tags: 'item.tags',
   favourite: 'item.favourite',
@@ -62,7 +63,7 @@ export function ItemForm({ draft, onChange, baseline, language, t, prefix, locke
   const select = (key: GarmentField, options: ReadonlyArray<readonly [string, string]>, empty: MessageKey | null) => {
     const raw = draft.raw[key] as string;
     const legacy = raw !== '' && !options.some(([value]) => value === raw);
-    return labelled(key, <select id={`${prefix}-${key}`} value={raw} disabled={locked} {...aria(key, `${prefix}-${key}`)}
+    return labelled(key, <select id={`${prefix}-${key}`} value={raw} disabled={locked || key === 'garment_type' && draft.raw.category === ''} {...aria(key, `${prefix}-${key}`)}
       onChange={(event) => change(key, event.target.value)}>
       {empty && <option value="">{t(empty)}</option>}
       {legacy && <option value={raw}>{raw}</option>}
@@ -140,6 +141,7 @@ export function ItemForm({ draft, onChange, baseline, language, t, prefix, locke
     switch (key) {
       case 'title': case 'subcategory': case 'brand': case 'size_label': case 'material': return text(key);
       case 'category': return select('category', enumFields.category.map((code) => [code, t(`categoryOne.${code}`)] as const), 'capture.selectCategory');
+      case 'garment_type': return select('garment_type', garmentTypesFor(draft.raw.category).map((code) => [code, t(`garmentType.${code}`)] as const), 'item.notSet');
       case 'colours': return colourChips();
       case 'seasons': return seasonBoxes();
       case 'pattern': return select('pattern', enumFields.pattern.map((code) => [code, t(`pattern.${code}`)] as const), 'item.notSet');

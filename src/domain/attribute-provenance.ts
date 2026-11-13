@@ -8,7 +8,7 @@ export type SleeveLength = typeof sleeveLengths[number];
 export type GarmentLength = typeof garmentLengths[number];
 
 export const provenanceFields = [
-  'title', 'category', 'subcategory', 'colours', 'pattern', 'sleeve_length', 'garment_length',
+  'title', 'category', 'garment_type', 'subcategory', 'colours', 'pattern', 'sleeve_length', 'garment_length',
   'brand', 'size_label', 'material', 'seasons', 'formality', 'warmth', 'min_temp', 'max_temp',
   'rain_rating', 'windproof', 'upper_coverage', 'lower_coverage', 'style_tags', 'tags',
   'purchase_date', 'purchase_price', 'notes',

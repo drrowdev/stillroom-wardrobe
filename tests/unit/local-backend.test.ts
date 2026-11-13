@@ -405,7 +405,7 @@ describe('owned B1 function lifecycle', () => {
     + '\n[functions.enhance-photo]\nenabled = true\nverify_jwt = true\n'
     + '\n[functions.try-on]\nenabled = true\nverify_jwt = true\n'
     + '\n[functions.outfit-generate]\nenabled = true\nverify_jwt = true\n';
-  const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json', 'azure-openai.ts', 'azure-profiles.ts'];
+  const files = ['index.ts', 'handler.ts', 'protocol.ts', 'google-cloud.ts', 'deno.d.ts', 'deno.json', 'azure-openai.ts', 'azure-profiles.ts', 'azure-v4.ts'];
   const directories = ['finalize-analyzed-item', 'analyze-clothing', 'finalize-image-change', 'delete-account', '_shared', 'stylist-chat', 'enhance-photo', 'try-on', 'outfit-generate'];
   const finalizerFiles = ['index.ts', 'handler.ts', 'deno.json', 'verify-image.ts'];
   const imageChangeFiles = ['index.ts', 'handler.ts', 'deno.json'];

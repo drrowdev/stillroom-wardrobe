@@ -5,7 +5,7 @@ import {
 } from './garment-fields';
 
 export const observedAiFields = [
-  'category', 'subcategory', 'colours', 'pattern', 'sleeve_length', 'garment_length',
+  'category', 'garment_type', 'subcategory', 'colours', 'pattern', 'sleeve_length', 'garment_length',
   'brand', 'size_label', 'upper_coverage', 'lower_coverage',
 ] as const;
 export const estimatedAiFields = ['material', 'seasons', 'formality', 'style_tags'] as const;
@@ -63,7 +63,7 @@ function validFact(field: AiField, value: unknown): boolean {
     case 'colours': return validList(value, collectionLimits.colours, (entry) => colours.some((code) => code === entry));
     case 'seasons': return validList(value, collectionLimits.seasons, (entry) => seasons.some((code) => code === entry));
     case 'style_tags': return validList(value, collectionLimits.style_tags, (entry) => validText(entry, styleTagLimit));
-    case 'category': case 'pattern': case 'sleeve_length': case 'garment_length':
+    case 'category': case 'garment_type': case 'pattern': case 'sleeve_length': case 'garment_length':
       return value === null || enumFields[field].some((code) => code === value);
     case 'formality': case 'upper_coverage': case 'lower_coverage': {
       const [min, max] = integerRanges[field];

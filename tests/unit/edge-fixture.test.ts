@@ -168,7 +168,7 @@ describe('provider double', () => {
     expect(reason(headers, '{')).toBe('json');
     expect(reason(headers, azureBody(jpeg(120), { n: 2 }))).toBe('parameters');
     expect(reason(headers, azureBody(Buffer.from('not a jpeg')))).toBe('jpeg');
-    expect(double.requestVerdict(headers, azureBody(jpeg(120)))).toEqual({ mode: 'ready' });
+    expect(double.requestVerdict(headers, azureBody(jpeg(120)))).toEqual({ mode: 'ready', typed: false });
   });
   it('returns the production-shaped facts', () => {
     expect(double.READY_FACTS).toEqual(analysisFacts);
@@ -178,6 +178,17 @@ describe('provider double', () => {
     expect(double.completion('unrecognised-model').model).not.toBe(double.RETURNED_MODEL);
     expect(double.completion('cache-read').usage.prompt_tokens_details.cached_tokens).toBeGreaterThan(0);
     expect(double.completion('ready').model).toBe(double.RETURNED_MODEL);
+  });
+  it('answers with the fifteenth garment_type key only when the request schema asks for it', async () => {
+    const { AZURE_SPEC_V4 } = await import('../../supabase/functions/analyze-clothing/azure-v4.ts');
+    const body = JSON.parse(azureBody(jpeg(120), { response_format: { json_schema: { schema: AZURE_SPEC_V4.schema } } }));
+    const verdict = double.requestVerdict(headers, JSON.stringify(body));
+    expect(verdict).toEqual({ mode: 'ready', typed: true });
+    const fields = JSON.parse(double.completion('ready', true).choices[0].message.content).fields;
+    expect(Object.keys(fields)).toHaveLength(15);
+    expect(fields.garment_type).toBe('polo');
+    expect(Object.keys(JSON.parse(double.completion('ready').choices[0].message.content).fields)).toHaveLength(14);
+    expect(JSON.parse(double.completion('unclear', true).choices[0].message.content).fields.garment_type).toBeNull();
   });
 });
 
