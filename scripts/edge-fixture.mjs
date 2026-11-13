@@ -445,11 +445,13 @@ async function main() {
             ok = await db(`update private.ai_controls set monthly_allowance_micro=100000000,updated_at=clock_timestamp()
               where owner_id=${literal(ids[message.owner])} returning 'BUDGET_RESTORED';`) === 'BUDGET_RESTORED';
           } else if (message.op === 'analysis-v4' || message.op === 'analysis-v2') {
-            // Fixture-only: the owner's analysis controls as the guarded switch writes them (manifest, prompt version and amount
-            // only), v4 (CAPS1a garment type) or back to the gate's v2 activation. Teardown restores the whole snapshot anyway.
+            // Fixture-only: the owner's analysis controls as the guarded switch writes them (manifest, prompt version and amount),
+            // v4 (CAPS1a garment type) or back to the gate's v2 manifest. The gate's earlier cache-read anomaly has already switched the
+            // owner's analysis off (as the real shutdown does), so v4 turns it on for the case and v2 leaves it off again, the state the
+            // gate continues in. Teardown restores the whole snapshot anyway.
             const v4 = message.op === 'analysis-v4';
             ok = await db(`update private.ai_controls set execution_manifest_id='${v4 ? 'azure-eu-terra-devtest-v4' : 'azure-eu-terra-devtest-v2'}',
-              prompt_version=${v4 ? 3 : 2},max_request_micro=${v4 ? 1 : 4097351},updated_at=clock_timestamp()
+              prompt_version=${v4 ? 3 : 2},max_request_micro=${v4 ? 1 : 4097351},activated=${v4},updated_at=clock_timestamp()
               where owner_id=${literal(ids[message.owner])} returning 'ANALYSIS_SET';`) === 'ANALYSIS_SET';
           } else if (message.op === 'fence') {
             // Fixture-only fence on A's live item, so the claim's fence predicate is observed apart from Trash.

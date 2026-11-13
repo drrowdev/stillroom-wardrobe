@@ -775,40 +775,50 @@ async function main() {
     stage = 'analysis-v4';
     {
       // CAPS1a: a real analysis POST under v4 controls (prompt version 3, all 15 keys), then the Save of the observed type through the
-      // checked analysed path. Controls are put back to the gate's v2 activation afterwards, whatever happens.
-      requireEvidence((await op('analysis-v4', 'A')).ok === true);
+      // checked analysed path. The controls are put back to the v2 manifest afterwards, whatever happens, and a failed step is reported
+      // as its own labelled case instead of stopping the gate (so the restore always runs and is attributed to its own step).
+      const step = (label) => { stage = `analysis-v4-${label}`; };
+      step('controls');
+      const set = await op('analysis-v4', 'A');
+      check(PROVIDER, 'analysis-v4-controls-set', set.ok === true);
       try {
         const a40 = gateId('A', 40);
-        stage = 'analysis-v4-analyze';
+        step('analyze');
         const v4 = await analyze(A.token, a40, a40);
         const fields = v4.data?.result?.facts?.fields ?? {};
-        check(PROVIDER, 'analysis-v4-ready', ready(v4, a40, a40) && v4.data.result.promptVersion === 3
-          && v4.data.result.imageSha256 === analysisHash, summary(v4));
+        const readyV4 = ready(v4, a40, a40) && v4.data.result.promptVersion === 3 && v4.data.result.imageSha256 === analysisHash;
+        check(PROVIDER, 'analysis-v4-ready', readyV4, summary(v4));
         check(PROVIDER, 'analysis-v4-fifteen-fields', Object.keys(fields).length === 15 && fields.garment_type === 'polo'
           && fields.category === 'top' && isDeepStrictEqual(v4.data?.result?.facts, READY_FACTS_V4), Object.keys(fields).length);
+        step('replay');
         const served = (await count()).served;
         const v4Replay = await analyze(A.token, a40, a40);
-        check(PROVIDER, 'analysis-v4-replay-no-dispatch', isDeepStrictEqual(v4Replay.data, v4.data) && (await count()).served === served, summary(v4Replay));
-        stage = 'analysis-v4-save';
-        const h = analyzedHarness(client, A, env);
-        const value = analyzedIntent(A, 22);
-        value.p_item.id = gateId('A', 41, 'a'); value.p_image.id = gateId('A', 41, 'b');
-        value.p_item.garment_type = 'polo';
-        value.p_item.field_provenance.garment_type = { kind: 'ai_observed', revision: 1 };
-        value.p_claim = { requestId: a40, draftId: a40, generation: 1, imageSha256: analysisHash,
-          fields: { ...value.p_claim.fields, garment_type: { kind: 'ai_observed', value: 'polo' } } };
-        h.track(value);
-        try {
-          const row = await h.reserve(value);
-          await h.upload(value);
-          await h.finalize(value, row);
-          const saved = (await h.read('items', value.p_item.id))[0];
-          check(PROVIDER, 'analysis-v4-saved-type', saved?.garment_type === 'polo'
-            && isDeepStrictEqual(saved.field_provenance?.garment_type, { kind: 'ai_observed', revision: 1 }),
-          { type: saved?.garment_type, provenance: saved?.field_provenance?.garment_type });
-        } finally { await h.cleanup(); }
+        check(PROVIDER, 'analysis-v4-replay-no-dispatch', readyV4 && isDeepStrictEqual(v4Replay.data, v4.data) && (await count()).served === served, summary(v4Replay));
+        if (readyV4) {
+          step('save');
+          const h = analyzedHarness(client, A, env);
+          const value = analyzedIntent(A, 22);
+          value.p_item.id = gateId('A', 41, 'a'); value.p_image.id = gateId('A', 41, 'b');
+          value.p_item.garment_type = 'polo';
+          value.p_item.field_provenance.garment_type = { kind: 'ai_observed', revision: 1 };
+          value.p_claim = { requestId: a40, draftId: a40, generation: 1, imageSha256: analysisHash,
+            fields: { ...value.p_claim.fields, garment_type: { kind: 'ai_observed', value: 'polo' } } };
+          h.track(value);
+          try {
+            const row = await h.reserve(value);
+            await h.upload(value);
+            await h.finalize(value, row);
+            const saved = (await h.read('items', value.p_item.id))[0];
+            check(PROVIDER, 'analysis-v4-saved-type', saved?.garment_type === 'polo'
+              && isDeepStrictEqual(saved.field_provenance?.garment_type, { kind: 'ai_observed', revision: 1 }),
+            { type: saved?.garment_type, provenance: saved?.field_provenance?.garment_type });
+          } catch (error) {
+            check(PROVIDER, 'analysis-v4-saved-type', false, `${stage}: ${error instanceof Error ? error.message.slice(0, 100) : 'error'}`);
+          } finally { await h.cleanup(); }
+        } else check(PROVIDER, 'analysis-v4-saved-type', false, 'no ready v4 analysis to save');
+      } catch (error) {
+        check(PROVIDER, `analysis-v4-stopped-at-${stage}`, false, error instanceof Error ? error.message.slice(0, 120) : 'error');
       } finally {
-        stage = 'analysis-v4-restore';
         check(PROVIDER, 'analysis-v4-controls-restored', (await op('analysis-v2', 'A')).ok === true);
       }
     }
