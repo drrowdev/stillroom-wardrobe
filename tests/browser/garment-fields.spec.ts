@@ -6,6 +6,7 @@ import path from 'node:path';
 import { messages, type Language } from '../../src/i18n/all';
 import { provenanceFields } from '../../src/domain/attribute-provenance';
 import { moreFields, visibleFields } from '../../src/domain/item-details';
+import { garmentTypesByCategory } from '../../src/domain/garment-types';
 import { colours } from '../../src/domain/preferences';
 import { mockBackend, owners, signIn } from './mock-backend';
 import { editItem, manualEntry } from './ai-photo-first-support';
@@ -42,7 +43,7 @@ async function fillFields(page: Page, language: Language) {
     purchase_price: language === 'en' ? '1,234.50' : '1 234,50', notes: '  Oma teksti\nEgen text  ',
   };
   for (const [key, value] of Object.entries(text)) await page.locator(`#item-${key}`).fill(value);
-  const selections = { category: 'layer', pattern: 'checked', formality: '2', warmth: '3' };
+  const selections = { category: 'layer', garment_type: 'overshirt', pattern: 'checked', formality: '2', warmth: '3' };
   for (const [key, value] of Object.entries(selections)) await page.locator(`#item-${key}`).selectOption(value);
   await page.locator('#item-colours-add').selectOption('olive');
   await page.locator('#item-seasons-autumn').check();
@@ -124,7 +125,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await expect(page.locator('#wardrobe-title')).toBeVisible();
     const item = api.items.find((row) => row.owner_id === owners.a)!;
     const image = api.images.find((row) => row.owner_id === owners.a)!;
-    expect(item).toMatchObject({ title: 'Å manual overshirt 🌿', category: 'layer', colours: ['olive'], seasons: ['autumn'],
+    expect(item).toMatchObject({ title: 'Å manual overshirt 🌿', category: 'layer', garment_type: 'overshirt', colours: ['olive'], seasons: ['autumn'],
       subcategory: 'Overshirt', pattern: 'checked', brand: 'Fictional brand', size_label: 'M', material: 'Cotton',
       formality: 2, warmth: 3, purchase_date: '2024-02-29', purchase_price: 1234.5, tags: ['weekday'],
       notes: '  Oma teksti\nEgen text  ', favourite: true,
@@ -156,7 +157,7 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     await editItem(page);
     await expect(page.locator('#detail-description')).toHaveValue('Sibling draft');
     expect(image.alt_text).toBe('Sibling draft');
-    expect(item).toMatchObject({ title: 'Corrected name', category: 'top', colours: [], seasons: [], tags: [], notes: '',
+    expect(item).toMatchObject({ title: 'Corrected name', category: 'top', garment_type: null, colours: [], seasons: [], tags: [], notes: '',
       subcategory: null, pattern: null, brand: null, size_label: null, material: null, formality: null, purchase_price: null,
       purchase_date: null, warmth: null, windproof: null, currency: 'EUR', favourite: false, availability: 'ready', lifecycle: 'active' });
     expect(Object.keys(item.field_provenance as object).sort()).toEqual([...shownProvenance].sort());
@@ -168,6 +169,47 @@ for (const language of ['en', 'fi', 'sv'] as const) {
     expect(foreign).toEqual(originalForeign);
     expect(api.profiles).toEqual(profiles);
     expect([...api.files].map(([key, buffer]) => [key, createHash('sha256').update(buffer).digest('hex')])).toEqual(bytes);
+  });
+}
+for (const language of ['en', 'fi', 'sv'] as const) {
+  test(`garment type ${language}: options follow the category, a changed category clears a type it does not have`, async ({ page }) => {
+    const api = await setup(page, language);
+    await photo(page, api);
+    await expand(page, 'item');
+    const select = page.locator('#item-garment_type');
+    const options = async () => await select.locator('option').evaluateAll((elements) =>
+      elements.map((element) => [(element as HTMLOptionElement).value, element.textContent ?? '']));
+    await expect(page.locator('label[for="item-garment_type"]')).toHaveText(messages['item.garmentType'][language]);
+    await expect(page.locator('label[for="item-subcategory"]')).toHaveText(messages['item.styleDetails'][language]);
+    for (const category of Object.keys(garmentTypesByCategory) as (keyof typeof garmentTypesByCategory)[]) {
+      await page.locator('#item-category').selectOption(category);
+      expect((await options()).slice(1)).toEqual(garmentTypesByCategory[category].map((code) => [code, messages[`garmentType.${code}`][language]]));
+    }
+    await page.locator('#item-title').fill('Fictional vest');
+    await page.locator('#item-category').selectOption('outerwear');
+    await select.selectOption('vest');
+    // A vest is also a layer, so it stays when the category changes to layer; a coat does not, and is cleared.
+    await page.locator('#item-category').selectOption('layer');
+    await expect(select).toHaveValue('vest');
+    await page.locator('#item-category').selectOption('outerwear');
+    await select.selectOption('coat');
+    await page.locator('#item-category').selectOption('layer');
+    await expect(select).toHaveValue('');
+    await page.locator('#item-category').selectOption('outerwear');
+    await select.selectOption('parka');
+    await page.getByRole('button', { name: messages['capture.save'][language], exact: true }).click();
+    await expect(page.locator('#wardrobe-title')).toBeVisible();
+    expect(api.items[0]).toMatchObject({ category: 'outerwear', garment_type: 'parka' });
+    expect((api.items[0]!.field_provenance as Record<string, unknown>).garment_type).toEqual({ kind: 'user', revision: 1 });
+    await page.locator(`a[href="#/items/${api.items[0]!.id}"]`).click();
+    await expect(page.getByText(messages['garmentType.parka'][language], { exact: true }).first()).toBeVisible();
+    await editItem(page);
+    await page.locator('#detail-garment_type').selectOption('');
+    await page.getByRole('button', { name: messages['detail.saveChanges'][language], exact: true }).click();
+    await expect(page.getByText(messages['detail.saved'][language], { exact: true })).toBeVisible();
+    // An explicit clear is the owner's choice and is kept as such.
+    expect(api.items[0]).toMatchObject({ garment_type: null });
+    expect((api.items[0]!.field_provenance as Record<string, unknown>).garment_type).toEqual({ kind: 'user', revision: 2 });
   });
 }
 for (const language of ['fi', 'sv'] as const) {

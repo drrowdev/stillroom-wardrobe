@@ -51,7 +51,7 @@ describe('review-date gate inventory', () => {
       const text = await read(file);
       const code = text.split('\n').filter((line) => !line.trimStart().startsWith('--')).join('\n');
       const count = (code.match(/review_expires_at/g) ?? []).length;
-      expect(count, file).toBe(file === AVAIL || file === '20261101090000_unreserved_analysis_manifest.sql' ? 1 : 0);
+      expect(count, file).toBe(file === AVAIL || file === '20261101090000_unreserved_analysis_manifest.sql' || file === '20261113090100_garment_type_manifest.sql' ? 1 : 0);
     }
   });
 });

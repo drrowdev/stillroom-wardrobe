@@ -175,6 +175,25 @@ describe('saved-only projection', () => {
   it('lists saved items by the same rule the wardrobe uses', async () => {
     expect(savedItemIds(await rawManifest())).toEqual([A, B]);
   });
+  it('writes garment_type on every exported item, and still reads a backup made before it existed with its digest unchanged', async () => {
+    const meta = await saved();
+    expect(meta.tables.items.length).toBeGreaterThan(1);
+    for (const row of meta.tables.items) expect(Object.hasOwn(row, 'garment_type')).toBe(true);
+    expect(() => assertMetadata(meta)).not.toThrow();
+    const old = structuredClone(meta);
+    for (const row of old.tables.items) delete row.garment_type;
+    expect(() => assertMetadata(old)).not.toThrow();
+    // The digest is over the metadata exactly as it was written, so it differs from the new shape's and is stable for the old one.
+    expect(await metadataDigest(old)).not.toBe(await metadataDigest(meta));
+    expect(await metadataDigest(structuredClone(old))).toBe(await metadataDigest(old));
+    // Mixed rows, an unknown column and a raw manifest without the column are all refused.
+    const mixed = structuredClone(meta);
+    delete mixed.tables.items[0]!.garment_type;
+    expect(() => assertMetadata(mixed)).toThrow(BackupFormatError);
+    const raw = await rawManifest();
+    const without = { ...raw.tables, items: raw.tables.items.map(row => { const copy: Record<string, unknown> = { ...row }; delete copy.garment_type; return copy; }) };
+    expect(() => readRawManifest({ schema_version: 2, export_id: exportId, owner_id: owner, created_at: stamp, tables: without }, owner, exportId)).toThrow(BackupFormatError);
+  });
 });
 
 async function parts(meta: SavedMetadata, bytes: Uint8Array | ((ref: FileRef) => Uint8Array) = jpeg): Promise<string[]> {

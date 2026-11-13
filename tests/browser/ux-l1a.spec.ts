@@ -93,7 +93,7 @@ test('L1a add form shows only the essential fields; More details starts collapse
   expect(await details.evaluate((element) => (element as HTMLDetailsElement).open)).toBe(false);
   expect(await page.locator('.garment-field').evaluateAll((fields) => fields
     .filter((field) => !field.closest('details') && field.getClientRects().length > 0)
-    .map((field) => field.id || field.querySelector('[id]')?.id.replace(/-label$/, '')))).toEqual(['item-title', 'item-category', 'item-colours', 'item-seasons']);
+    .map((field) => field.id || field.querySelector('[id]')?.id.replace(/-label$/, '')))).toEqual(['item-title', 'item-category', 'item-garment_type', 'item-colours', 'item-seasons']);
   await expect(page.locator('.capture-photo img')).toBeVisible();
   for (const id of ['#item-subcategory', '#item-pattern', '#item-brand', '#item-warmth', '#item-purchase_price', '#item-notes', '#item-tags-new']) {
     await expect(page.locator(id)).toBeHidden();

@@ -134,6 +134,7 @@ export type Database = {
           field_provenance: Json
           formality: number | null
           garment_length: string | null
+          garment_type: string | null
           id: string
           lifecycle: string
           lower_coverage: number | null
@@ -173,6 +174,7 @@ export type Database = {
           field_provenance?: Json
           formality?: number | null
           garment_length?: string | null
+          garment_type?: string | null
           id?: string
           lifecycle?: string
           lower_coverage?: number | null
@@ -212,6 +214,7 @@ export type Database = {
           field_provenance?: Json
           formality?: number | null
           garment_length?: string | null
+          garment_type?: string | null
           id?: string
           lifecycle?: string
           lower_coverage?: number | null

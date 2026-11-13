@@ -198,15 +198,15 @@ describe('closed AI normal-child environment', () => {
   });
 });
 describe('strict provider facts', () => {
-  it('partitions all 24 provenance fields into observed, estimated and excluded facts', () => {
-    expect(observedAiFields).toHaveLength(10);
+  it('partitions all 25 provenance fields into observed, estimated and excluded facts', () => {
+    expect(observedAiFields).toHaveLength(11);
     expect(estimatedAiFields).toHaveLength(4);
-    expect(new Set([...aiFields, ...excluded]).size).toBe(24);
+    expect(new Set([...aiFields, ...excluded]).size).toBe(25);
     expect([...aiFields, ...excluded].sort()).toEqual([...provenanceFields].sort());
     for (const field of observedAiFields) expect(aiKind(field)).toBe('ai_observed');
     for (const field of estimatedAiFields) expect(aiKind(field)).toBe('ai_estimated');
   });
-  it.each(['category', 'pattern', 'sleeve_length', 'garment_length'] as const)('accepts every existing %s code, not labels or other types', (field) => {
+  it.each(['category', 'garment_type', 'pattern', 'sleeve_length', 'garment_length'] as const)('accepts every existing %s code, not labels or other types', (field) => {
     for (const code of enumFields[field]) expect(parseAiFacts(facts({ [field]: code })).ok).toBe(true);
     for (const bad of ['', 'TOP', 'not-a-code', 0, false, {}, []]) expect(parseAiFacts(facts({ [field]: bad }))).toEqual(invalid);
     expect(parseAiFacts(facts({ [field]: null })).ok).toBe(true);
@@ -341,7 +341,8 @@ describe('I29e SQL/shared contract parity', () => {
   it('pins the SQL field partition, vocabularies and all scalar/collection bounds to shared definitions', async () => {
     const sql = await readFile(migration, 'utf8');
     const list = (values: readonly string[]) => `array[${values.map((v) => `'${v}'`).join(',')}]`;
-    expect(sql).toContain(`observed constant text[] := ${list(observedAiFields)}`);
+    // The original migration keeps its historical ten observed fields; the garment type migration adds the eleventh.
+    expect(sql).toContain(`observed constant text[] := ${list(observedAiFields.filter((field) => field !== 'garment_type'))}`);
     expect(sql).toContain(`estimated constant text[] := ${list(estimatedAiFields)}`);
     for (const [field, codes] of Object.entries({
       category: enumFields.category, pattern: enumFields.pattern, sleeve_length: enumFields.sleeve_length, seasons,
@@ -380,7 +381,7 @@ const incoming: readonly (readonly [string, string])[] = [
   [path.join(root, 'src/features/wardrobe/item-form.tsx'), path.join(root, 'src/domain/ai-draft.ts')],
   [path.join(root, 'src/features/wardrobe/use-ai-draft.ts'), path.join(root, 'src/domain/ai-draft.ts')],
 ];
-const sharedOutgoing = [...modules, ...['wardrobe', 'preferences', 'attribute-provenance', 'garment-fields']
+const sharedOutgoing = [...modules, ...['wardrobe', 'preferences', 'attribute-provenance', 'garment-fields', 'garment-types']
   .map((name) => path.join(root, 'src/domain', `${name}.ts`))];
 const outgoing = new Map<string, readonly string[]>(modules.map((filename) => [
   filename, filename === path.join(root, 'src/domain/ai-draft.ts')

@@ -13,6 +13,9 @@ export const READY_FACTS = Object.freeze({ outcome: 'ready', fields: { category:
   seasons: [], formality: 0, style_tags: [] } });
 export const UNCLEAR_FACTS = Object.freeze({ outcome: 'unclear', fields: { category: null, ...nulls, colours: [],
   seasons: [], formality: null, style_tags: [] } });
+// Prompt 3 (manifest v4) adds the closed garment_type as a fifteenth key; the double answers with it only when the request's schema asks.
+export const READY_FACTS_V4 = Object.freeze({ outcome: 'ready', fields: { ...READY_FACTS.fields, garment_type: 'polo' } });
+export const UNCLEAR_FACTS_V4 = Object.freeze({ outcome: 'unclear', fields: { ...UNCLEAR_FACTS.fields, garment_type: null } });
 export const USAGE = Object.freeze({ prompt_tokens: 100, completion_tokens: 30, total_tokens: 130,
   prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 }, completion_tokens_details: { reasoning_tokens: 20 } });
 /** The fixture image width selects the double's behaviour. */
@@ -75,7 +78,8 @@ export function requestVerdict(headers, text) {
   if (body?.model !== DEPLOYMENT || body.stream !== false || body.n !== 1 || body.store !== false) return { reason: 'parameters' };
   if (typeof url !== 'string' || !url.startsWith('data:image/jpeg;base64,')) return { reason: 'image-url' };
   const width = jpegWidth(Buffer.from(url.slice('data:image/jpeg;base64,'.length), 'base64'));
-  return width === null ? { reason: 'jpeg' } : { mode: MODES[width] ?? 'ready' };
+  const typed = Object.hasOwn(body.response_format?.json_schema?.schema?.properties?.fields?.properties ?? {}, 'garment_type');
+  return width === null ? { reason: 'jpeg' } : { mode: MODES[width] ?? 'ready', typed };
 }
 export function stylistCompletion(mode, refs = []) {
   // Above both envelopes and the reservation: ceil((30000*220 + 5000*1320)/100) = 132000 > 129360 micro-USD.
@@ -234,8 +238,9 @@ export function tryonResponse(mode) {
   }
   return { status: 200, body: { created: 1, data: [{ b64_json: tryonOutput().toString('base64') }], usage: ENHANCE_USAGE } };
 }
-export function completion(mode) {
-  const content = mode === 'malformed' ? '{"outcome":"ready","fields":' : JSON.stringify(mode === 'unclear' ? UNCLEAR_FACTS : READY_FACTS);
+export function completion(mode, typed = false) {
+  const ready = typed ? READY_FACTS_V4 : READY_FACTS, unclear = typed ? UNCLEAR_FACTS_V4 : UNCLEAR_FACTS;
+  const content = mode === 'malformed' ? '{"outcome":"ready","fields":' : JSON.stringify(mode === 'unclear' ? unclear : ready);
   const usage = mode === 'cache-read' ? { ...USAGE, prompt_tokens_details: { cached_tokens: 10, cache_write_tokens: 0 } } : USAGE;
   const reply = { usage, choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', refusal: null, content } }] };
   if (mode === 'missing-model') return reply;
@@ -288,7 +293,7 @@ function main() {
         res.end(JSON.stringify(stylistCompletion(mode, verdict.refs)));
         return;
       }
-      res.end(JSON.stringify(completion(mode)));
+      res.end(JSON.stringify(completion(mode, verdict.typed === true)));
     });
   }).listen(8080, '0.0.0.0');
   console.log('EDGE-DOUBLE listening');

@@ -1,6 +1,7 @@
 import { colours } from '../../domain/preferences';
 import { patterns } from '../../domain/attribute-provenance';
 import { categories } from '../../domain/wardrobe';
+import { isGarmentType } from '../../domain/garment-types';
 import { seasons, type GarmentValues } from '../../domain/garment-fields';
 import { occasionOptions } from '../../domain/item-details';
 import { formatDateOnly, formatMoney } from '../../i18n/format';
@@ -23,13 +24,15 @@ export function itemFacts(values: GarmentValues, language: Language, t: Translat
   const season = (code: string) => includes(seasons, code) ? t(`season.${code}`) : code;
   const facts: ItemFact[] = [
     { field: 'category', label: t('item.category'), value: category || notSet },
+    ...(values.garment_type ? [{ field: 'garment_type', label: t('item.garmentType'),
+      value: isGarmentType(values.garment_type) ? t(`garmentType.${values.garment_type}`) : values.garment_type }] : []),
     { field: 'colours', label: t('item.colours'), value: values.colours.length ? list(values.colours.map(colour)) : notSet },
     { field: 'seasons', label: t('item.seasons'), value: values.seasons.length ? list(values.seasons.map(season)) : notSet },
   ];
   const add = (field: string, label: MessageKey, value: string | null | undefined) => {
     if (value !== null && value !== undefined && value.trim() !== '') facts.push({ field, label: t(label), value });
   };
-  add('subcategory', 'item.type', values.subcategory);
+  add('subcategory', 'item.styleDetails', values.subcategory);
   add('pattern', 'item.pattern', values.pattern === null ? null : includes(patterns, values.pattern) ? t(`pattern.${values.pattern}`) : values.pattern);
   add('brand', 'item.brand', values.brand);
   add('size_label', 'item.size', values.size_label);

@@ -12,7 +12,7 @@ describe('scheduled AI purge migration', () => {
   it('retains the reviewed migration order including the model identity addition', async () => {
     const names = (await readdir(DIR)).filter((name) => name.endsWith('.sql')).sort();
     expect(names.length).toBeGreaterThanOrEqual(41);
-    expect(names.slice(-36)).toEqual([NAME, '20260925100000_uniform_id_conflicts.sql', '20260925110000_restore_item_save.sql',
+    expect(names.slice(-38)).toEqual([NAME, '20260925100000_uniform_id_conflicts.sql', '20260925110000_restore_item_save.sql',
       '20260925120000_account_deletion.sql', '20260925120100_deletion_receipt_purge_schedule.sql', '20260927090000_restore_attribution.sql',
       '20260928090000_stylist_chat.sql', '20260928090100_stylist_expire_schedule.sql',
       '20260929090000_photo_enhancement.sql', '20260929090100_enhance_expire_schedule.sql', '20261001090000_admin_limits.sql',
@@ -23,7 +23,7 @@ describe('scheduled AI purge migration', () => {
       '20261106090000_outfit_generation.sql', '20261106090100_outfitgen_expire_schedule.sql', '20261107090000_outfitgen_undo_capacity.sql',
       '20261107100000_ai_guard.sql', '20261107100100_ai_guard_schedule.sql', '20261108100000_outfitgen_call_limits.sql',
       '20261109090000_outfitgen_pending_100.sql', '20261109100000_outfitgen_judge_v2.sql', '20261109110000_tryon_prompt_v4.sql',
-      '20261111090000_tryon_prompt_v5.sql']);
+      '20261111090000_tryon_prompt_v5.sql', '20261113090000_garment_type.sql', '20261113090100_garment_type_manifest.sql']);
   });
 
   it('schedules exactly one fixed, bounded, inactive job', async () => {

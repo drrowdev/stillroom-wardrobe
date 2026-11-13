@@ -25,7 +25,7 @@ export const owners = {
 type JsonRow = Record<string, unknown>;
 export type FeedbackFault = { method: 'POST' | 'DELETE' | 'READ'; commit: boolean; fail: number | 'abort' };
 const itemDefaults = () => ({
-  subcategory: null, colours: [], pattern: null, sleeve_length: null, garment_length: null,
+  subcategory: null, garment_type: null, colours: [], pattern: null, sleeve_length: null, garment_length: null,
   brand: null, size_label: null, material: null, seasons: [],
   formality: null, warmth: null, min_temp: null, max_temp: null, rain_rating: null, windproof: null,
   upper_coverage: null, lower_coverage: null, style_tags: [], tags: [], purchase_date: null,

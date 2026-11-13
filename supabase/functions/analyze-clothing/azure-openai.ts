@@ -79,23 +79,25 @@ export function validAzureUsage(u: AzureUsage): boolean {
     && Number.isSafeInteger(u.input + u.output) && u.input + u.output === u.total
     && u.reasoning <= u.output && u.cacheRead <= u.input;
 }
-export function validAzureFacts(value: unknown): value is JsonObject {
-  return validFacts(value) && exact(value.fields, AZURE_SCHEMA.properties.fields.required);
+export type AzureSpec = Readonly<{ prompt: string; schema: { properties: { fields: { required: readonly string[] } } } }>;
+export const AZURE_SPEC_V2: AzureSpec = Object.freeze({ prompt: AZURE_PROMPT, schema: AZURE_SCHEMA });
+export function validAzureFacts(value: unknown, spec: AzureSpec = AZURE_SPEC_V2): value is JsonObject {
+  return validFacts(value) && exact(value.fields, spec.schema.properties.fields.required);
 }
-export function azureRequest(image: Uint8Array): JsonObject {
+export function azureRequest(image: Uint8Array, spec: AzureSpec = AZURE_SPEC_V2): JsonObject {
   let binary = '';
   for (const byte of image) binary += String.fromCharCode(byte);
   return { ...AZURE_SETTINGS.bodyControls,
-    messages: [{ role: 'system', content: AZURE_PROMPT },
+    messages: [{ role: 'system', content: spec.prompt },
       { role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${btoa(binary)}`, detail: 'high' } }] }],
-    response_format: { type: 'json_schema', json_schema: { name: 'garment_facts', strict: true, schema: AZURE_SCHEMA } } };
+    response_format: { type: 'json_schema', json_schema: { name: 'garment_facts', strict: true, schema: spec.schema } } };
 }
 export async function analyzeAzure(config: AzureConfig, image: Uint8Array, signal: AbortSignal,
-  transport: AzureTransport = fetch): Promise<{ facts: JsonObject | null; usage: AzureUsage }> {
+  transport: AzureTransport = fetch, spec: AzureSpec = AZURE_SPEC_V2): Promise<{ facts: JsonObject | null; usage: AzureUsage }> {
   if (!azureConfigured(config)) throw new ProtocolError('UNCONFIGURED');
   signal.throwIfAborted();
   const response = await transport(AZURE_ENDPOINT, { method: 'POST', redirect: 'error', cache: 'no-store', signal,
-    headers: { 'Content-Type': 'application/json', 'api-key': config.apiKey! }, body: JSON.stringify(azureRequest(image)) });
+    headers: { 'Content-Type': 'application/json', 'api-key': config.apiKey! }, body: JSON.stringify(azureRequest(image, spec)) });
   if (response.headers.get('Content-Type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') {
     await response.body?.cancel(); throw new ProtocolError('ANALYSIS_FAILED');
   }
@@ -111,7 +113,7 @@ export async function analyzeAzure(config: AzureConfig, image: Uint8Array, signa
     && typeof choice.message.content === 'string' && new TextEncoder().encode(choice.message.content).length <= 8192) {
     try {
       const candidate: unknown = JSON.parse(choice.message.content);
-      if (validAzureFacts(candidate)) facts = candidate;
+      if (validAzureFacts(candidate, spec)) facts = candidate;
     } catch { /* Valid metering still reaches settlement when fact JSON is invalid. */ }
   }
   return { facts, usage };

@@ -143,6 +143,22 @@ describe('historical receipt reading versus Azure-only new dispatch', () => {
     expect(reply('gemini-3.8-flash', 2)).toBeNull();
     for (const promptVersion of [1, 2]) expect(reply(AZURE_MODEL, promptVersion, ['burgundy', 'light_blue'])?.code).toBe('OK');
     expect(reply(AZURE_MODEL, 3)).toBeNull();
+    const withType = (promptVersion: number, garmentType: unknown = 'shirt', category: unknown = 'top') => parseAnalysisReply({ code: 'OK',
+      status: 'ready', accounting: { basis: 'estimated', amountMicro: '1034', currency: 'USD' },
+      result: { schemaVersion: 1, requestId: '10000000-0000-4000-8000-000000000001',
+        draftId: '20000000-0000-4000-8000-000000000001', generation: 1, imageSha256: 'a'.repeat(64),
+        modelId: AZURE_MODEL, promptVersion, createdAtMs: Date.parse('2026-11-01'), expiresAtMs: Date.parse('2026-11-01') + 60000,
+        facts: { outcome: 'ready', fields: { ...facts.fields, category, garment_type: garmentType } } } });
+    // Prompt 3 results carry exactly the 15 keys; earlier prompts exactly 14, never the type.
+    expect(withType(3)?.code).toBe('OK');
+    expect(withType(3, null)?.code).toBe('OK');
+    expect(withType(2)).toBeNull();
+    expect(withType(1)).toBeNull();
+    expect(withType(3, 'poncho')).toBeNull();
+    expect(parseAnalysisReply({ code: 'OK', status: 'ready', accounting: { basis: 'estimated', amountMicro: '1', currency: 'USD' },
+      result: { schemaVersion: 1, requestId: '10000000-0000-4000-8000-000000000001', draftId: '20000000-0000-4000-8000-000000000001',
+        generation: 1, imageSha256: 'a'.repeat(64), modelId: AZURE_MODEL, promptVersion: 3, createdAtMs: 1000, expiresAtMs: 2000,
+        facts: { outcome: 'ready', fields: facts.fields } } })).toBeNull();
     expect(reply(AZURE_MODEL, 2, ['wine'])).toBeNull();
     const status = parseAiStatus({ code: 'OK', period: '2026-09', serverTimeMs: Date.parse('2026-09-21'),
       consent: { enabled: true, noticeRevision: 2, consentedAt: '2026-09-21T00:00:00Z', profileVersion: '1' },
@@ -157,9 +173,14 @@ describe('historical receipt reading versus Azure-only new dispatch', () => {
     expect(supportedAiPolicy(v1)).toBe(true); expect(aiNoticeProfile(v1.policy)).toBe('azure');
     const v3 = withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v3', maxRequestMicro: '1' });
     expect(supportedAiPolicy(v3)).toBe(true); expect(aiNoticeProfile(v3.policy)).toBe('azure');
+    const v4 = withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v4', promptVersion: 3, maxRequestMicro: '1' });
+    expect(supportedAiPolicy(v4)).toBe(true); expect(aiNoticeProfile(v4.policy)).toBe('azure');
     for (const mixed of [withPolicy({ promptVersion: 1 }), withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v1' }),
       withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v4' }),
-      withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v3', promptVersion: 1 })]) {
+      withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v3', promptVersion: 1 }),
+      withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v3', promptVersion: 3 }),
+      withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v4', promptVersion: 2, maxRequestMicro: '1' }),
+      withPolicy({ executionManifestId: 'azure-eu-terra-devtest-v4', promptVersion: 3, noticeRevision: 1 })]) {
       expect(supportedAiPolicy(mixed)).toBe(false); expect(aiNoticeProfile(mixed.policy)).toBeNull();
     }
     const legacy = { ...status, policy: { ...status.policy!, modelId: 'gemini-3.8-flash', noticeRevision: 1, promptVersion: 1,

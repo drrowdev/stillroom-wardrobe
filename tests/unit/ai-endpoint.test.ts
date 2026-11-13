@@ -3,7 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHandler } from '../../supabase/functions/analyze-clothing/handler';
 import { frozenV2Analyze } from '../fixtures/frozen-v2-analyze-handler';
-import { AZURE_MODEL, AZURE_MANIFEST } from '../../supabase/functions/analyze-clothing/azure-openai';
+import { AZURE_MODEL, AZURE_MANIFEST, azureRequest } from '../../supabase/functions/analyze-clothing/azure-openai';
+import { AZURE_PROMPT_V4, AZURE_SCHEMA_V4 } from '../../supabase/functions/analyze-clothing/azure-v4';
 import { analyzeGoogle, estimatedMicro, googleToken, normalizeUsage, TOKEN_URL } from '../../supabase/functions/analyze-clothing/google-cloud';
 import {
   GENERATION_CONFIG, MANIFEST_ID, MODEL_ID, PROMPT, RESPONSE_SCHEMA, SAFETY_SETTINGS, readBounded, validFacts,
@@ -353,6 +354,86 @@ describe('B1 source runtime and fixed protocol', () => {
       const seen = await run({}, AZURE_MANIFEST);
       expect(seen.body).toEqual({ code: 'TIMEOUT' });
       expect(seen.provider).not.toHaveBeenCalled();
+    });
+  });
+  describe('CAPS1a manifest v4 (garment type, prompt version 3)', () => {
+    const V4 = 'azure-eu-terra-devtest-v4';
+    const fields = (extra: Record<string, unknown>, withType = true) => Object.fromEntries(AZURE_SCHEMA_V4.properties.fields.required
+      .filter((key) => withType || key !== 'garment_type')
+      .map((key) => [key, ['colours', 'seasons', 'style_tags'].includes(key) ? [] : null]).map(([key, value]) => [key, extra[key as string] ?? value]));
+    const run = async (content: unknown, policyChange: object = {}) => {
+      const bodies: Record<string, Record<string, unknown>> = {};
+      let sent: Record<string, unknown> | null = null;
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+        const name = url.split('/').at(-1)!;
+        if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
+        if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
+          policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 3, executionManifestId: V4,
+            maxRequestMicro: '1', ...policyChange }, budget: BUDGET });
+        bodies[name] = JSON.parse(String(init.body));
+        if (name === 'ai_claim_analysis') return Response.json({ code: 'OK', claimed: true, manifestId: V4,
+          resultExpiresAtMs: Date.now() + 10000, dispatchBeforeMs: Date.now() + 1000 });
+        if (name === 'ai_finish_analysis') return Response.json({ code: 'READY', stored: true, accounting: null });
+        return Response.json({ code: 'OK', status: 'dispatched', result: null,
+          accounting: { basis: 'held', amountMicro: '1', currency: 'USD' } }, { status: 202 });
+      }));
+      const provider = vi.fn(async (_url: string, init: RequestInit) => {
+        sent = JSON.parse(String(init.body));
+        return Response.json({ model: AZURE_MODEL, usage: { prompt_tokens: 100, completion_tokens: 30, total_tokens: 130,
+          prompt_tokens_details: { cached_tokens: 0, cache_write_tokens: 0 }, completion_tokens_details: { reasoning_tokens: 20 } },
+        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', refusal: null, content: JSON.stringify(content) } }] });
+      });
+      await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
+      return { bodies, sent: sent as Record<string, unknown> | null, provider };
+    };
+    it('sends the v4 prompt and schema, claims and finishes under v4, and stores a valid type', async () => {
+      const seen = await run({ outcome: 'ready', fields: fields({ category: 'outerwear', garment_type: 'vest' }) });
+      expect(seen.provider).toHaveBeenCalledTimes(1);
+      const messages = seen.sent!.messages as { role: string; content: unknown }[];
+      expect(messages[0]).toEqual({ role: 'system', content: AZURE_PROMPT_V4 });
+      expect((seen.sent!.response_format as { json_schema: { schema: unknown } }).json_schema.schema).toEqual(AZURE_SCHEMA_V4);
+      expect(seen.bodies.ai_claim_analysis!.p_manifest_id).toBe(V4);
+      expect(seen.bodies.ai_finish_analysis).toMatchObject({ p_manifest_id: V4, p_code: 'SUCCESS' });
+      expect((seen.bodies.ai_finish_analysis!.p_facts as { fields: Record<string, unknown> }).fields).toMatchObject({ category: 'outerwear', garment_type: 'vest' });
+    });
+    it('stores a type the category does not have as not set, and still fills in the photo', async () => {
+      const seen = await run({ outcome: 'ready', fields: fields({ category: 'top', garment_type: 'jeans' }) });
+      expect(seen.bodies.ai_finish_analysis).toMatchObject({ p_code: 'SUCCESS' });
+      expect((seen.bodies.ai_finish_analysis!.p_facts as { fields: Record<string, unknown> }).fields).toMatchObject({ category: 'top', garment_type: null });
+    });
+    it('treats a reply with 14 keys, or an unknown code, as a failed photo with its usage still recorded', async () => {
+      for (const content of [{ outcome: 'ready', fields: fields({ category: 'top' }, false) },
+        { outcome: 'ready', fields: fields({ category: 'top', garment_type: 'poncho' }) }]) {
+        const seen = await run(content);
+        expect(seen.bodies.ai_finish_analysis).toMatchObject({ p_code: 'FAILED', p_facts: null });
+        expect(seen.bodies.ai_finish_analysis!.p_usage).toMatchObject({ input: 100, output: 30 });
+      }
+    });
+    it('keeps v3 on the 14-key v2 request, byte for byte', async () => {
+      const bodies: unknown[] = [];
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
+        if (url.endsWith('/user')) return Response.json({ id, role: 'authenticated', is_anonymous: false });
+        if (url.endsWith('/ai_status')) return Response.json({ code: 'OK', consent: { enabled: true, noticeRevision: 2 },
+          policy: { activated: true, noticeRevision: 2, modelId: AZURE_MODEL, promptVersion: 2, executionManifestId: 'azure-eu-terra-devtest-v3',
+            maxRequestMicro: '1' }, budget: BUDGET });
+        if (url.endsWith('/ai_claim_analysis')) return Response.json({ code: 'OK', claimed: true, manifestId: 'azure-eu-terra-devtest-v3',
+          resultExpiresAtMs: Date.now() + 10000, dispatchBeforeMs: Date.now() + 1000 });
+        bodies.push(init.body);
+        return Response.json({ code: 'READY', stored: true });
+      }));
+      const provider = vi.fn(async (_url: string, init: RequestInit) => {
+        bodies.push(JSON.parse(String(init.body)));
+        throw new DOMException('fixture timeout', 'TimeoutError');
+      });
+      await createHandler({ ...config, azure: { apiKey: 'fictional-local-only' } }, provider)(request());
+      expect(bodies[0]).toEqual(azureRequest(jpegHeaderFixture()));
+      expect(JSON.stringify(bodies[0])).not.toContain('garment_type');
+    });
+    it('does not dispatch v4 with the v3 prompt version, nor v3 with the v4 one', async () => {
+      for (const change of [{ promptVersion: 2 }, { executionManifestId: 'azure-eu-terra-devtest-v3' }]) {
+        const seen = await run({ outcome: 'ready', fields: fields({ category: 'top' }) }, change);
+        expect(seen.provider).not.toHaveBeenCalled();
+      }
     });
   });
 });

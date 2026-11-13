@@ -116,9 +116,9 @@ describe('unreserved analysis manifest migration (BUDGET2)', () => {
     expect(changed.map(([key]) => key).sort()).toEqual(['.limits.inputTokens', '.metering.reservationMicro', '.profileId']);
     expect(Object.keys(AZURE_SETTINGS_V3)).toEqual(Object.keys(AZURE_SETTINGS));
     expect(AZURE_PROFILES.map((p) => [p.manifestId, p.promptVersion, p.reservationMicro])).toEqual([
-      ['azure-eu-terra-devtest-v2', 2, '4097351'], ['azure-eu-terra-devtest-v3', 2, '1']]);
+      ['azure-eu-terra-devtest-v2', 2, '4097351'], ['azure-eu-terra-devtest-v3', 2, '1'], ['azure-eu-terra-devtest-v4', 3, '1']]);
     expect(azureProfileFor('azure-eu-terra-devtest-v1')).toBeNull();
-    expect(azureProfileFor('azure-eu-terra-devtest-v4')).toBeNull();
+    expect(azureProfileFor('azure-eu-terra-devtest-v5')).toBeNull();
     expect(azureProfileFor(undefined)).toBeNull();
   });
 

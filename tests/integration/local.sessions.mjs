@@ -217,6 +217,29 @@ async function itemProvenance(owner) {
       for (const expected of [row, legacyShaped, newlyUnknown]) {
         assert.deepEqual(manifest.tables.items.find((entry) => entry.id === expected.id), expected);
       }
+      stage = 'CAPS1a garment type: pair check, owner provenance, clear and category cascade rules';
+      {
+        const typed = await insert({ category: 'outerwear', garment_type: 'vest', field_provenance: { category: { kind: 'user', revision: 1 }, garment_type: { kind: 'user', revision: 1 } } });
+        assert.equal(typed.garment_type, 'vest');
+        // A vest is also a layer; a shirt is not outerwear; an unknown code is no type; nothing partial is written.
+        const moved = await save(typed, { category: 'layer', field_provenance: { ...typed.field_provenance, category: { kind: 'user', revision: 2 } } });
+        assert.equal(moved.garment_type, 'vest');
+        for (const body of [{ garment_type: 'shirt' }, { garment_type: 'poncho' }, { garment_type: '' }, { category: 'top' }, { category: 'footwear', garment_type: 'vest' }]) {
+          const result = await patch(moved, { notes: 'Must roll back', ...body });
+          assert.ok(!result.ok);
+          assert.deepEqual(await read(moved.id), [moved]);
+        }
+        const bad = await request(owner.token, '/rest/v1/items', { method: 'POST', body: { id: randomUUID(), title: 'Must not insert', category: 'top', garment_type: 'jeans' } });
+        assert.ok(!bad.ok);
+        // A value change without its own assertion falls back to unknown; an explicit clear is recorded as the owner's.
+        const unmarked = await save(moved, { garment_type: 'blazer' });
+        assert.deepEqual(unmarked.field_provenance.garment_type, { kind: 'unknown', revision: 2 });
+        const cleared = await save(unmarked, { garment_type: null, field_provenance: { ...unmarked.field_provenance, garment_type: { kind: 'user', revision: 3 } } });
+        assert.equal(cleared.garment_type, null);
+        assert.deepEqual(cleared.field_provenance.garment_type, { kind: 'user', revision: 3 });
+        const typedAgain = await save(cleared, { category: 'bottom', garment_type: 'shorts', field_provenance: { ...cleared.field_provenance, category: { kind: 'user', revision: 3 }, garment_type: { kind: 'user', revision: 4 } } });
+        assert.equal(typedAgain.garment_type, 'shorts');
+      }
       stage = 'I29c optional collections and exact decimal zero false versus null';
       for (const price of ['0.00', '0.01', '0.10', '9999999999.99']) {
         const value = await insert({ purchase_price: price, warmth: 0, windproof: false, colours: [], seasons: [],

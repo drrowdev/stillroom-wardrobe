@@ -1,9 +1,10 @@
 import { assertSanitizedJpeg, readJpegHeader } from '../../../src/images/jpeg.ts';
 import { AI_BUDGET_CONTRACT, AI_BUDGET_CONTRACT_HEADER, parseAiBudget } from '../../../src/domain/ai-budget.ts';
 import { AI_GUARD_CODE, guardRefusal } from '../../../src/domain/ai-guard.ts';
-import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MODEL,
+import { analyzeAzure, azureConfigured, validAzureFacts, AZURE_MODEL, AZURE_SPEC_V2,
   type AzureConfig, type AzureTransport } from './azure-openai.ts';
-import { azureProfileFor } from './azure-profiles.ts';
+import { azureProfileFor, AZURE_MANIFEST_V4 } from './azure-profiles.ts';
+import { normalizeGarmentType } from './azure-v4.ts';
 import {
   MAX_IMAGE_BYTES, MODEL_ID, ProtocolError, REQUEST_MS,
   UUID, exact, object, readBounded, readJson, sha256, validAccounting, validResult, type JsonObject,
@@ -94,7 +95,7 @@ export function createHandler(config: HandlerConfig, azureTransport: AzureTransp
         if (!exact(result, ['code', 'status', 'result', 'accounting']) || !validAccounting(result.accounting)
           || !['dispatched', 'ready'].includes(String(result.status))) throw new ProtocolError('ANALYSIS_FAILED');
         if (result.status === 'ready') {
-          if (!(validResult(result.result, AZURE_MODEL, [1, 2]) && validAzureFacts(result.result.facts) || validResult(result.result, MODEL_ID))
+          if (!(validResult(result.result, AZURE_MODEL, [1, 2, 3]) && validAzureFacts(result.result.facts, profile?.spec ?? AZURE_SPEC_V2) || validResult(result.result, MODEL_ID))
             || result.result.requestId !== requestId || result.result.draftId !== draftId
             || result.result.generation !== Number(generation) || result.result.imageSha256 !== imageHash) throw new ProtocolError('ANALYSIS_FAILED');
         } else if (result.result !== null) throw new ProtocolError('ANALYSIS_FAILED');
@@ -134,10 +135,11 @@ export function createHandler(config: HandlerConfig, azureTransport: AzureTransp
         || typeof claim.resultExpiresAtMs !== 'number' || !Number.isSafeInteger(claim.resultExpiresAtMs)
         || Date.now() >= Math.min(claim.dispatchBeforeMs, claim.resultExpiresAtMs)) return error('TIMEOUT');
       signal.throwIfAborted();
-      const result = await analyzeAzure(config.azure, image, signal, azureTransport);
+      const result = await analyzeAzure(config.azure, image, signal, azureTransport, profile.spec);
+      const facts = result.facts && profile.manifestId === AZURE_MANIFEST_V4 ? normalizeGarmentType(result.facts) : result.facts;
       const finished = await rpc('ai_finish_analysis', {
         p_owner_id: user.id, p_request_id: requestId, p_manifest_id: profile.manifestId,
-        p_facts: result.facts, p_usage: result.usage, p_code: result.facts ? 'SUCCESS' : 'FAILED',
+        p_facts: facts, p_usage: result.usage, p_code: facts ? 'SUCCESS' : 'FAILED',
       }, true);
       if (finished.code !== 'READY' || finished.stored !== true) return error('ANALYSIS_FAILED');
       return await status();

@@ -10,6 +10,7 @@ import {
   type AiField, type AiKind, type AiResult, type DeepReadonly,
 } from './ai-analysis';
 import { styleTagLimit } from './preferences';
+import { isGarmentTypeFor } from './garment-types';
 
 // Owner decision (UX L1a): suggestions are applied only to fields the form shows. Hidden facts are never applied or claimed.
 export const hiddenAiFields = ['sleeve_length', 'garment_length', 'upper_coverage', 'lower_coverage', 'style_tags'] as const;
@@ -145,6 +146,8 @@ export function receiveAiResult(state: AiDraftState, current: unknown, input: un
     const value = result.facts.fields[field];
     if (!isAssertedAiValue(value) || draft.intent[field] || state.eligibility && !state.eligibility[field]
       || !sameValue(draft.raw[field], defaults[field])) continue;
+    // A suggested type is dropped when the draft's own category (set by the owner or saved) does not have it.
+    if (field === 'garment_type' && !isGarmentTypeFor(draft.raw.category, value)) continue;
     Object.assign(draft.raw, { [field]: projectedValue(value!) });
     Object.assign(derivation, { [field]: { value: Array.isArray(value) ? [...value] : value, kind: aiKind(field) } });
   }
@@ -158,7 +161,8 @@ export function editAiDraftField<K extends GarmentField>(
   if (state.status === 'invalidated') return { status: 'ignored', state, reason: 'invalidated' };
   const draft = editGarmentField(copyDraft(state.draft), field, value, language);
   const derivation = { ...state.derivation };
-  if (aiFields.some((key) => key === field)) delete derivation[field as AiField];
+  // A category edit can clear the type with it; an edited field is no longer a suggestion.
+  for (const key of aiFields) if (draft.intent[key]) delete derivation[key];
   return updated({ ...state, draft, derivation });
 }
 export function presentAiDraft(state: AiDraftState, current: AiContext, language: GarmentDraft['priceLanguage']): AiTransition {

@@ -133,7 +133,7 @@ async function readTargets(client: AppClient, scope: OwnerScope, ids: string[], 
   return { rows, images };
 }
 
-// The values, kinds and photo as the restore writes them for photo 0. Empty fields carry no kind.
+// The values, kinds and photo as the restore writes them for photo 0. Empty fields carry no kind, except an owner-cleared garment type.
 type Restored = { values: GarmentValues; payload: GarmentPayload; provenance: FieldProvenance };
 function restoredFields(source: RestoreItem): Restored {
   const values = parseGarmentValues(source.row);
@@ -141,7 +141,7 @@ function restoredFields(source: RestoreItem): Restored {
   const provenance: FieldProvenance = {};
   for (const [field, kind] of Object.entries(source.kinds)) {
     const value = (payload as Record<string, unknown>)[field];
-    if (value === null || value === '' || Array.isArray(value) && value.length === 0) continue;
+    if ((value === null || value === '' || Array.isArray(value) && value.length === 0) && !(field === 'garment_type' && kind === 'user')) continue;
     (provenance as Record<string, unknown>)[field] = { kind, revision: 1 };
   }
   return { values, payload, provenance };

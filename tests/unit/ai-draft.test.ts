@@ -23,7 +23,7 @@ const context: AiContext = {
 };
 const nextContext: AiContext = { ...context, generation: 2, requestId: '30000000-0000-4000-8000-000000000002', imageSha256: 'b'.repeat(64) };
 const allFields = {
-  category: 'top', subcategory: '  Overshirt  ', colours: ['olive', 'green'], pattern: 'checked',
+  category: 'top', garment_type: 'shirt', subcategory: '  Overshirt  ', colours: ['olive', 'green'], pattern: 'checked',
   sleeve_length: 'long', garment_length: 'regular', brand: ' Fictional Brand ', size_label: 'M',
   upper_coverage: 2, lower_coverage: 0, material: 'Cotton blend', seasons: ['spring', 'autumn'],
   formality: 0, style_tags: [' Soft Lines ', 'fictional style'],
@@ -178,13 +178,13 @@ describe('pure bound draft projection', () => {
     expect(beginAiAnalysis(started, context)).toEqual({ status: 'ignored', state: started, reason: 'ineligible_state' });
     expect(idle.status).toBe('idle');
   });
-  it('fills the nine form fields, never the five hidden ones, without manual intent or invented basics', () => {
+  it('fills the ten form fields, never the five hidden ones, without manual intent or invented basics', () => {
     const state = ready();
     const draft = raw(state);
     const defaults = initialRawFields('EUR');
     expect(draft.intent).toEqual({});
     expect(draft.priceLanguage).toBe('fi');
-    expect([...formAiFields].sort()).toEqual(['brand', 'category', 'colours', 'formality', 'material', 'pattern', 'seasons', 'size_label', 'subcategory']);
+    expect([...formAiFields].sort()).toEqual(['brand', 'category', 'colours', 'formality', 'garment_type', 'material', 'pattern', 'seasons', 'size_label', 'subcategory']);
     for (const field of formAiFields) {
       const value = allFields[field];
       expect(draft.raw[field]).toEqual(Array.isArray(value) ? value : String(value));
@@ -207,12 +207,31 @@ describe('pure bound draft projection', () => {
     expect(Object.keys(claim(state).fields)).toEqual(['category']);
   });
   it.each(formAiFields)('applies %s without introducing a new error, leaving missing basics honest', (field) => {
-    const state = changed(receiveAiResult(pending(), context, result({ [field]: allFields[field] }), 1500));
+    const state = changed(receiveAiResult(pending(), context, result(field === 'garment_type' ? { category: 'top', [field]: allFields[field] } : { [field]: allFields[field] }), 1500));
     const validation = validateGarmentDraft(raw(state));
     expect(validation.errors[field]).toBeUndefined();
     expect(validation.errors.title).toBe(true);
-    if (field !== 'category') expect(validation.errors.category).toBe(true);
-    expect(Object.keys(state.derivation!)).toEqual([field]);
+    if (field !== 'category' && field !== 'garment_type') expect(validation.errors.category).toBe(true);
+    expect(Object.keys(state.derivation!)).toEqual(field === 'garment_type' ? ['category', field] : [field]);
+  });
+  it('drops a suggested type that the draft\'s own category does not have, and keeps it when it does', () => {
+    let draft = editGarmentField(newGarmentDraft('EUR', 'en'), 'category', 'bottom', 'en');
+    let state = changed(receiveAiResult(pending(draft), context, result({ category: 'top', garment_type: 'shirt' }), 1500));
+    expect(state.draft?.raw.category).toBe('bottom');
+    expect(state.draft?.raw.garment_type).toBe('');
+    expect(state.derivation).not.toHaveProperty('garment_type');
+    draft = editGarmentField(newGarmentDraft('EUR', 'en'), 'category', 'outerwear', 'en');
+    state = changed(receiveAiResult(pending(draft), context, result({ category: 'top', garment_type: 'vest' }), 1500));
+    expect(state.draft?.raw.garment_type).toBe('vest');
+    expect(claim(state).fields).toEqual({ garment_type: { value: 'vest', kind: 'ai_observed' } });
+  });
+  it('clears a suggested type with the category the owner then changes, and stays claimable', () => {
+    const state = ready();
+    const edited = changed(editAiDraftField(state, context, 'category', 'bottom', 'en'));
+    expect(edited.draft?.raw.garment_type).toBe('');
+    expect(edited.draft?.intent).toEqual({ category: true, garment_type: true });
+    expect(claim(edited).fields).not.toHaveProperty('garment_type');
+    expect(claim(edited).fields).not.toHaveProperty('category');
   });
   it('preserves pre-existing non-default raw fields without relabelling them user input', () => {
     const draft = newGarmentDraft('USD', 'sv');

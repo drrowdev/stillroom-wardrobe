@@ -21,7 +21,7 @@ function draft(): GarmentDraft {
   return editGarmentField(editGarmentField(newGarmentDraft('EUR', 'en'), 'title', 'Shirt', 'en'), 'category', 'top', 'en');
 }
 const fullRaw: RawFields = {
-  title: 'Å shirt 🌿', category: 'layer', subcategory: 'Overshirt', colours: ['olive', 'green'], pattern: 'checked',
+  title: 'Å shirt 🌿', category: 'layer', garment_type: 'overshirt', subcategory: 'Overshirt', colours: ['olive', 'green'], pattern: 'checked',
   sleeve_length: 'long', garment_length: 'regular', brand: 'Own brand', size_label: 'M', material: 'Cotton',
   seasons: ['spring', 'autumn'], formality: '2', warmth: '3', min_temp: '-5', max_temp: '15', rain_rating: '1',
   windproof: 'false', upper_coverage: '2', lower_coverage: '0', style_tags: ['calm'], tags: ['weekday'],
@@ -36,8 +36,8 @@ function row() {
     created_at: '2026-09-09T00:00:00Z', updated_at: '2026-09-09T00:00:00Z', field_provenance: {} };
 }
 describe('closed complete manual fields', () => {
-  it('has exactly thirty fields, unknown physical facts and visible non-factual defaults', () => {
-    expect(new Set(garmentFields).size).toBe(30);
+  it('has exactly thirty-one fields, unknown physical facts and visible non-factual defaults', () => {
+    expect(new Set(garmentFields).size).toBe(31);
     const { values, patch } = buildGarmentWrite(draft());
     expect(values).toMatchObject({ colours: [], seasons: [], warmth: null, windproof: null, favourite: false, currency: 'EUR', availability: 'ready', lifecycle: 'active' });
     expect(Object.keys(garmentPayload(values)).sort()).toEqual([...garmentFields].sort());
@@ -47,7 +47,7 @@ describe('closed complete manual fields', () => {
   });
   it('preserves all reviewed fields and only explicitly supplied insert assertions', () => {
     const result = buildGarmentWrite(fullDraft());
-    expect(Object.keys(result.patch.field_provenance)).toHaveLength(24);
+    expect(Object.keys(result.patch.field_provenance)).toHaveLength(25);
     for (const field of provenanceFields) expect(result.patch.field_provenance[field]).toEqual({ kind: 'user', revision: 1 });
     expect(result.values.notes).toBe(fullRaw.notes);
     expect(result.values.purchase_price).toBe('0.10');
@@ -58,13 +58,14 @@ describe('closed complete manual fields', () => {
     expect(result.patch).not.toHaveProperty('deleted_at');
   });
   it.each(provenanceFields)('couples the changed %s value and exact next manual assertion', (field) => {
-    const base = parseItemBaseline(row(), owner, id);
+    const stored = () => field === 'garment_type' ? { ...row(), category: 'layer' } : row();
+    const base = parseItemBaseline(stored(), owner, id);
     const next = editGarmentField(newGarmentDraft('EUR', 'en', base.values), field, fullRaw[field], 'en');
     const attempt = prepareGarmentAttempt(base, next, 4);
     expect(attempt.patch).toHaveProperty(field);
     expect(attempt.patch.field_provenance).toEqual({ [field]: { kind: 'user', revision: 1 } });
-    expect(confirmsItem(parseItemBaseline({ ...row(), ...attempt.patch, version: 4 }, owner, id), attempt)).toBe(true);
-    const bad = { ...row(), ...attempt.patch, version: 4, field_provenance: {} };
+    expect(confirmsItem(parseItemBaseline({ ...stored(), ...attempt.patch, version: 4 }, owner, id), attempt)).toBe(true);
+    const bad = { ...stored(), ...attempt.patch, version: 4, field_provenance: {} };
     expect(confirmsItem(parseItemBaseline(bad, owner, id), attempt)).toBe(false);
   });
   it.each(provenanceFields)('same-value confirmation of %s requires intent, then becomes an already-user no-op', (field) => {

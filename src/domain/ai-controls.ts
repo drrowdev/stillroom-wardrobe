@@ -6,12 +6,15 @@ export const aiModel = 'gemini-3.8-flash';
 export const azureAiModel = 'gpt-5.6-terra-2026-07-09';
 export const azureAiManifest = 'azure-eu-terra-devtest-v2';
 export const azureAiManifestV3 = 'azure-eu-terra-devtest-v3';
+export const azureAiManifestV4 = 'azure-eu-terra-devtest-v4';
 // Each Azure manifest is valid only with its own prompt version; mixed pairs are unsupported. `minRequestMicro` is the
 // manifest's reservation: the per-photo amount the account's controls hold. v3 holds the smallest amount the schema allows.
+// Prompt 3 (v4) adds the closed garment_type field: results of prompts 1 and 2 carry exactly 14 fields, prompt 3 exactly 15.
 export const azureAiProfiles = [
   { executionManifestId: 'azure-eu-terra-devtest-v1', promptVersion: 1, minRequestMicro: 4097351n },
   { executionManifestId: azureAiManifest, promptVersion: 2, minRequestMicro: 4097351n },
   { executionManifestId: azureAiManifestV3, promptVersion: 2, minRequestMicro: 1n },
+  { executionManifestId: azureAiManifestV4, promptVersion: 3, minRequestMicro: 1n },
 ] as const;
 export const aiCodes = ['OK', 'UNAVAILABLE', 'UNAUTHENTICATED', 'INVALID_INPUT', 'CONSENT_REQUIRED',
   'UNCONFIGURED', 'INACTIVE', 'CONFIG_CHANGED', 'CONFLICT', 'ACTIVE_DRAFT',
@@ -139,8 +142,11 @@ export function parseAnalysisReply(value: unknown): AiAnalysisReply | null {
   const parsed = value.result === null ? null : parseAiResult(value.result);
   if (value.status === 'ready' ? !parsed?.ok : value.result !== null) return null;
   if (parsed?.ok && !(parsed.value.modelId === aiModel && parsed.value.promptVersion === 1
-    || parsed.value.modelId === azureAiModel && [1, 2].includes(parsed.value.promptVersion))) return null;
-  if (parsed?.ok && parsed.value.modelId === azureAiModel && !hasOnlyDataKeys(parsed.value.facts.fields, aiFields)) return null;
+    || parsed.value.modelId === azureAiModel && [1, 2, 3].includes(parsed.value.promptVersion))) return null;
+  if (parsed?.ok && parsed.value.modelId === azureAiModel) {
+    const expected = parsed.value.promptVersion >= 3 ? aiFields : aiFields.filter((field) => field !== 'garment_type');
+    if (!hasOnlyDataKeys(parsed.value.facts.fields, expected)) return null;
+  }
   return freezeValues({ code: 'OK', status: value.status, result: parsed?.ok ? parsed.value : null,
     accounting: { basis: a.basis, amountMicro: a.amountMicro, currency: 'USD' } });
 }

@@ -6,7 +6,7 @@ import { languages, translate, type Language, type MessageKey } from '../../src/
 const t = (language: Language) => (key: MessageKey, parameters?: Record<string, string | number>) => translate(language, key, parameters);
 
 const base: GarmentValues = {
-  title: 'Blue shirt', category: 'top', subcategory: null, colours: [], pattern: null, sleeve_length: null, garment_length: null,
+  title: 'Blue shirt', category: 'top', garment_type: null, subcategory: null, colours: [], pattern: null, sleeve_length: null, garment_length: null,
   brand: null, size_label: null, material: null, seasons: [], formality: null, warmth: null, min_temp: null, max_temp: null,
   rain_rating: null, windproof: null, upper_coverage: null, lower_coverage: null, style_tags: [], tags: [], purchase_date: null,
   purchase_price: null, notes: '', currency: 'EUR', favourite: false, availability: 'ready', lifecycle: 'active',
