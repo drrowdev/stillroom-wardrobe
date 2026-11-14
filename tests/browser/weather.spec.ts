@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route, type TestInfo } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Route, type TestInfo } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { lstat, mkdir, open } from 'node:fs/promises';
 import path from 'node:path';
@@ -12,6 +12,12 @@ type Row = Record<string, unknown>;
 const text = (key: MessageKey, language: Language = 'en', parameters?: Record<string, string | number>) => translate(language, key, parameters);
 const button = (page: Page, key: MessageKey, language: Language = 'en') => page.getByRole('button', { name: text(key, language), exact: true });
 const cards = (page: Page) => page.locator('.today-card');
+// Today no longer prints weather or length advice; the old English, Finnish and Swedish sentences are matched as text.
+const unsaidAdvice = /outerwear for the cold|no outerwear or layers|marked as rainproof|marked as windproof|suits all of today|cover your ankles|ulkovaatteita kylmään|ulkovaatteita tai välikerroksia|sateenkestäväksi|tuulenpitäväksi|sovi kaikkeen tämän|peittävät nilkat|ytterkläder för kylan|ytterkläder eller mellanlager|regntäta|vindtäta|passar allt väder|täcker anklarna/i;
+async function noAdvice(card: Locator) {
+  await expect(card).toBeVisible();
+  await expect(card).not.toContainText(unsaidAdvice);
+}
 const bar = (page: Page) => page.locator('.weather-bar');
 const weatherTrigger = (page: Page) => page.locator('#weather-trigger');
 async function openDetails(page: Page) {
@@ -360,7 +366,7 @@ test('WEATHER2 current expiry, held refresh and current-only changes preserve th
     service.clock.at = at; service.weather.set('65.0', { temperature: 4, current: 13 });
   } });
   await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 13));
-  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  await noAdvice(cards(page).first());
   await expect(cards(page)).toHaveCount(2);
   await openDetails(page);
   const idea = await cards(page).nth(1).innerText();
@@ -392,7 +398,7 @@ test('WEATHER2 failed refresh and offline keep hourly forecast, with bounded ret
   await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
   await expect(bar(page)).toContainText(await lowLine(page, 4));
   await expect(bar(page).locator('.weather-hours li')).toHaveCount(15);
-  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  await noAdvice(cards(page).first());
   const retry = bar(page).getByRole('button', { name: text('common.retry'), exact: true });
   await expect(retry).toBeDisabled();
   expect(weather.forecasts()).toHaveLength(2);
@@ -481,7 +487,7 @@ test('WEATHER2 late-quarter cadence has brief grace gaps across successive quart
     else await expect(weatherTrigger(page)).toHaveText(await currentLine(page, minute < 17 ? 18 : minute < 32 ? 19 : 20));
     await expect(bar(page)).toContainText(await lowLine(page, 4));
     await expect(cards(page).nth(1)).toHaveText(idea, { useInnerText: true });
-    await expect(cards(page).nth(1)).toContainText(text('today.addCoat'));
+    await noAdvice(cards(page).nth(1));
   }
 });
 
@@ -499,7 +505,7 @@ test('WEATHER2 gradual failure cadence retains forecast and retries no faster th
     await expect.poll(() => weather.forecasts().length).toBe(minute < 2 ? 1 : minute < 17 ? 2 : minute < 32 ? 3 : 4);
     await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
     await expect(bar(page)).toContainText(await lowLine(page, 4));
-    await expect(cards(page).first()).toContainText(text('today.addCoat'));
+    await noAdvice(cards(page).first());
     if (minute >= 2) {
       await expect(bar(page)).toContainText(text('weather.refreshFailed'));
       const retry = bar(page).getByRole('button', { name: text('common.retry'), exact: true });
@@ -530,7 +536,7 @@ for (const outcome of ['missing', 'malformed', 'stale', 'future'] as const) test
     await expect(weatherTrigger(page)).toHaveText(text('weather.currentUnavailable'));
     await expect(bar(page)).toContainText(await lowLine(page, 4));
     await expect(bar(page)).not.toContainText(text('weather.refreshFailed'));
-    await expect(cards(page).first()).toContainText(text('today.addCoat'));
+    await noAdvice(cards(page).first());
   }
 });
 
@@ -583,7 +589,7 @@ for (const status of [200, 503]) test(`WEATHER2 held refresh retry joins one req
     await gradualMinute(page, weather);
     await expect.poll(() => weather.forecasts().length).toBe(minute < 15 || minute === 15 && status === 503 ? 3 : 4);
     await expect(bar(page)).toContainText(await lowLine(page, 4));
-    await expect(cards(page).first()).toContainText(text('today.addCoat'));
+    await noAdvice(cards(page).first());
   }
   await expect(weatherTrigger(page)).toHaveText(await currentLine(page, 19));
   await expect(bar(page)).not.toContainText(text('weather.refreshFailed'));
@@ -792,19 +798,19 @@ test('I16 a forecast stops counting after three hours; suggestions drop it and i
   await page.clock.install({ time: at });
   const { weather } = await start(page, { weather: oulu, tokenSeconds: twoDays, seed: (api, service) => { basics(api); service.clock.at = at; } });
   await expect(bar(page)).toContainText(await lowLine(page, 0));
-  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  await noAdvice(cards(page).first());
   weather.status.forecast = 503;
   await page.clock.fastForward('02:59:00');
   await expect(bar(page)).toContainText(await lowLine(page, 0));
   await expect(bar(page)).toContainText(text('weather.refreshFailed'));
-  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  await noAdvice(cards(page).first());
   expect(weather.forecasts()).toHaveLength(2);
   weather.status.forecast = 200;
   weather.hold.forecast.add('65.0');
   await page.clock.fastForward('00:01:01');
   await expect(bar(page)).toContainText(text('weather.loading'));
   await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
-  await expect(cards(page).first()).not.toContainText(text('today.addCoat'));
+  await noAdvice(cards(page).first());
   // "Loading" renders before the mocked route logs the new request.
   await expect.poll(() => weather.forecasts().length).toBe(3);
   await weather.release('forecast', forecastReply({ temperature: 10 }, 10800, at + 3 * 3600_000));
@@ -830,7 +836,8 @@ test('I16 an unfinished outfit still names what the weather needs, without claim
   } });
   const card = cards(page).first();
   await expect(card).toContainText(text('today.missing', 'en', { categories: text('categoryOne.footwear') }));
-  await expect(card).toContainText(text('today.addCoat'));
+  await expect(card.locator('.today-missing')).toHaveCount(1);
+  await noAdvice(card);
   await expect(card).not.toContainText(text('today.reasonWarmth'));
 });
 
@@ -880,16 +887,16 @@ test('I16 a manual temperature overrides a forecast, including one that arrives 
   await expect(cards(page).first()).toBeVisible();
   await expect(bar(page)).toContainText(manual);
   await expect(bar(page)).not.toContainText(await lowLine(page, -8));
-  await expect(page.getByText(text('today.addCoat'), { exact: true })).toHaveCount(0);
+  await noAdvice(cards(page).first());
   await button(page, 'weather.clearManual').click();
   await expect(bar(page)).toContainText(await lowLine(page, -8));
-  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  await noAdvice(cards(page).first());
   await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
 });
 
 test('I16 Indoors turns every weather rule off, including the temperature', async ({ page }) => {
   await start(page, { weather: oulu, seed: api => basics(api) });
-  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  await noAdvice(cards(page).first());
   await expect(place(page, 'setting.outdoors')).toHaveAttribute('aria-pressed', 'true');
   await expect(place(page, 'setting.indoors')).toHaveAttribute('aria-pressed', 'false');
   await place(page, 'setting.indoors').click();
@@ -899,12 +906,12 @@ test('I16 Indoors turns every weather rule off, including the temperature', asyn
   await expect(bar(page)).not.toContainText('Weather isn\'t used indoors.');
   await expect(bar(page)).not.toContainText(await lowLine(page, 0));
   await expect(button(page, 'weather.enterTemperature')).toHaveCount(0);
-  await expect(cards(page).first()).not.toContainText(text('today.addCoat'));
+  await noAdvice(cards(page).first());
   await expect(cards(page).first().getByRole('button', { name: text('today.save'), exact: true })).toBeVisible();
   await place(page, 'setting.outdoors').click();
   await expect(place(page, 'setting.outdoors')).toHaveAttribute('aria-pressed', 'true');
   await expect(bar(page)).toContainText(await lowLine(page, 0));
-  await expect(cards(page).first()).toContainText(text('today.addCoat'));
+  await noAdvice(cards(page).first());
 });
 
 test('Indoors also replaces a manual temperature, and has no temperature actions without a forecast', async ({ page }) => {
@@ -982,19 +989,19 @@ test('the forecast names its time zone only when it differs from the profile\'s,
   await expect(bar(page)).not.toContainText('Europe/Helsinki');
 });
 
-test.describe('I16 weather gaps on each idea, without suitability claims', () => {
+test.describe('I16 weather gaps on each idea print no advice line', () => {
   const cases: { name: string; forecast: { temperature: number; rain?: number; wind?: number }; bottom?: Row; extra?: Row; expected: MessageKey[]; absent: MessageKey[] }[] = [
-    { name: 'cold with no coat', forecast: { temperature: 0 }, expected: ['today.addCoat'], absent: ['today.reasonWarmth', 'today.checkLength'] },
+    { name: 'cold with no coat', forecast: { temperature: 0 }, expected: [], absent: ['today.reasonWarmth'] },
     { name: 'cold with unknown length, including an unconfirmed value', forecast: { temperature: 0 }, bottom: { lower_coverage: 2 },
-      extra: { category: 'outerwear', colours: ['grey'] }, expected: ['today.checkLength'], absent: ['today.addCoat', 'today.reasonWarmth'] },
+      extra: { category: 'outerwear', colours: ['grey'] }, expected: [], absent: ['today.reasonWarmth'] },
     { name: 'unknown rain protection, including an unconfirmed value', forecast: { temperature: 15, rain: 80 },
-      extra: { category: 'layer', colours: ['grey'], rain_rating: 2 }, expected: [], absent: ['today.reasonRain', 'today.noRain', 'today.noCover'] },
+      extra: { category: 'layer', colours: ['grey'], rain_rating: 2 }, expected: [], absent: ['today.reasonRain'] },
     { name: 'unknown wind protection', forecast: { temperature: 15, wind: 12 },
-      extra: { category: 'layer', colours: ['grey'], windproof: null, field_provenance: { windproof: user } }, expected: [], absent: ['today.reasonWind', 'today.noCover'] },
+      extra: { category: 'layer', colours: ['grey'], windproof: null, field_provenance: { windproof: user } }, expected: [], absent: ['today.reasonWind'] },
     { name: 'protection marked as inadequate', forecast: { temperature: 15, rain: 80 },
-      extra: { category: 'layer', colours: ['grey'], rain_rating: 0, field_provenance: { rain_rating: user } }, expected: ['today.noRain'], absent: ['today.reasonRain'] },
+      extra: { category: 'layer', colours: ['grey'], rain_rating: 0, field_provenance: { rain_rating: user } }, expected: [], absent: ['today.reasonRain'] },
     { name: 'rain protection confirmed by the owner', forecast: { temperature: 15, rain: 80 },
-      extra: { category: 'layer', colours: ['grey'], rain_rating: 2, field_provenance: { rain_rating: user } }, expected: ['today.reasonRain'], absent: ['today.noRain'] },
+      extra: { category: 'layer', colours: ['grey'], rain_rating: 2, field_provenance: { rain_rating: user } }, expected: ['today.reasonRain'], absent: [] },
   ];
   for (const entry of cases) test(entry.name, async ({ page }) => {
     await start(page, { weather: oulu, seed: (api, service) => {
@@ -1003,28 +1010,26 @@ test.describe('I16 weather gaps on each idea, without suitability claims', () =>
       service.weather.set('65.0', entry.forecast);
     } });
     const card = cards(page).first();
+    await noAdvice(card);
+    await expect(card.locator('.today-missing')).toHaveCount(0);
     for (const key of entry.expected) await expect(card).toContainText(text(key));
     for (const key of entry.absent) await expect(card).not.toContainText(text(key));
     await expect(card).not.toContainText(unsaidRain);
     await expect(card).not.toContainText(unsaidWind);
     await expect(card).not.toContainText(text('today.missing', 'en', { categories: text('categoryOne.outerwear') }));
   });
-  const lengthAdvice = {
-    en: 'Check that these bottoms cover your ankles in cold weather.',
-    fi: 'Tarkista, että nämä alaosat peittävät nilkat kylmällä säällä.',
-    sv: 'Kontrollera att de här plaggen täcker anklarna i kallt väder.',
-  } as const;
   const unsaidLength = /length of these bottoms isn't recorded|pituutta ei ole merkitty|Längden på de här plaggen är inte angiven/i;
-  for (const language of ['en', 'fi', 'sv'] as const) test(`unknown length of the bottoms gives the ankle advice in ${language}`, async ({ page }) => {
+  for (const language of ['en', 'fi', 'sv'] as const) test(`unknown length of the bottoms leaves the card clean, with its actions, in ${language}`, async ({ page }) => {
     await start(page, { language, weather: oulu, seed: (api, service) => {
       basics(api, 'a', { lower_coverage: 2 });
       add(api, 'Grey coat', { category: 'outerwear', colours: ['grey'] });
       service.weather.set('65.0', { temperature: 0 });
     } });
-    const missing = cards(page).first().locator('.today-missing');
-    await expect(missing).toHaveText(lengthAdvice[language]);
-    await expect(missing).toHaveText(text('today.checkLength', language));
-    await expect(cards(page).first()).not.toContainText(unsaidLength);
+    const card = cards(page).first();
+    await noAdvice(card);
+    await expect(card.locator('.today-missing')).toHaveCount(0);
+    await expect(card).not.toContainText(unsaidLength);
+    for (const key of ['calendar.wearToday', 'today.save', 'today.like'] as const) await expect(card.getByRole('button', { name: text(key, language), exact: true })).toBeVisible();
   });
 });
 
@@ -1043,7 +1048,8 @@ test.describe('I16 unknown rain protection is not mentioned on Today', () => {
       await expect(card).toBeVisible();
       await expect(card.locator('.today-missing')).toHaveCount(0);
       await expect(card).not.toContainText(unsaidRain);
-      for (const key of ['today.reasonRain', 'today.noRain', 'today.noCover'] as const) await expect(card).not.toContainText(text(key, language));
+      await noAdvice(card);
+      await expect(card).not.toContainText(text('today.reasonRain', language));
     });
 
     test(`an unfinished idea keeps only its missing-categories line in ${language}`, async ({ page }) => {
@@ -1067,7 +1073,7 @@ test.describe('I16 unknown rain protection is not mentioned on Today', () => {
       const card = cards(page).first();
       await expect(card).toBeVisible();
       await expect(card.locator('.today-missing')).toHaveCount(0);
-      await expect(card).not.toContainText(text('today.noCover', language));
+      await noAdvice(card);
       await expect(card).not.toContainText(unsaidRain);
     });
 
@@ -1080,7 +1086,7 @@ test.describe('I16 unknown rain protection is not mentioned on Today', () => {
       await expect(card).toBeVisible();
       await expect(card.locator('.today-missing')).toHaveCount(0);
       await expect(card).not.toContainText(unsaidWind);
-      await expect(card).not.toContainText(text('today.noCover', language));
+      await noAdvice(card);
       await expect(card).not.toContainText(unsaidRain);
     });
   }
@@ -1319,8 +1325,6 @@ test.describe('bounded I16 visual evidence', () => {
     { scene: 'today-unknown-rain', project: 'chromium', language: 'en', width: 1280, zoom: false, suffix: 'en-desktop' },
     { scene: 'today-unknown-rain', project: 'mobile', language: 'fi', width: 320, zoom: false, suffix: 'fi-mobile' },
     { scene: 'today-unknown-rain', project: 'mobile', language: 'sv', width: 320, zoom: true, suffix: 'sv-320-200' },
-    { scene: 'today-check-length', project: 'chromium', language: 'en', width: 1280, zoom: false, suffix: 'en-desktop' },
-    { scene: 'today-check-length', project: 'mobile', language: 'fi', width: 320, zoom: false, suffix: 'fi-mobile' },
   ] as const;
   for (const selected of scenes) test(`${selected.scene} ${selected.suffix} retains functional assertions in every project`, async ({ page }, testInfo: TestInfo) => {
     const language: Language = selected.language;
@@ -1365,14 +1369,6 @@ test.describe('bounded I16 visual evidence', () => {
       await expect(cards(page).first()).toBeVisible();
       await expect(cards(page).first().locator('.today-missing')).toHaveCount(0);
       await expect(cards(page).first()).not.toContainText(unsaidRain);
-    } else if (selected.scene === 'today-check-length') {
-      await start(page, { language, weather: oulu, seed: (api, service) => {
-        basics(api, 'a', { lower_coverage: 2 }); add(api, 'Grey coat', { category: 'outerwear', colours: ['grey'] });
-        service.weather.set('65.0', { temperature: 0 });
-      } });
-      await expect(bar(page)).toContainText(await lowLine(page, 0, language));
-      await expect(cards(page).first().locator('.today-missing')).toHaveText(text('today.checkLength', language));
-      await expect(button(page, 'weather.enterTemperature', language)).toHaveCount(0);
     } else {
       await start(page, { language, weather: oulu, seed: (api, service) => { basics(api); service.status.forecast = 503; } });
       await expect(bar(page)).toContainText(text('weather.failed', language));
@@ -1407,21 +1403,8 @@ test.describe('bounded I16 visual evidence', () => {
         && document.documentElement.scrollWidth <= innerWidth && !document.querySelector('input[type=password],#email,#password')
         && !privatePattern.test(document.body.innerText) && !privatePattern.test(fields);
     }, { expectedLanguage: language, width: selected.width })).toBe(true);
-    if (selected.scene === 'today-check-length') {
-      // The advice must show in the image itself: close the weather details, bring the sentence to the middle of the view and check nothing is drawn over it.
-      await weatherTrigger(page).click();
-      await expect(weatherTrigger(page)).toHaveAttribute('aria-expanded', 'false');
-      const advice = cards(page).first().locator('.today-missing');
-      await advice.evaluate(element => element.scrollIntoView({ block: 'center' }));
-      await expect(advice).toBeInViewport({ ratio: 1 });
-      expect(await advice.evaluate(element => {
-        const rect = element.getBoundingClientRect();
-        const points = [[rect.left + 2, rect.top + 2], [rect.right - 2, rect.top + 2], [rect.left + 2, rect.bottom - 2], [rect.right - 2, rect.bottom - 2], [rect.left + rect.width / 2, rect.top + rect.height / 2]] as const;
-        return points.every(([x, y]) => element.contains(document.elementFromPoint(x, y))) && element.scrollWidth <= element.clientWidth;
-      }), 'The advice sentence is not covered or clipped').toBe(true);
-    }
     if (!write) return;
-    const png = await page.screenshot({ fullPage: selected.scene !== 'today-check-length', animations: 'disabled', type: 'png', scale: 'css' });
+    const png = await page.screenshot({ fullPage: true, animations: 'disabled', type: 'png', scale: 'css' });
     expect(png.byteLength > 0 && png.byteLength <= 1048576).toBe(true);
     expect(png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) && png.readUInt32BE(16) === selected.width).toBe(true);
     const file = await open(path.join(directory, `${selected.scene}-${selected.suffix}.png`), 'wx');
