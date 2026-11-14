@@ -284,11 +284,5 @@
   "today.reasonWarmth": {"en":"Right warmth","fi":"Sopivan lämmin","sv":"Lagom varm"},
   "today.reasonRain": {"en":"Rain-ready","fi":"Sopii sateeseen","sv":"Klarar regn"},
   "today.reasonWind": {"en":"Wind-ready","fi":"Sopii tuuleen","sv":"Klarar blåst"},
-  "today.addCoat": {"en":"You have no outerwear for the cold yet.","fi":"Sinulla ei vielä ole ulkovaatteita kylmään.","sv":"Du har inga ytterkläder för kylan än."},
-  "today.addCover": {"en":"You have no outerwear or layers for this weather yet.","fi":"Sinulla ei vielä ole ulkovaatteita tai välikerroksia tähän säähän.","sv":"Du har inga ytterkläder eller mellanlager för det här vädret än."},
-  "today.noRain": {"en":"None of your outerwear or layers is marked as rainproof.","fi":"Yhtäkään ulkovaatettasi tai välikerrostasi ei ole merkitty sateenkestäväksi.","sv":"Inga av dina ytterkläder eller mellanlager är markerade som regntäta."},
-  "today.noWind": {"en":"None of your outerwear or layers is marked as windproof.","fi":"Yhtäkään ulkovaatettasi tai välikerrostasi ei ole merkitty tuulenpitäväksi.","sv":"Inga av dina ytterkläder eller mellanlager är markerade som vindtäta."},
-  "today.noCover": {"en":"None of your outerwear or layers suits all of today's weather.","fi":"Mikään ulkovaatteistasi tai välikerroksistasi ei sovi kaikkeen tämän päivän säähän.","sv":"Inga av dina ytterkläder eller mellanlager passar allt väder idag."},
-  "today.checkLength": {"en":"Check that these bottoms cover your ankles in cold weather.","fi":"Tarkista, että nämä alaosat peittävät nilkat kylmällä säällä.","sv":"Kontrollera att de här plaggen täcker anklarna i kallt väder."},
   "today.ideaGone": {"en":"These ideas are no longer available.","fi":"Nämä ehdotukset eivät ole enää saatavilla.","sv":"De här förslagen finns inte längre."}
 }

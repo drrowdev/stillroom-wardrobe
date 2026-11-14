@@ -1185,6 +1185,16 @@ removes only its card and its Undo brings it back. Show other ideas now skips on
 unit tests and the Today, Try on idea, weather and stylist browser specs; the swipe feel on a real phone and the look of three-up
 cards need the coordinator's visual review.
 
+**TODAY-DECLUTTER1 Today idea cards print no advice lines (app only; no schema, Edge, provider or engine change).** Owner decision of
+14 November 2026 ("Remove all the small advice lines under Today ideas ... and keep just the clean cards", widened to "from everywhere"):
+the grey sentences under an idea ("Check that these bottoms cover your ankles in cold weather.", no outerwear for the cold or
+for this weather, not marked rainproof or windproof, nothing suits all of today's weather) are no longer shown, on a complete idea
+or an unfinished one. Today was the only surface that printed them. `notes()` and the six keys (`today.addCoat`, `addCover`, `noRain`,
+`noWind`, `noCover`, `checkLength`) are removed in all three languages; the engine still computes `weatherNeeds` and
+`missingDetails`, so ranking and the "Right warmth", "Rain-ready" and "Wind-ready" reasons are unchanged. "Add these to complete
+the look" on an unfinished idea and "Clothes without a dress code are left out" stay. The weather spec now asserts that cards carry
+no advice sentence while their actions remain; the `today-check-length` visual scene is removed.
+
 **FILT1 provider refusal kind (source only; hosted apply owner-gated as ledger 29).**
 Adds `20261005090000_provider_refusal.sql` after ledger 28, in one transaction:
 two nullable evidence columns (`provider_refusal`, `usage_absent`), the

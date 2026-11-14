@@ -262,7 +262,6 @@ export function TodayScreen({ client, scope, images, online, language, t, timeZo
           <h2 id={`idea-${partial.key}`} className="sr-only">{t('today.idea', { number: 1 })}</h2>
           <Pieces ids={partial.itemIds} byId={byId} images={images} t={t} />
           <p className="today-missing">{t('today.missing', { categories: list(partial.missingSlots) })}</p>
-          {notes(partial).map(key => <p key={key} className="today-missing">{t(key)}</p>)}
           <div className="today-actions"><button type="button" className="button button-primary" onClick={onAddItem}><Icon name="plus" />{t('wardrobe.add')}</button></div>
         </article>)}
       </div>
@@ -405,7 +404,6 @@ function Idea({ suggestion, number, total, byId, images, t, list, online, vote, 
     {heading}
     <Pieces ids={suggestion.itemIds} byId={byId} images={images} t={t} optionalMark />
     {suggestion.reasons.length > 0 && <ul className="today-reasons">{suggestion.reasons.map(reason => <li key={reason.key}><Icon name="check" />{t(reasonKeys[reason.key])}</li>)}</ul>}
-    {notes(suggestion).map(key => <p key={key} className="today-missing">{t(key)}</p>)}
     {!suggestion.weatherNeeds && suggestion.missingSlots.length > 0 && <p className="today-missing">{t('today.missing', { categories: list(suggestion.missingSlots) })}</p>}
     {problem}
     <div className="today-actions">
@@ -440,21 +438,4 @@ function Idea({ suggestion, number, total, byId, images, t, list, online, vote, 
       </div>
     </fieldset>}
   </article>;
-}
-
-// Weather gaps on one idea: what is missing, unknown or unsuitable. Unknown protection is never treated as enough or as lacking.
-function notes(suggestion: Suggestion): MessageKey[] {
-  const needs = suggestion.weatherNeeds ?? [];
-  const found: MessageKey[] = [];
-  const add = (key: MessageKey) => { if (!found.includes(key)) found.push(key); };
-  const cold = needs.some(entry => entry.need === 'cold');
-  for (const { need, status } of needs) {
-    if (status === 'none') add(cold ? 'today.addCoat' : 'today.addCover');
-    else if (status === 'unknown') continue;
-    else if (status === 'lacking' && need !== 'cold') add(need === 'rain' ? 'today.noRain' : 'today.noWind');
-  }
-  // An unknown need stays unsaid for rain, so it must not turn into a claim that nothing suits the weather.
-  if (needs.some(entry => entry.status === 'apart' || entry.status === 'lacking') && !needs.some(entry => entry.status === 'unknown') && !found.length) add('today.noCover');
-  if (suggestion.missingDetails.includes('coverage')) add('today.checkLength');
-  return found;
 }
